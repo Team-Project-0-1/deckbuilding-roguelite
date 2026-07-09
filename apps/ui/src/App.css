@@ -1,7 +1,14 @@
+/* 확정 픽셀 폰트 (PRD 가정 원장 #1): Neo둥근모 — 셀프호스팅, OFL 라이선스 */
+@font-face {
+  font-family: 'NeoDunggeunmo';
+  src: url('./fonts/neodgm.ttf') format('truetype');
+  font-display: swap;
+}
+
 :root {
   color: #f5f0d8;
   background: #8fca72;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: 'NeoDunggeunmo', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
