@@ -4,8 +4,10 @@ import { effectiveElements } from '@game/core';
 import { createCombat, legalCommands, previewFlip, step } from '@game/core';
 import type { CombatEvent, CombatState, Command } from '@game/core';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import './App.css';
+import { EmberIcon, FlameIcon, GoblinSprite, HeartIcon, ShieldIcon, SkullIcon, SwordIcon, WarriorSprite } from './icons';
 
 const WORDS = ['BRAVE', 'EMBER', 'IRON', 'MOSS', 'RIVER', 'DUSK', 'SPARK', 'VALE'];
 
@@ -53,13 +55,23 @@ const sameCommand = (left: Command, right: Command): boolean => {
   return false;
 };
 
-const intentText = (enemy: CombatState['enemies'][number]): string =>
-  enemy.intent.actions
-    .map((action) => {
-      if (action.kind === 'attack') return `⚔${action.damage * (action.hits ?? 1)}`;
-      return `◆${action.amount}`;
-    })
-    .join(' ');
+const IntentBadge = ({ enemy }: { enemy: CombatState['enemies'][number] }) => (
+  <div aria-label="다음 행동 의도" className="intent">
+    {enemy.intent.actions.map((action, index) =>
+      action.kind === 'attack' ? (
+        <span key={index}>
+          <SwordIcon scale={1.6} />
+          {action.hits !== undefined && action.hits > 1 ? `${action.damage}×${action.hits}` : action.damage}
+        </span>
+      ) : (
+        <span key={index}>
+          <ShieldIcon scale={1.6} tone="steel" />
+          {action.amount}
+        </span>
+      )
+    )}
+  </div>
+);
 
 const effectText = (skillId: string): string => {
   const skill = contentDb.skills[skillId];
@@ -206,22 +218,36 @@ export const App = () => {
     }
   };
 
-  const playerHp = `${state.player.hp}/${state.player.maxHp}`;
   const enemy = state.enemies[0];
   const ended = state.phase === 'victory' || state.phase === 'defeat';
 
   return (
     <main className="combat-shell" aria-label="전투 화면">
+      <div className="backdrop" aria-hidden="true">
+        <div className="sky" />
+        <div className="mountains" />
+        <div className="treeline" />
+        <div className="ground" />
+      </div>
       <section className="battlefield">
-        <UnitPanel side="player" name="전사" hp={playerHp} block={state.player.block} statuses={state.player.statuses} floats={floats} />
+        <UnitPanel
+          side="player"
+          name="전사"
+          hp={state.player.hp}
+          maxHp={state.player.maxHp}
+          block={state.player.block}
+          statuses={state.player.statuses}
+          floats={floats}
+        />
         {enemy !== undefined ? (
           <UnitPanel
             side="enemy"
             name={contentDb.enemies[String(enemy.defId)]?.name ?? '적'}
-            hp={`${enemy.hp}/${enemy.maxHp}`}
+            hp={enemy.hp}
+            maxHp={enemy.maxHp}
             block={enemy.block}
             statuses={enemy.statuses}
-            intent={intentText(enemy)}
+            intent={<IntentBadge enemy={enemy} />}
             floats={floats}
           />
         ) : null}
@@ -269,13 +295,21 @@ export const App = () => {
                 })}
               </div>
               {skill?.type === 'consume' ? (
-                <div className={`consume-condition ${consumeReady ? 'met' : ''}`}>
-                  🔥×{skill.consume.count}
-                  {consumeUse !== undefined ? <span>{consumeUse.coins.map((coin) => `#${String(coin)}`).join(' ')}</span> : null}
+                <div aria-label={`화염 코인 ${skill.consume.count}개 소비`} className={`consume-condition ${consumeReady ? 'met' : ''}`}>
+                  <FlameIcon scale={1.6} />
+                  <span>×{skill.consume.count} 소비</span>
                 </div>
               ) : null}
               <div className="card-art" aria-hidden="true">
-                {skill?.type === 'consume' ? '🔥' : skill?.tags.includes('attack') ? '⚔' : '▣'}
+                {skill?.type === 'consume' ? (
+                  <FlameIcon scale={4.2} />
+                ) : skill?.id !== undefined && String(skill.id) === 'flame-rampage' ? (
+                  <EmberIcon scale={4.2} />
+                ) : skill?.tags.includes('attack') ? (
+                  <SwordIcon scale={4.2} />
+                ) : (
+                  <ShieldIcon scale={4.2} />
+                )}
               </div>
               <p>{effectText(String(slotState.skillId))}</p>
               {slotState.usedThisTurn ? <span className="spent-label">사용됨</span> : null}
@@ -309,14 +343,26 @@ export const App = () => {
               type="button"
               onClick={() => setSelectedCoin(selectedCoin === coin ? null : coin)}
             >
-              <span>{coinFaces[Number(coin)] ?? (effectiveElements(state.coins[Number(coin)]!, contentDb).includes('fire') ? '🔥' : 'B')}</span>
+              <span className="coin-face">
+                {coinFaces[Number(coin)] !== undefined ? (
+                  coinFaces[Number(coin)] === 'H' ? '앞' : '뒤'
+                ) : effectiveElements(state.coins[Number(coin)]!, contentDb).includes('fire') ? (
+                  <FlameIcon scale={1.8} />
+                ) : (
+                  <SwordIcon scale={1.8} />
+                )}
+              </span>
               <small>{coinLabel(state, coin)}</small>
             </button>
           ))}
         </div>
         <div className="pile-counts">
-          <span>버림 {state.zones.discard.length}</span>
-          <span>소모 {state.zones.exhausted.length}</span>
+          <span aria-label={`버림 더미 ${state.zones.discard.length}`}>
+            <SkullIcon scale={1.6} /> 버림 {state.zones.discard.length}
+          </span>
+          <span aria-label={`소모 더미 ${state.zones.exhausted.length}`}>
+            <EmberIcon scale={1.6} /> 소모 {state.zones.exhausted.length}
+          </span>
         </div>
         <button aria-label="턴 종료" className="end-turn" disabled={locked || findLegal({ type: 'endTurn' }) === undefined} type="button" onClick={() => runCommand({ type: 'endTurn' })}>
           턴 종료
@@ -347,34 +393,50 @@ export const App = () => {
 interface UnitPanelProps {
   side: 'player' | 'enemy';
   name: string;
-  hp: string;
+  hp: number;
+  maxHp: number;
   block: number;
   statuses: CombatState['player']['statuses'];
-  intent?: string;
+  intent?: ReactNode;
   floats: FloatText[];
 }
 
-const UnitPanel = ({ side, name, hp, block, statuses, intent, floats }: UnitPanelProps) => (
+const UnitPanel = ({ side, name, hp, maxHp, block, statuses, intent, floats }: UnitPanelProps) => (
   <div className={`unit ${side}`}>
-    {intent !== undefined ? <div className="intent">{intent}</div> : null}
-    <div className="hp-bar">
-      <span>{name}</span>
-      <strong>{hp}</strong>
-      <em>▣ {block}</em>
+    <div className="unit-plate">
+      <div className="plate-row">
+        <span className="unit-name">{name}</span>
+        {block > 0 ? (
+          <em aria-label={`방어 ${block}`} className="block-chip">
+            <ShieldIcon scale={1.4} />
+            {block}
+          </em>
+        ) : null}
+        {(statuses.burn ?? 0) > 0 ? (
+          <em aria-label={`화상 ${statuses.burn}`} className="burn-chip">
+            <EmberIcon scale={1.4} />
+            {statuses.burn}
+          </em>
+        ) : null}
+      </div>
+      <div aria-label={`체력 ${hp}/${maxHp}`} className="hp-bar">
+        <HeartIcon scale={1.4} />
+        <div className="hp-track">
+          <div className="hp-fill" style={{ width: `${Math.max(0, (hp / maxHp) * 100)}%` }} />
+        </div>
+        <strong className="hp-num">
+          {hp}/{maxHp}
+        </strong>
+      </div>
     </div>
-    {(statuses.burn ?? 0) > 0 ? <div className="status-badge">화상 {statuses.burn}</div> : null}
+    {intent !== undefined ? intent : null}
     <div className="sprite" aria-label={`${name} 스프라이트`}>
-      <span className="head" />
-      <span className="body" />
-      <span className="arm left" />
-      <span className="arm right" />
-      <span className="leg left" />
-      <span className="leg right" />
+      {side === 'player' ? <WarriorSprite /> : <GoblinSprite />}
     </div>
     {floats
       .filter((item) => item.target === side)
       .map((item) => (
-        <b className={`float-text ${item.kind}`} key={item.id}>
+        <b className={`float-text kind-${item.kind}`} key={item.id}>
           {item.text}
         </b>
       ))}
