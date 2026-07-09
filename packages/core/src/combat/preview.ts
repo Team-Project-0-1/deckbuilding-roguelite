@@ -12,6 +12,7 @@ export interface PreviewBranch {
   damage: number;
   block: number;
   selfDamage: number;
+  burn: number;
 }
 
 export interface PreviewFlipResult {
@@ -19,8 +20,9 @@ export interface PreviewFlipResult {
   byAxis: {
     damage: { min: number; max: number };
     block: { min: number; max: number };
+    burn: { min: number; max: number };
   };
-  expected: { damage: number; block: number };
+  expected: { damage: number; block: number; burn: number };
 }
 
 const scriptedFlips = (faces: readonly Face[]): Rng => {
@@ -59,9 +61,12 @@ const sumBranch = (events: readonly CombatEvent[]): Omit<PreviewBranch, 'faces' 
       if (event.type === 'blockGained' && event.target.type === 'player') {
         return { ...total, block: total.block + event.amount };
       }
+      if (event.type === 'statusApplied' && event.status === 'burn') {
+        return { ...total, burn: total.burn + event.stacks };
+      }
       return total;
     },
-    { damage: 0, block: 0, selfDamage: 0 }
+    { damage: 0, block: 0, selfDamage: 0, burn: 0 }
   );
 
 const minMax = (values: readonly number[]): { min: number; max: number } => ({
@@ -95,11 +100,13 @@ export const previewFlip = (state: CombatState, slot: SlotId, db: ContentDb): Pr
     branches,
     byAxis: {
       damage: minMax(branches.map((branch) => branch.damage)),
-      block: minMax(branches.map((branch) => branch.block))
+      block: minMax(branches.map((branch) => branch.block)),
+      burn: minMax(branches.map((branch) => branch.burn))
     },
     expected: {
       damage: branches.reduce((sum, branch) => sum + branch.damage * branch.probability, 0),
-      block: branches.reduce((sum, branch) => sum + branch.block * branch.probability, 0)
+      block: branches.reduce((sum, branch) => sum + branch.block * branch.probability, 0),
+      burn: branches.reduce((sum, branch) => sum + branch.burn * branch.probability, 0)
     }
   };
 };

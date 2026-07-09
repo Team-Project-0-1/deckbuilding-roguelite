@@ -15,10 +15,12 @@
 
 ## 현재 마일스톤
 
-마일스톤 3 (M2 최소 UI + 플립 연출 + 배포) 진행 중 — codex 위임 + Claude 검수 체제
+마일스톤 5 (M4 소비형 + 취급 태그 + 일회성) 진행 중. M2는 코드 완료·시각 검증만 사람 대기(스크린샷 라이브러리·배포처 결정)
 
 ## 완료
 
+- [x] **M3 화염 코인 + 화상 + 불씨 주머니** (2026-07-10) — 효과 원자 applyStatus/addCoin(뽑을 더미 무작위 삽입·손패 상한 10·임시 플래그), P6 코인별 속성 proc(A8 귀속), 캐릭터 특성 훅(combatStart), 콘텐츠: fire 코인·불타는 일격·점화·전사 basic8+fire2. 골든 8종 포함 테스트 25/25, 퍼즈 1,000판 ✓. 검수에서 잡은 것: sim 퍼즈 하네스의 M1 시절 불변식("생성 없음")이 낡아 원장 불변식(총량=초기+생성)으로 Claude 직접 교체. 전투 종료 임시 코인 정산은 M5 런 도입 시 구현(주석 예약)
+- [x] **M2 (코드 완료, 시각 검증 대기)** (2026-07-10) — 전투 UI(§15.1 레이아웃, 클릭 장전/회수, CSS 3D 플립 연출, 프리뷰 툴팁, 승패 오버레이, URL 시드), core preview.ts(2^n 열거, 순수). 남은 것: 스크린샷(sudo 라이브러리 설치 대기)·배포(배포처 3택 대기)·손맛 게이트(사람)
 - [x] **M1 헤드리스 전투 코어** (2026-07-10) — content-types 스키마 전체(EffectAtom union, M3/M4 원자는 명시적 예약 에러), CombatState/순수 리듀서/이벤트, 플립 해결 P0~P9(3회 캡 P1 마킹, 1히트 패킷 합산, 패배 우선 판정), 턴 상태기계(T0 리셋·D3 자기 페이즈 방어 리셋·D7 폐기), 약탈자 고정 사이클(초기 의도 공개), CLI play --auto/fuzz, 테스트 14종. codex(신모델) 작성 → Claude 검수(수정: lint 3건, StatusId 확정 어휘 정합). 잔여 과제: attempt 소금 결선(M5), pileShuffled 이벤트(M2), 다중 적 타겟 UI(M5+)
 - [x] **M0 프로젝트 셋업** (2026-07-10) — pnpm 모노레포(core/content/ui/sim), xoshiro128** 결정론 RNG(계층 derive + attempt 소금), RNG 테스트 7종, ESLint core 순수성 규칙, Vite+React 부트스트랩(base path), sim CLI, GitHub Actions CI. codex 작성 → Claude 검수(수정 2건: CoinUid/SlotId number 브랜드, sim CLI 내로잉) → 검증 통과. 런타임: Node 18(EOL, vitest 구동 불가) → Node 22.14 로컬 설치로 해결
 

@@ -40,9 +40,10 @@ const eventText = (event: CombatEvent): string => {
   }
 };
 
-const assertInvariants = (state: CombatState, initialCoins: number): string | undefined => {
+const assertInvariants = (state: CombatState, expectedCoins: number): string | undefined => {
   if (zoneCoinCount(state.zones) !== Object.keys(state.coins).length) return 'zone coin count mismatch';
-  if (Object.keys(state.coins).length !== initialCoins) return 'unexpected coin creation/removal in M1';
+  // 총량 원장: 전 영역 합 = 초기 코인 수 + coinCreated 누적 (§8.1 불변식 1)
+  if (Object.keys(state.coins).length !== expectedCoins) return 'coin ledger mismatch';
   if (state.player.hp > state.player.maxHp || state.player.hp < 0) return 'player hp out of bounds';
   if (state.player.block < 0) return 'player block is negative';
   for (const enemy of state.enemies) {
@@ -73,7 +74,7 @@ const runPlay = () => {
   const seed = arg('--seed', '42') ?? '42';
   let state = createCombat({ character: 'warrior' as never, enemies: ['raider' as never] }, contentDb, seed);
   const log: string[] = [];
-  const initialCoins = Object.keys(state.coins).length;
+  let expectedCoins = Object.keys(state.coins).length;
 
   for (let i = 0; i < 200 && state.phase === 'player'; i += 1) {
     const cmd = chooseAuto(state);
@@ -83,8 +84,9 @@ const runPlay = () => {
       process.exit(1);
     }
     state = result.state;
+    expectedCoins += result.events.filter((event) => event.type === 'coinCreated').length;
     log.push(...result.events.map(eventText));
-    const invariant = assertInvariants(state, initialCoins);
+    const invariant = assertInvariants(state, expectedCoins);
     if (invariant !== undefined) {
       console.error(`invariant: ${invariant}`);
       process.exit(1);
@@ -102,7 +104,7 @@ const runFuzz = () => {
   const rng = rngFrom(seedFromString(seed));
   for (let game = 0; game < games; game += 1) {
     let state = createCombat({ character: 'warrior' as never, enemies: ['raider' as never] }, contentDb, `${seed}-${game}`);
-    const initialCoins = Object.keys(state.coins).length;
+    let expectedCoins = Object.keys(state.coins).length;
     const commands: Command[] = [];
     for (let stepIndex = 0; stepIndex < 200 && state.phase === 'player'; stepIndex += 1) {
       const legal = legalCommands(state, contentDb);
@@ -116,7 +118,8 @@ const runFuzz = () => {
         process.exit(1);
       }
       state = result.state;
-      const invariant = assertInvariants(state, initialCoins);
+      expectedCoins += result.events.filter((event) => event.type === 'coinCreated').length;
+      const invariant = assertInvariants(state, expectedCoins);
       if (invariant !== undefined) {
         console.error(`seed=${seed} game=${game} invariant=${invariant}`);
         console.error(JSON.stringify(commands));

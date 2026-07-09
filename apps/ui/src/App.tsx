@@ -8,7 +8,7 @@ import './App.css';
 
 const WORDS = ['BRAVE', 'EMBER', 'IRON', 'MOSS', 'RIVER', 'DUSK', 'SPARK', 'VALE'];
 
-type FloatText = { id: number; text: string; target: 'player' | 'enemy'; kind: 'damage' | 'block' };
+type FloatText = { id: number; text: string; target: 'player' | 'enemy'; kind: 'damage' | 'block' | 'status' | 'coin' };
 type CombatAction = { type: 'set'; state: CombatState } | { type: 'restart'; seed: string };
 
 const slot = (value: number): SlotId => value as SlotId;
@@ -58,12 +58,19 @@ const intentText = (enemy: CombatState['enemies'][number]): string =>
 const effectText = (skillId: string): string => {
   const skill = contentDb.skills[skillId];
   if (skill?.type !== 'flip') return '소비형 예약';
-  const parts = skill.base.map((atom) => (atom.kind === 'damage' ? `피해 ${atom.amount}` : atom.kind === 'block' ? `방어 ${atom.amount}` : '특수'));
+  const atomText = (atom: (typeof skill.base)[number]): string => {
+    if (atom.kind === 'damage') return `피해 ${atom.amount}`;
+    if (atom.kind === 'block') return `방어 ${atom.amount}`;
+    if (atom.kind === 'applyStatus' && atom.status === 'burn') return `화상 ${atom.stacks}`;
+    if (atom.kind === 'addCoin') return `임시 ${atom.coin} +${atom.count}`;
+    return '특수';
+  };
+  const parts = skill.base.map(atomText);
   if (skill.heads !== undefined) {
-    parts.push(...skill.heads.effects.map((atom) => (atom.kind === 'damage' ? `앞면 +${atom.amount}` : `앞면 효과`)));
+    parts.push(...skill.heads.effects.map((atom) => (atom.kind === 'damage' ? `앞면 +${atom.amount}` : `앞면 ${atomText(atom)}`)));
   }
   if (skill.tails !== undefined) {
-    parts.push(...skill.tails.effects.map((atom) => (atom.kind === 'block' ? `뒷면 +${atom.amount}` : `뒷면 효과`)));
+    parts.push(...skill.tails.effects.map((atom) => (atom.kind === 'block' ? `뒷면 +${atom.amount}` : `뒷면 ${atomText(atom)}`)));
   }
   return parts.join(' / ');
 };
@@ -72,6 +79,20 @@ const coinLabel = (state: CombatState, coin: CoinUid): string => {
   const instance = state.coins[Number(coin)];
   const def = instance === undefined ? undefined : contentDb.coins[String(instance.defId)];
   return def?.element ?? '기본';
+};
+
+const coinClasses = (state: CombatState, coin: CoinUid, selected: boolean, flipping: boolean): string => {
+  const instance = state.coins[Number(coin)];
+  const def = instance === undefined ? undefined : contentDb.coins[String(instance.defId)];
+  return [
+    'coin',
+    selected ? 'selected' : '',
+    flipping ? 'flipping' : '',
+    def?.element === 'fire' ? 'fire' : '',
+    instance?.permanent === false ? 'temporary' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
 };
 
 export const App = () => {
@@ -85,7 +106,16 @@ export const App = () => {
   const [flipping, setFlipping] = useState<Record<number, boolean>>({});
   const [floats, setFloats] = useState<FloatText[]>([]);
   const nextFloatId = useRef(1);
+  const initialEventsQueued = useRef(false);
   const legal = useMemo(() => legalCommands(state, contentDb), [state]);
+
+  useEffect(() => {
+    if (!initialEventsQueued.current && state.events.length > 0) {
+      initialEventsQueued.current = true;
+      setLocked(true);
+      setQueue(state.events);
+    }
+  }, [state.events]);
 
   const findLegal = (cmd: Command): Command | undefined => legal.find((candidate) => sameCommand(candidate, cmd));
   const runCommand = (cmd: Command) => {
@@ -109,7 +139,7 @@ export const App = () => {
     }
 
     const [event, ...rest] = queue;
-    const showFloat = (text: string, target: 'player' | 'enemy', kind: 'damage' | 'block') => {
+    const showFloat = (text: string, target: 'player' | 'enemy', kind: FloatText['kind']) => {
       const id = nextFloatId.current;
       nextFloatId.current += 1;
       setFloats((items) => [...items, { id, text, target, kind }]);
@@ -130,6 +160,15 @@ export const App = () => {
     } else if (event?.type === 'blockGained') {
       showFloat(`+${event.amount}`, event.target.type === 'player' ? 'player' : 'enemy', 'block');
       delay = 360;
+    } else if (event?.type === 'statusApplied') {
+      showFloat(`화상 +${event.stacks}`, event.target.type === 'player' ? 'player' : 'enemy', 'status');
+      delay = 380;
+    } else if (event?.type === 'statusTicked') {
+      showFloat(`화상 -${event.amount}`, event.target.type === 'player' ? 'player' : 'enemy', 'status');
+      delay = 460;
+    } else if (event?.type === 'coinCreated') {
+      showFloat('임시 코인', 'player', 'coin');
+      delay = 320;
     } else if (event?.type === 'intentRevealed') {
       delay = 260;
     }
@@ -147,7 +186,13 @@ export const App = () => {
     setLocked(false);
     setSelectedCoin(null);
     setCoinFaces({});
-    dispatchState({ type: 'restart', seed: nextSeed });
+    initialEventsQueued.current = true;
+    const nextState = createState(nextSeed);
+    dispatchState({ type: 'set', state: nextState });
+    if (nextState.events.length > 0) {
+      setLocked(true);
+      setQueue(nextState.events);
+    }
   };
 
   const playerHp = `${state.player.hp}/${state.player.maxHp}`;
@@ -157,13 +202,14 @@ export const App = () => {
   return (
     <main className="combat-shell" aria-label="전투 화면">
       <section className="battlefield">
-        <UnitPanel side="player" name="전사" hp={playerHp} block={state.player.block} floats={floats} />
+        <UnitPanel side="player" name="전사" hp={playerHp} block={state.player.block} statuses={state.player.statuses} floats={floats} />
         {enemy !== undefined ? (
           <UnitPanel
             side="enemy"
             name={contentDb.enemies[String(enemy.defId)]?.name ?? '적'}
             hp={`${enemy.hp}/${enemy.maxHp}`}
             block={enemy.block}
+            statuses={enemy.statuses}
             intent={intentText(enemy)}
             floats={floats}
           />
@@ -171,7 +217,7 @@ export const App = () => {
       </section>
 
       <section className="skill-row" aria-label="스킬 카드">
-        {state.slots.slice(0, 2).map((slotState, index) => {
+        {state.slots.slice(0, 4).map((slotState, index) => {
           const skill = contentDb.skills[String(slotState.skillId)];
           const placed = state.zones.placed[slot(index)] ?? [];
           const use = findLegal({ type: 'useFlipSkill', slot: slot(index), target: skill?.targetType === 'single-enemy' ? 0 : undefined });
@@ -214,6 +260,8 @@ export const App = () => {
                   피해 {preview.byAxis.damage.min}~{preview.byAxis.damage.max} (기대 {preview.expected.damage})
                   <br />
                   방어 {preview.byAxis.block.min}~{preview.byAxis.block.max} (기대 {preview.expected.block})
+                  <br />
+                  화상 {preview.byAxis.burn.min}~{preview.byAxis.burn.max} (기대 {preview.expected.burn})
                 </div>
               ) : null}
             </article>
@@ -230,13 +278,13 @@ export const App = () => {
           {state.zones.hand.map((coin) => (
             <button
               aria-label={`${coinLabel(state, coin)} 동전 선택`}
-              className={`coin ${selectedCoin === coin ? 'selected' : ''} ${flipping[Number(coin)] ? 'flipping' : ''}`}
+              className={coinClasses(state, coin, selectedCoin === coin, flipping[Number(coin)] === true)}
               disabled={locked}
               key={coin}
               type="button"
               onClick={() => setSelectedCoin(selectedCoin === coin ? null : coin)}
             >
-              <span>{coinFaces[Number(coin)] ?? 'B'}</span>
+              <span>{coinFaces[Number(coin)] ?? (coinLabel(state, coin) === 'fire' ? '🔥' : 'B')}</span>
               <small>{coinLabel(state, coin)}</small>
             </button>
           ))}
@@ -276,11 +324,12 @@ interface UnitPanelProps {
   name: string;
   hp: string;
   block: number;
+  statuses: CombatState['player']['statuses'];
   intent?: string;
   floats: FloatText[];
 }
 
-const UnitPanel = ({ side, name, hp, block, intent, floats }: UnitPanelProps) => (
+const UnitPanel = ({ side, name, hp, block, statuses, intent, floats }: UnitPanelProps) => (
   <div className={`unit ${side}`}>
     {intent !== undefined ? <div className="intent">{intent}</div> : null}
     <div className="hp-bar">
@@ -288,6 +337,7 @@ const UnitPanel = ({ side, name, hp, block, intent, floats }: UnitPanelProps) =>
       <strong>{hp}</strong>
       <em>▣ {block}</em>
     </div>
+    {(statuses.burn ?? 0) > 0 ? <div className="status-badge">화상 {statuses.burn}</div> : null}
     <div className="sprite" aria-label={`${name} 스프라이트`}>
       <span className="head" />
       <span className="body" />

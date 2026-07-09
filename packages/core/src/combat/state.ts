@@ -1,6 +1,7 @@
 import type { CoinInstance, EnemyIntent, StatusId } from '../content-types';
 import type { CoinUid, EnemyDefId, SkillId, SlotId } from '../ids';
 import type { Rng, RngSnapshot } from '../rng';
+import type { CombatEvent } from './events';
 
 export interface UnitState {
   hp: number;
@@ -45,6 +46,7 @@ export interface CombatState {
   rng: { flip: RngSnapshot; shuffle: RngSnapshot; ai: RngSnapshot };
   rngImpl?: { flip?: Rng; shuffle?: Rng; ai?: Rng };
   nextUid: number;
+  events: CombatEvent[];
 }
 
 export const clonePlaced = (placed: Record<SlotId, CoinUid[]>): Record<SlotId, CoinUid[]> => {
@@ -73,5 +75,6 @@ export const cloneState = (state: CombatState): CombatState => ({
     shuffle: { s: [...state.rng.shuffle.s] as [number, number, number, number] },
     ai: { s: [...state.rng.ai.s] as [number, number, number, number] }
   },
-  rngImpl: state.rngImpl
+  rngImpl: state.rngImpl,
+  events: [...state.events]
 });

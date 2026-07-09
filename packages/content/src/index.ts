@@ -2,7 +2,7 @@ import type { CharacterId, CoinDefId, EnemyDefId, SkillId } from '@game/core';
 import { validateContentDb } from '@game/core';
 import type { CharacterDef, CoinDef, ContentDb, EnemyDef, SkillDef } from '@game/core';
 
-export const CONTENT_VERSION = '0.1.0-m1';
+export const CONTENT_VERSION = '0.3.0-m3';
 
 const coin = (value: string) => value as CoinDefId;
 const skill = (value: string) => value as SkillId;
@@ -10,7 +10,12 @@ const character = (value: string) => value as CharacterId;
 const enemy = (value: string) => value as EnemyDefId;
 
 export const coins = {
-  basic: { id: coin('basic'), element: null }
+  basic: { id: coin('basic'), element: null },
+  fire: {
+    id: coin('fire'),
+    element: 'fire',
+    proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] }
+  }
 } satisfies Record<string, CoinDef>;
 
 export const skills = {
@@ -35,6 +40,32 @@ export const skills = {
     cost: 1,
     base: [{ kind: 'block', amount: 5 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
+  },
+  'burning-strike': {
+    id: skill('burning-strike'),
+    name: '불타는 일격',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 2,
+    base: [
+      { kind: 'damage', amount: 8 },
+      { kind: 'addCoin', coin: coin('fire'), zone: 'discard', count: 1 }
+    ],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 3 }] }
+  },
+  ignite: {
+    id: skill('ignite'),
+    name: '점화',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 1,
+    base: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }],
+    heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] },
+    tails: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] }
   }
 } satisfies Record<string, SkillDef>;
 
@@ -56,14 +87,13 @@ export const characters = {
     id: character('warrior'),
     name: '전사',
     maxHp: 70,
-    // M1 intentionally starts with basic x10. M3 replaces this with basic x8 + fire x2.
-    startingBag: Array.from({ length: 10 }, () => coin('basic')),
-    startingSkills: [skill('slash'), skill('guard')],
+    startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('fire'), coin('fire')],
+    startingSkills: [skill('slash'), skill('guard'), skill('burning-strike'), skill('ignite')],
     trait: {
       id: 'ember-pouch',
       name: '불씨 주머니',
       hook: 'combatStart',
-      effects: []
+      effects: [{ kind: 'addCoin', coin: coin('fire'), zone: 'draw', count: 1 }]
     }
   }
 } satisfies Record<string, CharacterDef>;

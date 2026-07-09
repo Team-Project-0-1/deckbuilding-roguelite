@@ -1,6 +1,6 @@
 import type { ContentDb, EffectAtom, FlipSkillDef, TargetRef } from '../../content-types';
 import { effectiveElements } from '../../content-types';
-import type { Face, SlotId } from '../../ids';
+import type { CoinUid, Face, SlotId } from '../../ids';
 import { rngFrom } from '../../rng';
 import type { CombatEvent } from '../events';
 import type { CombatState } from '../state';
@@ -27,6 +27,7 @@ export const checkCombatEnd = (state: CombatState, events: CombatEvent[]): Comba
     return { ...state, phase: 'defeat' };
   }
   if (state.enemies.every((enemy) => enemy.hp <= 0)) {
+    // M5 run settlement hook: remove temporary coins from all zones when combat finalization spans combats.
     events.push({ type: 'combatEnded', result: 'victory', turns: state.turn });
     return { ...state, phase: 'victory' };
   }
@@ -83,6 +84,58 @@ export const applyBlock = (
   return { ...state, enemies };
 };
 
+const addTemporaryCoin = (
+  state: CombatState,
+  atom: Extract<EffectAtom, { kind: 'addCoin' }>,
+  events: CombatEvent[]
+): CombatState => {
+  let nextState = state;
+  const rng = nextState.rngImpl?.shuffle ?? rngFrom(nextState.rng.shuffle);
+
+  for (let i = 0; i < atom.count; i += 1) {
+    const coin = nextState.nextUid as CoinUid;
+    const coins = {
+      ...nextState.coins,
+      [Number(coin)]: { uid: coin, defId: atom.coin, permanent: false, grants: [] }
+    };
+
+    if (atom.zone === 'draw') {
+      const draw = [...nextState.zones.draw];
+      draw.splice(rng.int(draw.length + 1), 0, coin);
+      nextState = {
+        ...nextState,
+        coins,
+        nextUid: nextState.nextUid + 1,
+        rng: { ...nextState.rng, shuffle: rng.snapshot() },
+        zones: { ...nextState.zones, draw }
+      };
+      events.push({ type: 'coinCreated', coin, defId: String(atom.coin), zone: 'draw' });
+      continue;
+    }
+
+    if (atom.zone === 'hand' && nextState.zones.hand.length < 10) {
+      nextState = {
+        ...nextState,
+        coins,
+        nextUid: nextState.nextUid + 1,
+        zones: { ...nextState.zones, hand: [...nextState.zones.hand, coin] }
+      };
+      events.push({ type: 'coinCreated', coin, defId: String(atom.coin), zone: 'hand' });
+      continue;
+    }
+
+    nextState = {
+      ...nextState,
+      coins,
+      nextUid: nextState.nextUid + 1,
+      zones: { ...nextState.zones, discard: [coin, ...nextState.zones.discard] }
+    };
+    events.push({ type: 'coinCreated', coin, defId: String(atom.coin), zone: 'discard' });
+  }
+
+  return nextState;
+};
+
 export const applyEffectAtom = (
   state: CombatState,
   atom: EffectAtom,
@@ -97,13 +150,38 @@ export const applyEffectAtom = (
       return applyBlock(state, { type: 'player' }, atom.amount, events);
     case 'selfDamage':
       return applyDamage(state, { type: 'player' }, atom.amount, 'self', events);
-    case 'applyStatus':
-      throw new Error('applyStatus is reserved for M3');
+    case 'applyStatus': {
+      const statusTarget = atom.to === 'self' ? { type: 'player' as const } : target;
+      if (statusTarget.type === 'enemy' && !isAliveEnemy(state, statusTarget.index)) return state;
+      if (atom.status !== 'burn') throw new Error(`unsupported status: ${atom.status}`);
+      if (statusTarget.type === 'player') {
+        const next = (state.player.statuses.burn ?? 0) + atom.stacks;
+        events.push({ type: 'statusApplied', target: statusTarget, status: atom.status, stacks: atom.stacks });
+        return { ...state, player: { ...state.player, statuses: { ...state.player.statuses, burn: next } } };
+      }
+      const enemies = state.enemies.map((enemy, index) =>
+        index === statusTarget.index
+          ? { ...enemy, statuses: { ...enemy.statuses, burn: (enemy.statuses.burn ?? 0) + atom.stacks } }
+          : enemy
+      );
+      events.push({ type: 'statusApplied', target: statusTarget, status: atom.status, stacks: atom.stacks });
+      return { ...state, enemies };
+    }
     case 'addCoin':
-      throw new Error('addCoin is reserved for M3');
+      return addTemporaryCoin(state, atom, events);
     case 'grantElement':
       throw new Error('grantElement is reserved for M3');
   }
+};
+
+const targetForElementProc = (state: CombatState, atom: EffectAtom, skillTarget: TargetRef): TargetRef | undefined => {
+  if (atom.kind === 'applyStatus' && atom.status === 'burn' && atom.to === 'target') {
+    if (skillTarget.type === 'enemy' && isAliveEnemy(state, skillTarget.index)) return skillTarget;
+    const fallback = firstAliveEnemy(state);
+    return fallback === undefined ? undefined : { type: 'enemy', index: fallback };
+  }
+  if (atom.kind === 'applyStatus' && atom.to === 'self') return { type: 'player' };
+  return skillTarget;
 };
 
 const targetForSkill = (state: CombatState, skill: FlipSkillDef, target?: number): TargetRef => {
@@ -195,8 +273,14 @@ export const resolveFlip = (
     const face = faces[i];
     if (coin === undefined || face === undefined) continue;
     for (const element of effectiveElements(coin, db)) {
-      void element;
-      // M1 content contains only basic coins. Element proc hooks are reserved for M3.
+      const proc = Object.values(db.coins).find((def) => def.element === element)?.proc;
+      if (proc === undefined || proc.face !== face) continue;
+      for (const atom of proc.effects) {
+        const procTarget = targetForElementProc(state, atom, skillTarget);
+        if (procTarget === undefined) continue;
+        state = applyEffectAtom(state, atom, procTarget, events);
+        if (state.phase === 'victory' || state.phase === 'defeat') return { state, events };
+      }
     }
   }
 
@@ -213,4 +297,3 @@ export const resolveFlip = (
   }
   return { state, events };
 };
-

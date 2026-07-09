@@ -4,7 +4,7 @@ import { derive, rngFrom, seedFromString } from '../rng';
 import type { Command } from './commands';
 import { initialIntent, runEnemyPhase } from './enemy';
 import type { CombatEvent } from './events';
-import { applyDamage, checkCombatEnd, resolveFlip } from './resolve/flip';
+import { applyDamage, applyEffectAtom, checkCombatEnd, resolveFlip } from './resolve/flip';
 import { cloneState } from './state';
 import type { CombatState, CombatZones } from './state';
 
@@ -51,6 +51,19 @@ const drawCards = (input: CombatState, count: number): { state: CombatState; eve
     rng: { ...state.rng, shuffle: rng.snapshot() },
     zones: { ...state.zones, draw, discard, hand: [...state.zones.hand, ...drawn] }
   };
+  return { state, events };
+};
+
+const runCombatStartTrait = (input: CombatState, db: ContentDb, characterId: CharacterId): { state: CombatState; events: CombatEvent[] } => {
+  const character = db.characters[String(characterId)];
+  if (character?.trait.hook !== 'combatStart') return { state: input, events: [] };
+
+  const events: CombatEvent[] = [{ type: 'traitTriggered', trait: character.trait.id }];
+  let state = input;
+  for (const atom of character.trait.effects) {
+    state = applyEffectAtom(state, atom, { type: 'player' }, events);
+    if (state.phase === 'victory' || state.phase === 'defeat') break;
+  }
   return { state, events };
 };
 
@@ -117,11 +130,13 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
     })),
     skillUsesThisTurn: 0,
     rng: { flip: derive(combat, 'flip'), shuffle: shuffleRng.snapshot(), ai: derive(combat, 'ai') },
-    nextUid: character.startingBag.length + 1
+    nextUid: character.startingBag.length + 1,
+    events: []
   };
 
-  const started = startPlayerTurn(base);
-  return started.state;
+  const trait = runCombatStartTrait(base, db, cfg.character);
+  const started = startPlayerTurn(trait.state);
+  return { ...started.state, events: [...trait.events, ...started.events] };
 };
 
 const removeCoin = (coins: readonly CoinUid[], coin: CoinUid): CoinUid[] => coins.filter((candidate) => candidate !== coin);

@@ -19,6 +19,7 @@ export type CombatEvent =
   | { type: 'statusApplied'; target: TargetRef; status: StatusId; stacks: number }
   | { type: 'statusTicked'; target: TargetRef; status: StatusId; amount: number; remaining: number }
   | { type: 'coinCreated'; coin: CoinUid; defId: string; zone: 'draw' | 'discard' | 'hand' }
+  | { type: 'traitTriggered'; trait: string }
   | { type: 'coinsConsumed'; coins: CoinUid[] }
   | { type: 'elementGranted'; coins: CoinUid[]; element: Element }
   | { type: 'intentRevealed'; enemy: number; intent: EnemyIntent }
