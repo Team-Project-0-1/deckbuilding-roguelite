@@ -21,7 +21,7 @@
 |------|-----------|-----------|
 | 거부 행동 사유 피드백 | **닫힘 (2026-07-11, `41bab3e`)** | 한국어 사유 9종 카탈로그(`apps/ui/src/action-feedback.ts`) + aria-live 칩, 단위 테스트와 브라우저 테스트(`apps/ui/scripts/feedback-check.mjs`)로 고정. |
 | 프리뷰의 자해·코인 생성 축 | **닫힘 (2026-07-11, `41bab3e`)** | `previewFlip` byAxis/expected에 selfDamage·coinsCreated 추가, 코어 테스트 + 브라우저 테스트(화염 폭주 자해 0~2·생성 0~1, 베기 무표시)로 고정. |
-| 소비 코인 직접 선택 규칙 | 조건부 보류 | 비용 1은 현재 자동 선택을 유지한다. 비용 2 이상 콘텐츠를 넣기 전에 직접 선택·취소 UX와 결정론 규칙을 확정한다. |
+| 소비 코인 직접 선택 규칙 | **닫힘 (2026-07-11, `7ea1a17`)** | 규칙 확정·구현: count 1 = A15 자동 유지, count≥2 = 연료 지정 모드(자동 제안 사전 선택·토글·Escape/타행동 취소), 실행 `coins[]` 손패 순서 결정론 — `apps/ui/src/fuel-selection.ts` + test-db 단위/통합 테스트. 브라우저 E2E는 첫 cost≥2 콘텐츠 PR의 필수 게이트 (`PRD/PHASE3_PREP.md` §4). |
 
 ## 검증 증거 보류
 
