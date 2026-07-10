@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "run_dir": "D:\\Documents\\GitHub\\deckbuilding-roguelite\\apps\\ui\\src\\assets\\generated\\coins\\mana\\curation-run",
+  "cell": {
+    "shape": "rect",
+    "width": 122,
+    "height": 128,
+    "size": 122,
+    "safe_margin": 0
+  },
+  "rows": [
+    {
+      "state": "candidates",
+      "frames": 3,
+      "method": "imported-pngs",
+      "files": [
+        "frames/candidates/frame-0.png",
+        "frames/candidates/frame-1.png",
+        "frames/candidates/frame-2.png"
+      ],
+      "labels": [
+        "candidate-01-dark-tabs",
+        "candidate-02-dark-round",
+        "coin-mana"
+      ],
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "warnings": []
+}

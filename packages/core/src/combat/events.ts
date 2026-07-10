@@ -24,6 +24,7 @@ export type CombatEvent =
   | { type: 'coinsConsumed'; coins: CoinUid[] }
   | { type: 'pileShuffled'; count: number }
   | { type: 'elementGranted'; coins: CoinUid[]; element: Element }
+  | { type: 'witherApplied'; enemy: number; amount: number; nextDrawPenalty: number }
   | { type: 'intentRevealed'; enemy: number; intent: EnemyIntent }
   | { type: 'turnStarted'; turn: number }
   | { type: 'combatEnded'; result: 'victory' | 'defeat'; turns: number };

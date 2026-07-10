@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "candidate-01-dark-tabs",
+    "description": "static mana coin candidate matched to shipped basic/fire coin references",
+    "base_image": null
+  },
+  "cell": {
+    "shape": "rect",
+    "width": 122,
+    "height": 128,
+    "safe_margin_x": 2,
+    "safe_margin_y": 2
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "manual"
+  },
+  "states": {
+    "candidate": {
+      "frames": 1,
+      "fps": 1,
+      "loop": false,
+      "action": "one static front-facing mana coin candidate"
+    }
+  },
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
+  "motion_phase_guides": false,
+  "fit": {
+    "pixel_perfect": true,
+    "logical_height": 62,
+    "palette_size": 24,
+    "detail_bias": true,
+    "outline": 0.62,
+    "align_x": "bbox-center",
+    "align_y": "center"
+  },
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005
+  }
+}

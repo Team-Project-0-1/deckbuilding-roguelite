@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-curation",
+  "pixel_perfect": true,
+  "states": {
+    "idle": {
+      "selected": [0, 1, 2, 3],
+      "order": [0, 1, 2, 3],
+      "transforms": {}
+    },
+    "attack": {
+      "selected": [0, 1, 2, 3],
+      "order": [0, 1, 2, 3],
+      "transforms": {}
+    },
+    "hurt": {
+      "selected": [0, 1, 2, 3],
+      "order": [0, 1, 2, 3],
+      "transforms": {}
+    }
+  }
+}

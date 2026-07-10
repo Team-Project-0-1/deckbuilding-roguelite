@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "shaman",
+    "description": "frail ash-green fire-and-curse shaman with rust-and-ochre robes and crooked staff with attached ember brazier, facing left",
+    "base_image": "base-source.png"
+  },
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "cyan",
+    "hex": "#00FFFF",
+    "rgb": [
+      0,
+      255,
+      255
+    ],
+    "selection": "auto",
+    "score": 246.93,
+    "min_subject_distance": 237.55,
+    "background": {
+      "mode": "flat",
+      "hex": "#F803EC",
+      "rgb": [
+        248,
+        3,
+        236
+      ],
+      "opaque_border_fraction": 1.0,
+      "border_coverage": 1.0,
+      "enclosed_background_pixels": 493,
+      "enclosed_material_pixels": 6,
+      "subject_pixels": 7700
+    },
+    "candidates": [
+      {
+        "name": "magenta",
+        "hex": "#FF00FF",
+        "score": 232.86,
+        "min_subject_distance": 222.57,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "green",
+        "hex": "#00FF00",
+        "score": 190.73,
+        "min_subject_distance": 186.39,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "cyan",
+        "hex": "#00FFFF",
+        "score": 246.93,
+        "min_subject_distance": 237.55,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "blue",
+        "hex": "#004DFF",
+        "score": 222.07,
+        "min_subject_distance": 212.77,
+        "clears_erase_radius": true
+      }
+    ],
+    "selection_reason": "highest 1st-percentile subject distance among the 4 candidate(s) clearing the 96 erase radius"
+  },
+  "states": {
+    "idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "precise four-frame idle loop: base stance, tiny lowered breath with one blink, gentle raised breath, then a final pose nearly identical to the base; keep staff height, feet, torso lean, cloak contour, and attached brazier alignment stable across the seam"
+    },
+    "attack": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "decisive four-stage staff curse cast: compact draw-back, strong forward staff thrust with the hanging brazier clearly separated from the torso and bright orange-yellow flame, extended follow-through, full recovery toward combat idle; all effects stay physically attached"
+    },
+    "hurt": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "clear four-stage hurt sequence while consistently facing left: upright impact recoil, deepest backward bend and stagger while gripping the staff, visibly higher partial recovery, settled combat idle; no counterattack and no detached effects"
+    }
+  },
+  "style": "match the accepted idle anchor exactly: bright crisp 16-bit-inspired pixel art, 32px-grid aesthetic, chunky SD proportions, identical outline weight, strong olive-green highlights on face, long ear, hands and feet, cream bone ornaments, rust-orange cloak, dark brown crooked staff, and attached bright orange-yellow ember brazier; preserve high value separation at small size",
+  "motion_phase_guides": false,
+  "fit": {
+    "align_x": "foot-centroid",
+    "align_y": "bottom",
+    "pixel_perfect": true,
+    "logical_height": 104,
+    "palette_size": 48
+  },
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005
+  }
+}

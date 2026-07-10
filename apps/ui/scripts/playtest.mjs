@@ -1,207 +1,425 @@
 // 결정론 브라우저 플레이테스트 — 코인 장전 루프·플립 가시성·불타는 일격 회귀·뷰포트 검증.
 // 사용: node scripts/playtest.mjs [스크린샷 디렉토리 (기본 /tmp/playtest)]
 // 전제: `pnpm build` 완료 (vite preview가 dist를 서빙). 실패 시 exit code 1 + FAIL 목록 출력.
-import { mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { chromium } from 'playwright';
-import { preview } from 'vite';
+import { chromium } from "playwright";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = process.argv[2] ?? '/tmp/playtest';
-const SEED = 'BRAVE-EMBER-42';
-const URL = `http://127.0.0.1:4174/deckbuilding-roguelite/?seed=${SEED}`;
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const outDir = process.argv[2] ?? "/tmp/playtest";
+const SEED = "BRAVE-EMBER-42";
+const baseUrl =
+  process.env.PLAYTEST_BASE_URL ??
+  "http://127.0.0.1:4174/deckbuilding-roguelite/";
+const URL = `${baseUrl}?seed=${SEED}`;
 
 const failures = [];
-const check = (name, condition, detail = '') => {
-  const mark = condition ? 'ok' : 'FAIL';
-  console.log(`[${mark}] ${name}${detail === '' ? '' : ` — ${detail}`}`);
-  if (!condition) failures.push(`${name}${detail === '' ? '' : ` — ${detail}`}`);
+const check = (name, condition, detail = "") => {
+  const mark = condition ? "ok" : "FAIL";
+  console.log(`[${mark}] ${name}${detail === "" ? "" : ` — ${detail}`}`);
+  if (!condition)
+    failures.push(`${name}${detail === "" ? "" : ` — ${detail}`}`);
 };
 
-const server = await preview({ root, preview: { host: '127.0.0.1', port: 4174, strictPort: true } });
-const browser = await chromium.launch();
+const server =
+  process.env.PLAYTEST_BASE_URL === undefined
+    ? await (
+        await import("vite")
+      ).preview({
+        root,
+        preview: { host: "127.0.0.1", port: 4174, strictPort: true },
+      })
+    : null;
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
+    ? {}
+    : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
+);
 await mkdir(outDir, { recursive: true });
 
 /** 페이지 준비 — 콘솔/페이지 에러 수집기 부착 후 이벤트 큐가 빠질 때까지 대기 */
-const boot = async (viewport = { width: 1280, height: 720 }) => {
-  const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
+const boot = async (
+  viewport = { width: 1280, height: 720 },
+  { fast = false } = {},
+) => {
+  // 시나리오 간 저장소를 분리하되, 한 시나리오 안의 reload에는 같은 저장소를 유지한다.
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  if (fast) {
+    await page.addInitScript(() => {
+      const nativeTimeout = window.setTimeout.bind(window);
+      window.setTimeout = (callback, delay = 0, ...args) =>
+        nativeTimeout(callback, Math.min(Number(delay), 12), ...args);
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+  }
   const errors = [];
-  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(`console: ${message.text()}`);
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    const source = message.location().url;
+    if (message.type() === "error" && !source.endsWith("/favicon.ico"))
+      errors.push(`console: ${message.text()}`);
   });
-  await page.goto(URL, { waitUntil: 'networkidle' });
+  await page.goto(URL, { waitUntil: "networkidle" });
   await page.waitForFunction(
-    () => document.querySelector('.end-turn:not(:disabled)') !== null && document.querySelector('.float-text') === null,
+    () =>
+      document.querySelector(".end-turn:not(:disabled)") !== null &&
+      document.querySelector(".float-text") === null,
     undefined,
-    { timeout: 15000 }
+    { timeout: 15000 },
   );
   return { page, errors };
 };
 
-const shellAlive = (page) => page.evaluate(() => document.querySelector('main.combat-shell') !== null);
-const handCount = (page) => page.locator('.hand-tray .coin').count();
+const shellAlive = (page) =>
+  page.evaluate(() => document.querySelector("main.combat-shell") !== null);
+const handCount = (page) => page.locator(".hand-tray .coin").count();
+
+const waitForCombatOrBoundary = (page, timeout = 15000) =>
+  page.waitForFunction(
+    () =>
+      document.querySelector(
+        '[data-testid="reward-overlay"], [data-testid="run-result"]',
+      ) !== null ||
+      (document.querySelector(".end-turn:not(:disabled)") !== null &&
+        document.querySelector(
+          ".float-text, .skill-card.resolving, .socket-coin.flipping",
+        ) === null),
+    undefined,
+    { timeout },
+  );
+
+const resolveSkillAnimation = async (page) => {
+  await page.waitForTimeout(20);
+  await waitForCombatOrBoundary(page);
+};
+
+const useConsumeIfReady = async (page, slotIndex) => {
+  const card = page.locator(".skill-card").nth(slotIndex);
+  if (
+    (await card.count()) === 0 ||
+    (await card.locator(".card-title").getAttribute("aria-disabled")) !==
+      "false"
+  )
+    return false;
+  await card.locator(".card-title").click();
+  await resolveSkillAnimation(page);
+  return true;
+};
+
+const useFlipSkill = async (page, slotIndex) => {
+  const card = page.locator(".skill-card").nth(slotIndex);
+  if ((await card.count()) === 0) return false;
+  const sockets = card.locator(".socket");
+  const socketCount = await sockets.count();
+  if (socketCount === 0 || (await handCount(page)) < socketCount) return false;
+  for (let index = 0; index < socketCount; index += 1) {
+    if ((await sockets.nth(index).locator(".socket-coin").count()) > 0)
+      continue;
+    await page.locator(".hand-tray .coin").first().click();
+    await sockets.nth(index).click();
+  }
+  if (
+    (await card.locator(".card-title").getAttribute("aria-disabled")) !==
+    "false"
+  )
+    return false;
+  await card.locator(".card-title").click();
+  await resolveSkillAnimation(page);
+  return true;
+};
+
+const winCurrentCombat = async (page) => {
+  for (let turn = 0; turn < 18; turn += 1) {
+    let actions = 0;
+    if (await useConsumeIfReady(page, 4)) actions += 1;
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+    if (actions < 3 && (await useFlipSkill(page, 2))) actions += 1;
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+    if (actions < 3 && (await useFlipSkill(page, 1))) actions += 1;
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+    if (actions < 3 && (await useFlipSkill(page, 0))) actions += 1;
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+    if (actions < 3) await useFlipSkill(page, 3);
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+    await page.locator(".end-turn").click();
+    await waitForCombatOrBoundary(page, 20000);
+    if (
+      (await page
+        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
+        .count()) > 0
+    )
+      return;
+  }
+  throw new Error("자동 전투가 18턴 안에 끝나지 않았다");
+};
 
 // ---------- 시나리오 1: 첫 상태 + 클릭 장전/회수/사용 (베기) ----------
 {
   const { page, errors } = await boot();
   await page.screenshot({ path: `${outDir}/01-initial.png` });
 
-  check('S1 첫 손패 5개', (await handCount(page)) === 5);
-  check('S1 주머니 6 (10+불씨1-드로우5)', (await page.locator('.pouch-circle').innerText()) === '6');
-  check('S1 적 의도 1턴부터 공개', (await page.locator('.intent').count()) === 1);
-  check('S1 손패 코인에 플립 결과 얼굴 없음', (await page.locator('.hand-tray .coin .coin-face-mark').count()) === 0);
+  check("S1 첫 손패 5개", (await handCount(page)) === 5);
+  check(
+    "S1 주머니 6 (10+불씨1-드로우5)",
+    (await page.locator(".pouch-circle").innerText()) === "6",
+  );
+  check(
+    "S1 적 의도 1턴부터 공개",
+    (await page.locator(".intent").count()) === 1,
+  );
+  check(
+    "S1 손패 코인에 플립 결과 얼굴 없음",
+    (await page.locator(".hand-tray .coin .coin-face-mark").count()) === 0,
+  );
 
   // 클릭 장전: 코인 선택 → 합법 소켓 하이라이트 → 소켓 클릭 → 장전
-  await page.locator('.hand-tray .coin').first().click();
-  check('S1 선택 코인 표시', (await page.locator('.hand-tray .coin.selected').count()) === 1);
-  const acceptCount = await page.locator('.socket.accept').count();
-  check('S1 합법 소켓 하이라이트 ≥1', acceptCount >= 1, `accept=${acceptCount}`);
+  await page.locator(".hand-tray .coin").first().click();
+  check(
+    "S1 선택 코인 표시",
+    (await page.locator(".hand-tray .coin.selected").count()) === 1,
+  );
+  const acceptCount = await page.locator(".socket.accept").count();
+  check(
+    "S1 합법 소켓 하이라이트 ≥1",
+    acceptCount >= 1,
+    `accept=${acceptCount}`,
+  );
 
-  const slashSocket = page.locator('.skill-card').first().locator('.socket');
+  const slashSocket = page.locator(".skill-card").first().locator(".socket");
   await slashSocket.first().click();
-  check('S1 장전 후 손패 4개', (await handCount(page)) === 4);
-  check('S1 소켓 loaded', (await page.locator('.skill-card').first().locator('.socket.loaded').count()) === 1);
+  check("S1 장전 후 손패 4개", (await handCount(page)) === 4);
+  check(
+    "S1 소켓 loaded",
+    (await page
+      .locator(".skill-card")
+      .first()
+      .locator(".socket.loaded")
+      .count()) === 1,
+  );
   await page.screenshot({ path: `${outDir}/02-placed.png` });
 
   // 회수: 장전된 소켓 클릭 → 손패 복귀
   await slashSocket.first().click();
-  check('S1 회수 후 손패 5개', (await handCount(page)) === 5);
+  check("S1 회수 후 손패 5개", (await handCount(page)) === 5);
 
   // 재장전 → 카드 제목 버튼으로 사용 → 플립 연출 가시성
-  await page.locator('.hand-tray .coin').first().click();
+  await page.locator(".hand-tray .coin").first().click();
   await slashSocket.first().click();
   const beforeUse = `${outDir}/03-before-use.png`;
   await page.screenshot({ path: beforeUse });
-  await page.locator('.skill-card').first().locator('.card-title').click();
+  await page.locator(".skill-card").first().locator(".card-title").click();
 
   // 플립 연출: 해결 중 소켓 코인이 남아 flipping 클래스를 가져야 한다
   const sawFlip = await page
-    .waitForFunction(() => document.querySelector('.socket-coin.flipping, .coin.flipping') !== null, undefined, { timeout: 4000 })
+    .waitForFunction(
+      () =>
+        document.querySelector(".socket-coin.flipping, .coin.flipping") !==
+        null,
+      undefined,
+      { timeout: 4000 },
+    )
     .then(() => true)
     .catch(() => false);
-  check('S1 플립 연출 가시 (flipping 클래스 등장)', sawFlip);
+  check("S1 플립 연출 가시 (flipping 클래스 등장)", sawFlip);
   await page.screenshot({ path: `${outDir}/04-during-flip.png` });
 
   const sawFace = await page
-    .waitForFunction(() => document.querySelector('.coin-face-mark') !== null, undefined, { timeout: 4000 })
+    .waitForFunction(
+      () => document.querySelector(".coin-face-mark") !== null,
+      undefined,
+      { timeout: 4000 },
+    )
     .then(() => true)
     .catch(() => false);
-  check('S1 플립 결과 면 공개 (앞/뒤 마크)', sawFace);
+  check("S1 플립 결과 면 공개 (앞/뒤 마크)", sawFace);
   await page.screenshot({ path: `${outDir}/05-face-revealed.png` });
 
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 15000 });
-  check('S1 사용됨 표시', (await page.locator('.skill-card.spent').count()) >= 1);
-  check('S1 해결 후 손패 4개', (await handCount(page)) === 4);
-  check('S1 콘솔/페이지 에러 0', errors.length === 0, errors.join(' | '));
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 15000 },
+  );
+  check(
+    "S1 사용됨 표시",
+    (await page.locator(".skill-card.spent").count()) >= 1,
+  );
+  check("S1 해결 후 손패 4개", (await handCount(page)) === 4);
+  check("S1 콘솔/페이지 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
 // ---------- 시나리오 2: 불타는 일격 회귀 — 부분 장전이 화면을 죽이지 않는다 ----------
 {
   const { page, errors } = await boot();
-  const strike = page.locator('.skill-card').nth(2); // slot 2 = 불타는 일격 (cost 2)
+  const strike = page.locator(".skill-card").nth(2); // slot 2 = 불타는 일격 (cost 2)
 
-  await page.locator('.hand-tray .coin').first().click();
-  await strike.locator('.socket').first().click();
+  await page.locator(".hand-tray .coin").first().click();
+  await strike.locator(".socket").first().click();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${outDir}/06-strike-one-coin.png` });
-  check('S2 1/2 장전 후 화면 생존', await shellAlive(page));
-  check('S2 1/2 장전 후 에러 0', errors.length === 0, errors.join(' | '));
+  check("S2 1/2 장전 후 화면 생존", await shellAlive(page));
+  check("S2 1/2 장전 후 에러 0", errors.length === 0, errors.join(" | "));
 
-  await page.locator('.hand-tray .coin').first().click();
-  await strike.locator('.socket').nth(1).click();
+  await page.locator(".hand-tray .coin").first().click();
+  await strike.locator(".socket").nth(1).click();
   await page.waitForTimeout(300);
-  check('S2 2/2 장전 후 프리뷰 표시', (await strike.locator('.preview-tip').count()) === 1);
+  check(
+    "S2 2/2 장전 후 프리뷰 표시",
+    (await strike.locator(".preview-tip").count()) === 1,
+  );
   await page.screenshot({ path: `${outDir}/07-strike-loaded.png` });
 
-  const discardBefore = await page.locator('.pile-button.discard').innerText();
-  await strike.locator('.card-title').click();
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 15000 });
+  const discardBefore = await page.locator(".pile-button.discard").innerText();
+  await strike.locator(".card-title").click();
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 15000 },
+  );
   await page.screenshot({ path: `${outDir}/08-strike-resolved.png` });
-  check('S2 사용 후 화면 생존', await shellAlive(page));
-  const discardAfter = await page.locator('.pile-button.discard').innerText();
-  check('S2 버림 더미 증가 (코인2+임시화염1)', discardBefore !== discardAfter, `${discardBefore} → ${discardAfter}`);
-  check('S2 에러 0', errors.length === 0, errors.join(' | '));
+  check("S2 사용 후 화면 생존", await shellAlive(page));
+  const discardAfter = await page.locator(".pile-button.discard").innerText();
+  check(
+    "S2 버림 더미 증가 (코인2+임시화염1)",
+    discardBefore !== discardAfter,
+    `${discardBefore} → ${discardAfter}`,
+  );
+  check("S2 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
 // ---------- 시나리오 3: 키보드 전용 장전/회수/사용 ----------
 {
   const { page, errors } = await boot();
-  const coin = page.locator('.hand-tray .coin').first();
+  const coin = page.locator(".hand-tray .coin").first();
   await coin.focus();
-  await page.keyboard.press('Enter');
-  check('S3 키보드 선택', (await page.locator('.hand-tray .coin.selected').count()) === 1);
+  await page.keyboard.press("Enter");
+  check(
+    "S3 키보드 선택",
+    (await page.locator(".hand-tray .coin.selected").count()) === 1,
+  );
 
-  const socket = page.locator('.skill-card').first().locator('.socket').first();
+  const socket = page.locator(".skill-card").first().locator(".socket").first();
   await socket.focus();
-  await page.keyboard.press('Enter');
-  check('S3 키보드 장전', (await handCount(page)) === 4);
+  await page.keyboard.press("Enter");
+  check("S3 키보드 장전", (await handCount(page)) === 4);
 
   await socket.focus();
-  await page.keyboard.press('Enter');
-  check('S3 키보드 회수', (await handCount(page)) === 5);
+  await page.keyboard.press("Enter");
+  check("S3 키보드 회수", (await handCount(page)) === 5);
 
   // 다시 장전 후 카드 제목으로 사용
   await coin.focus();
-  await page.keyboard.press('Enter');
+  await page.keyboard.press("Enter");
   await socket.focus();
-  await page.keyboard.press('Enter');
-  const title = page.locator('.skill-card').first().locator('.card-title');
+  await page.keyboard.press("Enter");
+  const title = page.locator(".skill-card").first().locator(".card-title");
   await title.focus();
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 15000 });
-  check('S3 키보드 사용 완료', (await page.locator('.skill-card.spent').count()) >= 1);
-  check('S3 에러 0', errors.length === 0, errors.join(' | '));
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 15000 },
+  );
+  check(
+    "S3 키보드 사용 완료",
+    (await page.locator(".skill-card.spent").count()) >= 1,
+  );
+  check("S3 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
 // ---------- 시나리오 4: 드래그 장전 / 무효 드롭 / 소켓 드래그 회수 ----------
 {
   const { page, errors } = await boot();
-  const coin = page.locator('.hand-tray .coin').first();
-  const guardCard = page.locator('.skill-card').nth(1); // 방어 (cost 1)
+  const coin = page.locator(".hand-tray .coin").first();
+  const guardCard = page.locator(".skill-card").nth(1); // 방어 (cost 1)
 
   // 드래그 성공: 코인 → 방어 소켓
   const coinBox = await coin.boundingBox();
-  await page.mouse.move(coinBox.x + coinBox.width / 2, coinBox.y + coinBox.height / 2);
+  await page.mouse.move(
+    coinBox.x + coinBox.width / 2,
+    coinBox.y + coinBox.height / 2,
+  );
   await page.mouse.down();
   await page.mouse.move(coinBox.x, coinBox.y - 60, { steps: 5 });
-  const proxyVisible = await page.locator('.drag-proxy').count();
-  check('S4 드래그 프록시 표시', proxyVisible === 1);
-  const socketBox = await guardCard.locator('.socket').first().boundingBox();
-  await page.mouse.move(socketBox.x + socketBox.width / 2, socketBox.y + socketBox.height / 2, { steps: 8 });
+  const proxyVisible = await page.locator(".drag-proxy").count();
+  check("S4 드래그 프록시 표시", proxyVisible === 1);
+  const socketBox = await guardCard.locator(".socket").first().boundingBox();
+  await page.mouse.move(
+    socketBox.x + socketBox.width / 2,
+    socketBox.y + socketBox.height / 2,
+    { steps: 8 },
+  );
   await page.screenshot({ path: `${outDir}/09-dragging.png` });
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check('S4 드래그 장전 성공', (await handCount(page)) === 4);
-  check('S4 방어 소켓 loaded', (await guardCard.locator('.socket.loaded').count()) === 1);
+  check("S4 드래그 장전 성공", (await handCount(page)) === 4);
+  check(
+    "S4 방어 소켓 loaded",
+    (await guardCard.locator(".socket.loaded").count()) === 1,
+  );
 
   // 무효 드롭: 코인 → 전장 (아무 일 없음 + 손패 유지)
-  const coin2 = page.locator('.hand-tray .coin').first();
+  const coin2 = page.locator(".hand-tray .coin").first();
   const coin2Box = await coin2.boundingBox();
-  await page.mouse.move(coin2Box.x + coin2Box.width / 2, coin2Box.y + coin2Box.height / 2);
+  await page.mouse.move(
+    coin2Box.x + coin2Box.width / 2,
+    coin2Box.y + coin2Box.height / 2,
+  );
   await page.mouse.down();
   await page.mouse.move(640, 200, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check('S4 무효 드롭 시 손패 유지', (await handCount(page)) === 4);
-  check('S4 무효 드롭 후 화면 생존', await shellAlive(page));
+  check("S4 무효 드롭 시 손패 유지", (await handCount(page)) === 4);
+  check("S4 무효 드롭 후 화면 생존", await shellAlive(page));
 
   // 소켓에서 드래그로 회수: 장전된 소켓 → 트레이
-  const loaded = guardCard.locator('.socket.loaded');
+  const loaded = guardCard.locator(".socket.loaded");
   const loadedBox = await loaded.boundingBox();
-  const trayBox = await page.locator('.hand-tray').boundingBox();
-  await page.mouse.move(loadedBox.x + loadedBox.width / 2, loadedBox.y + loadedBox.height / 2);
+  const trayBox = await page.locator(".hand-tray").boundingBox();
+  await page.mouse.move(
+    loadedBox.x + loadedBox.width / 2,
+    loadedBox.y + loadedBox.height / 2,
+  );
   await page.mouse.down();
-  await page.mouse.move(trayBox.x + trayBox.width / 2, trayBox.y + trayBox.height / 2, { steps: 8 });
+  await page.mouse.move(
+    trayBox.x + trayBox.width / 2,
+    trayBox.y + trayBox.height / 2,
+    { steps: 8 },
+  );
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check('S4 소켓 드래그 회수', (await handCount(page)) === 5);
-  check('S4 에러 0', errors.length === 0, errors.join(' | '));
+  check("S4 소켓 드래그 회수", (await handCount(page)) === 5);
+  check("S4 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
@@ -210,23 +428,36 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
   const { page, errors } = await boot();
   for (let turn = 0; turn < 3; turn += 1) {
     // 매 턴 베기 1회 사용 (코인 플립 발생) 후 턴 종료
-    await page.locator('.hand-tray .coin').first().click();
-    await page.locator('.skill-card').first().locator('.socket').first().click();
-    await page.locator('.skill-card').first().locator('.card-title').click();
-    await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 20000 });
-    if ((await page.locator('.result-overlay').count()) > 0) break;
-    await page.locator('.end-turn').click();
+    await page.locator(".hand-tray .coin").first().click();
+    await page
+      .locator(".skill-card")
+      .first()
+      .locator(".socket")
+      .first()
+      .click();
+    await page.locator(".skill-card").first().locator(".card-title").click();
     await page.waitForFunction(
-      () => document.querySelector('.result-overlay') !== null || document.querySelector('.end-turn:not(:disabled)') !== null,
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
       undefined,
-      { timeout: 30000 }
+      { timeout: 20000 },
     );
-    if ((await page.locator('.result-overlay').count()) > 0) break;
-    const stale = await page.locator('.hand-tray .coin .coin-face-mark').count();
+    if ((await page.locator(".result-overlay").count()) > 0) break;
+    await page.locator(".end-turn").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".result-overlay") !== null ||
+        document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 30000 },
+    );
+    if ((await page.locator(".result-overlay").count()) > 0) break;
+    const stale = await page
+      .locator(".hand-tray .coin .coin-face-mark")
+      .count();
     check(`S5 턴${turn + 2} 손패에 낡은 얼굴 0`, stale === 0, `mark=${stale}`);
   }
   await page.screenshot({ path: `${outDir}/10-multi-turn.png` });
-  check('S5 멀티 턴 에러 0', errors.length === 0, errors.join(' | '));
+  check("S5 멀티 턴 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
@@ -236,100 +467,158 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 // ④ 플립·면 공개가 피해 피드백보다 먼저 ⑤ 턴 전환 후 낡은 상태 없음
 {
   const { page, errors } = await boot();
-  const card = (index) => page.locator('.skill-card').nth(index);
+  const card = (index) => page.locator(".skill-card").nth(index);
   const placeInto = async (cardIndex, socketIndex) => {
-    await page.locator('.hand-tray .coin').first().click();
-    await card(cardIndex).locator('.socket').nth(socketIndex).click();
+    await page.locator(".hand-tray .coin").first().click();
+    await card(cardIndex).locator(".socket").nth(socketIndex).click();
   };
   const useCard = async (cardIndex) => {
-    await card(cardIndex).locator('.card-title').click();
-    await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 20000 });
+    await card(cardIndex).locator(".card-title").click();
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 20000 },
+    );
   };
-  const loadedCount = () => page.locator('.socket.loaded').count();
+  const loadedCount = () => page.locator(".socket.loaded").count();
 
   // 1. 불타는 일격(slot 2, cost 2)에 1개 — 화면 생존, 프리뷰 실행 없음
   await placeInto(2, 0);
-  check('S7 스트라이크 1/2 화면 생존', await shellAlive(page));
-  check('S7 스트라이크 1/2 손패 4', (await handCount(page)) === 4);
-  check('S7 스트라이크 1/2 프리뷰 없음', (await card(2).locator('.preview-tip').count()) === 0);
+  check("S7 스트라이크 1/2 화면 생존", await shellAlive(page));
+  check("S7 스트라이크 1/2 손패 4", (await handCount(page)) === 4);
+  check(
+    "S7 스트라이크 1/2 프리뷰 없음",
+    (await card(2).locator(".preview-tip").count()) === 0,
+  );
   await page.screenshot({ path: `${outDir}/11-strike-partial.png` });
 
   // 2. 완료 전 다른 스킬(방어 slot 1)에도 장전 — 둘 다 장전 유지, 조작 가능
   await placeInto(1, 0);
-  check('S7 두 카드 동시 장전', (await loadedCount()) === 2);
-  check('S7 다중 장전 후 조작 가능(무잠금)', (await page.locator('.end-turn:not(:disabled)').count()) === 1);
+  check("S7 두 카드 동시 장전", (await loadedCount()) === 2);
+  check(
+    "S7 다중 장전 후 조작 가능(무잠금)",
+    (await page.locator(".end-turn:not(:disabled)").count()) === 1,
+  );
   await page.screenshot({ path: `${outDir}/12-multi-loaded.png` });
 
   // 3. 방어 코인 회수 — 총량 보존 (손패+장전 = 5)
-  await card(1).locator('.socket.loaded').click();
-  check('S7 회수 후 손패 4', (await handCount(page)) === 4);
-  check('S7 회수 후 총량 보존 (장전 1)', (await loadedCount()) === 1);
+  await card(1).locator(".socket.loaded").click();
+  check("S7 회수 후 손패 4", (await handCount(page)) === 4);
+  check("S7 회수 후 총량 보존 (장전 1)", (await loadedCount()) === 1);
   await page.screenshot({ path: `${outDir}/13-unplaced.png` });
 
   // 4. 재장전 → 방어 사용 — 스트라이크 코인은 규칙대로 제자리
   await placeInto(1, 0);
   await useCard(1);
-  check('S7 방어 해결 후 스트라이크 장전 유지', (await card(2).locator('.socket.loaded').count()) === 1);
-  check('S7 방어 해결 후 화면 생존', await shellAlive(page));
+  check(
+    "S7 방어 해결 후 스트라이크 장전 유지",
+    (await card(2).locator(".socket.loaded").count()) === 1,
+  );
+  check("S7 방어 해결 후 화면 생존", await shellAlive(page));
 
   // 5. 스트라이크 2/2 — 첫 장전 후 입력 잠금 없음, 카드 준비 상태
   await placeInto(2, 1);
-  check('S7 스트라이크 2/2 즉시 조작 가능', (await page.locator('.end-turn:not(:disabled)').count()) === 1);
-  check('S7 스트라이크 ready', (await card(2).evaluate((el) => el.classList.contains('ready'))) === true);
-  check('S7 스트라이크 프리뷰 표시', (await card(2).locator('.preview-tip').count()) === 1);
+  check(
+    "S7 스트라이크 2/2 즉시 조작 가능",
+    (await page.locator(".end-turn:not(:disabled)").count()) === 1,
+  );
+  check(
+    "S7 스트라이크 ready",
+    (await card(2).evaluate((el) => el.classList.contains("ready"))) === true,
+  );
+  check(
+    "S7 스트라이크 프리뷰 표시",
+    (await card(2).locator(".preview-tip").count()) === 1,
+  );
 
   // 6. 점화·베기 사용 → 턴 3회 캡. 완충 스트라이크가 남은 채 렌더 — 구 크래시 경로
   await placeInto(3, 0);
   await useCard(3);
   await placeInto(0, 0);
   await useCard(0);
-  check('S7 캡 상태 화면 생존 (완충 카드 렌더)', await shellAlive(page));
-  check('S7 캡 상태 스트라이크 사용 불가 (ready 아님)', (await card(2).evaluate((el) => el.classList.contains('ready'))) === false);
-  check('S7 캡 상태 프리뷰 숨김', (await card(2).locator('.preview-tip').count()) === 0);
-  check('S7 캡 상태 에러 0', errors.length === 0, errors.join(' | '));
+  check("S7 캡 상태 화면 생존 (완충 카드 렌더)", await shellAlive(page));
+  check(
+    "S7 캡 상태 스트라이크 사용 불가 (ready 아님)",
+    (await card(2).evaluate((el) => el.classList.contains("ready"))) === false,
+  );
+  check(
+    "S7 캡 상태 프리뷰 숨김",
+    (await card(2).locator(".preview-tip").count()) === 0,
+  );
+  check("S7 캡 상태 에러 0", errors.length === 0, errors.join(" | "));
   await page.screenshot({ path: `${outDir}/14-capped-loaded.png` });
 
   // 7. 턴 종료 — E0/D7: 미선언 장전 코인은 손패 복귀 후 폐기, 다음 턴 5장·낡은 면 0
-  await page.locator('.end-turn').click();
+  await page.locator(".end-turn").click();
   await page.waitForFunction(
-    () => document.querySelector('.result-overlay') !== null || document.querySelector('.end-turn:not(:disabled)') !== null,
+    () =>
+      document.querySelector(".result-overlay") !== null ||
+      document.querySelector(".end-turn:not(:disabled)") !== null,
     undefined,
-    { timeout: 30000 }
+    { timeout: 30000 },
   );
-  check('S7 턴2 스트라이크 소켓 비움 (D7)', (await loadedCount()) === 0);
-  check('S7 턴2 손패 5', (await handCount(page)) === 5);
-  check('S7 턴2 낡은 면 0', (await page.locator('.hand-tray .coin .coin-face-mark').count()) === 0);
+  check("S7 턴2 스트라이크 소켓 비움 (D7)", (await loadedCount()) === 0);
+  check("S7 턴2 손패 5", (await handCount(page)) === 5);
+  check(
+    "S7 턴2 낡은 면 0",
+    (await page.locator(".hand-tray .coin .coin-face-mark").count()) === 0,
+  );
 
   // 8. 턴2에 스트라이크 완충·사용 — 소켓 코인 전부 플립·면 공개가 피해 피드백보다 먼저
   await placeInto(2, 0);
   await placeInto(2, 1);
-  const discardBefore = await page.locator('.pile-button.discard').innerText();
-  await card(2).locator('.card-title').click();
+  const discardBefore = await page.locator(".pile-button.discard").innerText();
+  await card(2).locator(".card-title").click();
   const sawFlipAnim = await page
-    .waitForFunction(() => document.querySelector('.socket-coin.flipping') !== null, undefined, { timeout: 5000 })
+    .waitForFunction(
+      () => document.querySelector(".socket-coin.flipping") !== null,
+      undefined,
+      { timeout: 5000 },
+    )
     .then(() => true)
     .catch(() => false);
-  check('S7 플립 애니메이션 가시', sawFlipAnim);
+  check("S7 플립 애니메이션 가시", sawFlipAnim);
   await page.screenshot({ path: `${outDir}/15-flip-in-progress.png` });
-  await page.waitForFunction(() => document.querySelectorAll('.coin-face-mark').length >= 1, undefined, { timeout: 5000 });
-  check('S7 면 공개가 피해 피드백보다 먼저', (await page.locator('.float-text.kind-damage').count()) === 0);
-  await page.waitForFunction(() => document.querySelectorAll('.coin-face-mark').length === 2, undefined, { timeout: 5000 });
+  await page.waitForFunction(
+    () => document.querySelectorAll(".coin-face-mark").length >= 1,
+    undefined,
+    { timeout: 5000 },
+  );
+  check(
+    "S7 면 공개가 피해 피드백보다 먼저",
+    (await page.locator(".float-text.kind-damage").count()) === 0,
+  );
+  await page.waitForFunction(
+    () => document.querySelectorAll(".coin-face-mark").length === 2,
+    undefined,
+    { timeout: 5000 },
+  );
   await page.screenshot({ path: `${outDir}/16-faces-revealed.png` });
   const sawDamage = await page
-    .waitForFunction(() => document.querySelector('.float-text.kind-damage') !== null, undefined, { timeout: 6000 })
+    .waitForFunction(
+      () => document.querySelector(".float-text.kind-damage") !== null,
+      undefined,
+      { timeout: 6000 },
+    )
     .then(() => true)
     .catch(() => false);
-  check('S7 면 공개 후 피해 피드백', sawDamage);
+  check("S7 면 공개 후 피해 피드백", sawDamage);
   await page.waitForFunction(
-    () => document.querySelector('.result-overlay') !== null || document.querySelector('.end-turn:not(:disabled)') !== null,
+    () =>
+      document.querySelector(".result-overlay") !== null ||
+      document.querySelector(".end-turn:not(:disabled)") !== null,
     undefined,
-    { timeout: 20000 }
+    { timeout: 20000 },
   );
-  const discardAfter = await page.locator('.pile-button.discard').innerText();
-  check('S7 해결 후 버림 반영', discardBefore !== discardAfter, `${discardBefore} → ${discardAfter}`);
-  check('S7 해결 후 화면 생존', await shellAlive(page));
+  const discardAfter = await page.locator(".pile-button.discard").innerText();
+  check(
+    "S7 해결 후 버림 반영",
+    discardBefore !== discardAfter,
+    `${discardBefore} → ${discardAfter}`,
+  );
+  check("S7 해결 후 화면 생존", await shellAlive(page));
   await page.screenshot({ path: `${outDir}/17-post-resolution.png` });
-  check('S7 전 구간 에러 0', errors.length === 0, errors.join(' | '));
+  check("S7 전 구간 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
@@ -337,47 +626,67 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 {
   const { page, errors } = await boot();
   const popSum = async () => {
-    const text = await page.locator('.pouch-pop').innerText();
-    return [...text.matchAll(/×(\d+)/g)].reduce((sum, match) => sum + Number(match[1]), 0);
+    const text = await page.locator(".pouch-pop").innerText();
+    return [...text.matchAll(/×(\d+)/g)].reduce(
+      (sum, match) => sum + Number(match[1]),
+      0,
+    );
   };
 
   const popSettled = () =>
     page.waitForFunction(() => {
-      const pop = document.querySelector('.pouch-pop');
-      return pop !== null && getComputedStyle(pop).opacity === '1';
+      const pop = document.querySelector(".pouch-pop");
+      return pop !== null && getComputedStyle(pop).opacity === "1";
     });
 
-  await page.locator('.pouch-circle').click();
-  check('S8 팝오버 열림', (await page.locator('.pouch-pop').count()) === 1);
+  await page.locator(".pouch-circle").click();
+  check("S8 팝오버 열림", (await page.locator(".pouch-pop").count()) === 1);
   await popSettled();
-  const pouchNumber = Number(await page.locator('.pouch-circle').innerText());
-  check('S8 구성 합계 = 주머니 매수', (await popSum()) === pouchNumber, `sum vs ${pouchNumber}`);
-  const popText = await page.locator('.pouch-pop').innerText();
-  check('S8 기본·화염 종류 표기', popText.includes('기본') && popText.includes('화염'), popText.replace(/\n/g, ' / '));
-  const popBox = await page.locator('.pouch-pop').boundingBox();
-  check('S8 팝오버 좌측 고정 (전장 미가림)', popBox !== null && popBox.x + popBox.width < 640, `right=${Math.round((popBox?.x ?? 0) + (popBox?.width ?? 0))}`);
+  const pouchNumber = Number(await page.locator(".pouch-circle").innerText());
+  check(
+    "S8 구성 합계 = 주머니 매수",
+    (await popSum()) === pouchNumber,
+    `sum vs ${pouchNumber}`,
+  );
+  const popText = await page.locator(".pouch-pop").innerText();
+  check(
+    "S8 기본·화염 종류 표기",
+    popText.includes("기본") && popText.includes("화염"),
+    popText.replace(/\n/g, " / "),
+  );
+  const popBox = await page.locator(".pouch-pop").boundingBox();
+  check(
+    "S8 팝오버 좌측 고정 (전장 미가림)",
+    popBox !== null && popBox.x + popBox.width < 640,
+    `right=${Math.round((popBox?.x ?? 0) + (popBox?.width ?? 0))}`,
+  );
   await page.screenshot({ path: `${outDir}/18-pouch-open.png` });
 
-  await page.keyboard.press('Escape');
-  check('S8 Escape 닫기', (await page.locator('.pouch-pop').count()) === 0);
+  await page.keyboard.press("Escape");
+  check("S8 Escape 닫기", (await page.locator(".pouch-pop").count()) === 0);
 
-  await page.locator('.pouch-circle').click();
+  await page.locator(".pouch-circle").click();
   await page.mouse.click(640, 200);
-  check('S8 바깥 클릭 닫기', (await page.locator('.pouch-pop').count()) === 0);
+  check("S8 바깥 클릭 닫기", (await page.locator(".pouch-pop").count()) === 0);
 
   // 턴 전환 후 구성 갱신 — 2턴 드로우 뒤 더미 1닢
-  await page.locator('.end-turn').click();
+  await page.locator(".end-turn").click();
   await page.waitForFunction(
-    () => document.querySelector('.result-overlay') !== null || document.querySelector('.end-turn:not(:disabled)') !== null,
+    () =>
+      document.querySelector(".result-overlay") !== null ||
+      document.querySelector(".end-turn:not(:disabled)") !== null,
     undefined,
-    { timeout: 30000 }
+    { timeout: 30000 },
   );
-  await page.locator('.pouch-circle').click();
+  await page.locator(".pouch-circle").click();
   await popSettled();
-  check('S8 턴2 구성 합계 1', (await popSum()) === 1);
-  check('S8 턴2 주머니 라벨 1', (await page.locator('.pouch-circle').innerText()) === '1');
+  check("S8 턴2 구성 합계 1", (await popSum()) === 1);
+  check(
+    "S8 턴2 주머니 라벨 1",
+    (await page.locator(".pouch-circle").innerText()) === "1",
+  );
   await page.screenshot({ path: `${outDir}/19-pouch-turn2.png` });
-  check('S8 에러 0', errors.length === 0, errors.join(' | '));
+  check("S8 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
@@ -385,29 +694,53 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 // 겹침 레일은 유지하되: 장전(.lifted)은 절제된 리프트만, 검사 승격(호버/키보드 포커스/드롭
 // 목적지)은 가로 확대 없는 수직 리프트 — 승격 중에도 이웃 카드의 제목·소켓이 가려지지 않는다.
 {
-  for (const viewport of [{ width: 1280, height: 720 }, { width: 1024, height: 720 }]) {
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 720 },
+    { width: 1024, height: 720 },
+  ]) {
     const tag = `${viewport.width}x${viewport.height}`;
+    const maxCardWidth = viewport.width >= 1440 ? 160 : 126;
     const { page, errors } = await boot(viewport);
     const cardRect = (index) =>
       page.evaluate((i) => {
-        const rect = document.querySelectorAll('.skill-card')[i].getBoundingClientRect();
-        return { left: rect.left, right: rect.right, top: rect.top, width: rect.width };
+        const rect = document
+          .querySelectorAll(".skill-card")
+          [i].getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          width: rect.width,
+        };
       }, index);
     // 승격 중 이웃(불타는 일격, index 2)의 제목 중심·소켓 중심이 자기 카드로 히트되는가
     const adjacentClear = () =>
       page.evaluate(() => {
-        const cards = [...document.querySelectorAll('.skill-card')];
+        const cards = [...document.querySelectorAll(".skill-card")];
         const target = cards[2];
         const probe = (el) => {
           if (el === null) return false;
           const rect = el.getBoundingClientRect();
-          const under = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          const under = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
           return under !== null && target.contains(under);
         };
-        return probe(target.querySelector('.card-title')) && probe(target.querySelector('.socket'));
+        return (
+          probe(target.querySelector(".card-title")) &&
+          probe(target.querySelector(".socket"))
+        );
       });
     const detailShown = (index) =>
-      page.evaluate((i) => getComputedStyle(document.querySelectorAll('.skill-card')[i].querySelector('p')).opacity === '1', index);
+      page.evaluate(
+        (i) =>
+          getComputedStyle(
+            document.querySelectorAll(".skill-card")[i].querySelector("p"),
+          ).opacity === "1",
+        index,
+      );
     const parkPointer = async () => {
       await page.mouse.move(640, 260);
       await page.waitForTimeout(250);
@@ -415,53 +748,61 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 
     await parkPointer();
     const rest = await cardRect(1);
-    check(`S9 ${tag} 휴식 카드 기본 폭`, rest.width <= 126, `w=${Math.round(rest.width)}`);
+    check(
+      `S9 ${tag} 휴식 카드 기본 폭`,
+      rest.width <= maxCardWidth,
+      `w=${Math.round(rest.width)}`,
+    );
     await page.screenshot({ path: `${outDir}/20-${tag}-rail-rest.png` });
 
     // 호버 승격 = 수직 리프트 + 상세 노출, 가로 확대 없음
-    await page.locator('.skill-card').nth(1).hover();
+    await page.locator(".skill-card").nth(1).hover();
     await page.waitForTimeout(250);
     const hovered = await cardRect(1);
     check(
       `S9 ${tag} 호버 수직 승격 (확대 없음)`,
-      hovered.width <= 126 && hovered.top <= rest.top - 24,
-      `w=${Math.round(hovered.width)} lift=${Math.round(rest.top - hovered.top)}`
+      hovered.width <= maxCardWidth && hovered.top <= rest.top - 24,
+      `w=${Math.round(hovered.width)} lift=${Math.round(rest.top - hovered.top)}`,
     );
     check(`S9 ${tag} 호버 상세 텍스트 노출`, await detailShown(1));
     await page.screenshot({ path: `${outDir}/21-${tag}-hover.png` });
     await parkPointer();
 
     // 인접 두 카드 장전: 방어(1) + 불타는 일격(2)
-    await page.locator('.hand-tray .coin').first().click();
-    await page.locator('.skill-card').nth(1).locator('.socket').first().click();
-    await page.locator('.hand-tray .coin').first().click();
-    await page.locator('.skill-card').nth(2).locator('.socket').first().click();
+    await page.locator(".hand-tray .coin").first().click();
+    await page.locator(".skill-card").nth(1).locator(".socket").first().click();
+    await page.locator(".hand-tray .coin").first().click();
+    await page.locator(".skill-card").nth(2).locator(".socket").first().click();
     await parkPointer();
     const left = await cardRect(1);
     const right = await cardRect(2);
     check(
       `S9 ${tag} 장전 카드 상시 확대 없음`,
-      left.width <= 126 && right.width <= 126,
-      `w=${Math.round(left.width)},${Math.round(right.width)}`
+      left.width <= maxCardWidth && right.width <= maxCardWidth,
+      `w=${Math.round(left.width)},${Math.round(right.width)}`,
     );
-    check(`S9 ${tag} 장전 카드 겹침 ≤20px`, left.right - right.left <= 20, `overlap=${Math.round(left.right - right.left)}`);
+    check(
+      `S9 ${tag} 장전 카드 겹침 ≤20px`,
+      left.right - right.left <= 20,
+      `overlap=${Math.round(left.right - right.left)}`,
+    );
     check(`S9 ${tag} 두 장전 카드 제목·소켓 히트 가능`, await adjacentClear());
     await page.screenshot({ path: `${outDir}/22-${tag}-multi-loaded.png` });
 
     // 장전 카드 호버 승격 — 이웃 겹침이 휴식 수준(-14px)을 넘지 않고, 이웃 제목·소켓 무가림
-    await page.locator('.skill-card').nth(1).hover();
+    await page.locator(".skill-card").nth(1).hover();
     await page.waitForTimeout(250);
     const promoted = await cardRect(1);
     const neighbor = await cardRect(2);
     check(
       `S9 ${tag} 장전 카드 호버 수직 승격`,
-      promoted.width <= 126 && promoted.top <= rest.top - 24,
-      `w=${Math.round(promoted.width)} lift=${Math.round(rest.top - promoted.top)}`
+      promoted.width <= maxCardWidth && promoted.top <= rest.top - 24,
+      `w=${Math.round(promoted.width)} lift=${Math.round(rest.top - promoted.top)}`,
     );
     check(
       `S9 ${tag} 승격 중 이웃 겹침 ≤15px`,
       promoted.right - neighbor.left <= 15,
-      `overlap=${Math.round(promoted.right - neighbor.left)}`
+      `overlap=${Math.round(promoted.right - neighbor.left)}`,
     );
     check(`S9 ${tag} 승격 중 이웃 제목·소켓 무가림`, await adjacentClear());
     check(`S9 ${tag} 승격 카드 상세 노출`, await detailShown(1));
@@ -470,31 +811,51 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 
     // 키보드 포커스 = 호버와 동일 승격 — 베기 제목에 앵커 후 실제 Tab 2회
     // (마지막 이동이 실제 키 입력이라 :focus-visible이 보장된다): 베기 소켓 → 방어 제목
-    await page.locator('.skill-card').nth(0).locator('.card-title').focus();
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    await page.locator(".skill-card").nth(0).locator(".card-title").focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
     await page.waitForTimeout(250);
-    const focusOn = await page.evaluate(() => document.activeElement?.textContent ?? '');
-    check(`S9 ${tag} 키보드 포커스 대상 = 방어 제목`, focusOn.includes('방어'), focusOn);
+    const focusOn = await page.evaluate(
+      () => document.activeElement?.textContent ?? "",
+    );
+    check(
+      `S9 ${tag} 키보드 포커스 대상 = 방어 제목`,
+      focusOn.includes("방어"),
+      focusOn,
+    );
     const kb = await cardRect(1);
     check(
       `S9 ${tag} 키보드 포커스 수직 승격`,
-      kb.width <= 126 && kb.top <= rest.top - 24,
-      `w=${Math.round(kb.width)} lift=${Math.round(rest.top - kb.top)}`
+      kb.width <= maxCardWidth && kb.top <= rest.top - 24,
+      `w=${Math.round(kb.width)} lift=${Math.round(rest.top - kb.top)}`,
     );
-    check(`S9 ${tag} 키보드 승격 중 이웃 제목·소켓 무가림`, await adjacentClear());
+    check(
+      `S9 ${tag} 키보드 승격 중 이웃 제목·소켓 무가림`,
+      await adjacentClear(),
+    );
     await page.screenshot({ path: `${outDir}/24-${tag}-kb-focus.png` });
-    await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await page.evaluate(
+      () =>
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.blur(),
+    );
     await parkPointer();
 
     // 겹침 속에서도 소켓은 개별 타깃 가능 — 오른쪽 카드 회수
     const handBefore = await handCount(page);
-    await page.locator('.skill-card').nth(2).locator('.socket.loaded').click();
-    check(`S9 ${tag} 겹침 속 소켓 회수 가능`, (await handCount(page)) === handBefore + 1);
+    await page.locator(".skill-card").nth(2).locator(".socket.loaded").click();
+    check(
+      `S9 ${tag} 겹침 속 소켓 회수 가능`,
+      (await handCount(page)) === handBefore + 1,
+    );
 
-    const hScroll = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    const hScroll = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth,
+    );
     check(`S9 ${tag} 가로 스크롤 없음`, !hScroll);
-    check(`S9 ${tag} 에러 0`, errors.length === 0, errors.join(' | '));
+    check(`S9 ${tag} 에러 0`, errors.length === 0, errors.join(" | "));
     await page.close();
   }
 }
@@ -504,112 +865,612 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
   const { page, errors } = await boot();
   const pileSum = async (selector) => {
     const text = await page.locator(selector).innerText();
-    return [...text.matchAll(/×(\d+)/g)].reduce((sum, match) => sum + Number(match[1]), 0);
+    return [...text.matchAll(/×(\d+)/g)].reduce(
+      (sum, match) => sum + Number(match[1]),
+      0,
+    );
   };
   const pileSettled = (selector) =>
     page.waitForFunction((target) => {
       const pop = document.querySelector(target);
-      return pop !== null && getComputedStyle(pop).opacity === '1';
+      return pop !== null && getComputedStyle(pop).opacity === "1";
     }, selector);
 
-  check('S11 버림·소모 버튼 2개', (await page.locator('.pile-button').count()) === 2);
-  const pileHitBoxes = await page.locator('.pile-button').evaluateAll((buttons) =>
-    buttons.map((button) => {
-      const box = button.getBoundingClientRect();
-      return { width: Math.round(box.width), height: Math.round(box.height) };
-    })
+  check(
+    "S11 버림·소모 버튼 2개",
+    (await page.locator(".pile-button").count()) === 2,
+  );
+  const pileHitBoxes = await page
+    .locator(".pile-button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const box = button.getBoundingClientRect();
+        return { width: Math.round(box.width), height: Math.round(box.height) };
+      }),
+    );
+  check(
+    "S11 더미 버튼 히트 영역 ≥70×24px",
+    pileHitBoxes.every((box) => box.width >= 70 && box.height >= 24),
+    pileHitBoxes.map((box) => `${box.width}x${box.height}`).join(","),
+  );
+
+  await page.locator(".pile-button.discard").click();
+  const emptyDiscardText = await page.locator(".pile-pop.discard").innerText();
+  check(
+    "S11 빈 버림 인스펙터 열림",
+    emptyDiscardText.includes("아직 버린 동전이 없다"),
   );
   check(
-    'S11 더미 버튼 히트 영역 ≥70×24px',
-    pileHitBoxes.every((box) => box.width >= 70 && box.height >= 24),
-    pileHitBoxes.map((box) => `${box.width}x${box.height}`).join(',')
+    "S11 버림 리셔플 규칙 설명",
+    emptyDiscardText.includes("무작위로 섞여"),
   );
 
-  await page.locator('.pile-button.discard').click();
-  const emptyDiscardText = await page.locator('.pile-pop.discard').innerText();
-  check('S11 빈 버림 인스펙터 열림', emptyDiscardText.includes('아직 버린 동전이 없다'));
-  check('S11 버림 리셔플 규칙 설명', emptyDiscardText.includes('무작위로 섞여'));
-
-  await page.locator('.pile-button.exhausted').click();
-  check('S11 인스펙터 상호 배타적', (await page.locator('.pile-pop').count()) === 1 && (await page.locator('.pile-pop.exhausted').count()) === 1);
-  const emptyExhaustText = await page.locator('.pile-pop.exhausted').innerText();
-  check('S11 소모 수명주기 설명', emptyExhaustText.includes('영구 동전은 전투 후 복귀') && emptyExhaustText.includes('임시 동전은 전투 후 소멸'));
-  await page.keyboard.press('Escape');
-  check('S11 Escape 인스펙터 닫기', (await page.locator('.pile-pop').count()) === 0);
+  await page.locator(".pile-button.exhausted").click();
+  check(
+    "S11 인스펙터 상호 배타적",
+    (await page.locator(".pile-pop").count()) === 1 &&
+      (await page.locator(".pile-pop.exhausted").count()) === 1,
+  );
+  const emptyExhaustText = await page
+    .locator(".pile-pop.exhausted")
+    .innerText();
+  check(
+    "S11 소모 수명주기 설명",
+    emptyExhaustText.includes("영구 동전은 전투 후 복귀") &&
+      emptyExhaustText.includes("임시 동전은 전투 후 소멸"),
+  );
+  await page.keyboard.press("Escape");
+  check(
+    "S11 Escape 인스펙터 닫기",
+    (await page.locator(".pile-pop").count()) === 0,
+  );
 
   // 기본 동전으로 베기 → 비용 동전이 버림으로 이동하고 HUD가 이를 알려야 한다.
-  const basicCoin = page.locator('.hand-tray .coin:not(.fire):not(.granted-fire)').first();
+  const basicCoin = page
+    .locator(".hand-tray .coin:not(.fire):not(.granted-fire)")
+    .first();
   await basicCoin.click();
-  await page.locator('.skill-card').nth(0).locator('.socket').first().click();
-  await page.locator('.skill-card').nth(0).locator('.card-title').click();
+  await page.locator(".skill-card").nth(0).locator(".socket").first().click();
+  await page.locator(".skill-card").nth(0).locator(".card-title").click();
   const sawDiscardFeedback = await page
     .waitForFunction(
       () =>
-        document.querySelector('.pile-button.discard.receiving') !== null &&
-        document.querySelector('.pile-flow')?.textContent?.includes('버림 +1') === true,
+        document.querySelector(".pile-button.discard.receiving") !== null &&
+        document
+          .querySelector(".pile-flow")
+          ?.textContent?.includes("버림 +1") === true,
       undefined,
-      { timeout: 8000 }
+      { timeout: 8000 },
     )
     .then(() => true)
     .catch(() => false);
-  check('S11 스킬 비용 → 버림 피드백', sawDiscardFeedback);
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 15000 });
+  check("S11 스킬 비용 → 버림 피드백", sawDiscardFeedback);
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 15000 },
+  );
 
-  await page.locator('.pile-button.discard').click();
-  await pileSettled('.pile-pop.discard');
-  const discardText = await page.locator('.pile-pop.discard').innerText();
-  check('S11 버림 구성 합계 = 카운터', (await pileSum('.pile-pop.discard')) === 1);
-  check('S11 버림 동전 종류·수명 표시', discardText.includes('기본 ×1') && discardText.includes('리셔플 대상'));
+  await page.locator(".pile-button.discard").click();
+  await pileSettled(".pile-pop.discard");
+  const discardText = await page.locator(".pile-pop.discard").innerText();
+  check(
+    "S11 버림 구성 합계 = 카운터",
+    (await pileSum(".pile-pop.discard")) === 1,
+  );
+  check(
+    "S11 버림 동전 종류·수명 표시",
+    discardText.includes("기본 ×1") && discardText.includes("리셔플 대상"),
+  );
   await page.screenshot({ path: `${outDir}/26-discard-inspector.png` });
-  await page.keyboard.press('Escape');
+  await page.keyboard.press("Escape");
 
   // 시작 손패의 영구 화염 동전을 점화 검술로 소비 → 전투 중 제외, 전투 후 복귀 안내.
-  check('S11 소비 전 화염 동전 보유', (await page.locator('.hand-tray .coin.fire').count()) >= 1);
-  await page.locator('.skill-card').nth(4).locator('.card-title').click();
+  check(
+    "S11 소비 전 화염 동전 보유",
+    (await page.locator(".hand-tray .coin.fire").count()) >= 1,
+  );
+  await page.locator(".skill-card").nth(4).locator(".card-title").click();
   const sawExhaustFeedback = await page
     .waitForFunction(
       () =>
-        document.querySelector('.pile-button.exhausted.receiving') !== null &&
-        document.querySelector('.pile-flow')?.textContent?.includes('소모 +1') === true,
+        document.querySelector(".pile-button.exhausted.receiving") !== null &&
+        document
+          .querySelector(".pile-flow")
+          ?.textContent?.includes("소모 +1") === true,
       undefined,
-      { timeout: 8000 }
+      { timeout: 8000 },
     )
     .then(() => true)
     .catch(() => false);
-  check('S11 소비 동전 → 소모 영역 피드백', sawExhaustFeedback);
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 15000 });
+  check("S11 소비 동전 → 소모 영역 피드백", sawExhaustFeedback);
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 15000 },
+  );
 
-  await page.locator('.pile-button.exhausted').click();
-  await pileSettled('.pile-pop.exhausted');
-  const exhaustText = await page.locator('.pile-pop.exhausted').innerText();
-  check('S11 소모 구성 합계 = 카운터', (await pileSum('.pile-pop.exhausted')) === 1);
-  check('S11 소모 동전 종류 표시', exhaustText.includes('화염 ×1'));
-  check('S11 영구 소모 동전 복귀 안내', exhaustText.includes('전투 후 복귀'));
+  await page.locator(".pile-button.exhausted").click();
+  await pileSettled(".pile-pop.exhausted");
+  const exhaustText = await page.locator(".pile-pop.exhausted").innerText();
+  check(
+    "S11 소모 구성 합계 = 카운터",
+    (await pileSum(".pile-pop.exhausted")) === 1,
+  );
+  check(
+    "S11 소모 동전 종류 표시",
+    exhaustText.includes("화염") &&
+      (await page.locator(".pile-pop.exhausted .pop-coin.fire").count()) === 1,
+  );
+  check(
+    "S11 소모 동전 수명주기 안내",
+    exhaustText.includes("전투 후 복귀") ||
+      exhaustText.includes("전투 후 소멸"),
+  );
   await page.screenshot({ path: `${outDir}/27-exhaust-inspector.png` });
-  await page.keyboard.press('Escape');
+  await page.keyboard.press("Escape");
 
   // 두 번 턴 종료하면 남은 1개를 뽑은 뒤 버림 9개가 리셔플된다.
-  await page.locator('.end-turn').click();
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 30000 });
-  await page.locator('.end-turn').click();
+  await page.locator(".end-turn").click();
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 30000 },
+  );
+  await page.locator(".end-turn").click();
   const sawShuffleFeedback = await page
     .waitForFunction(
       () =>
-        document.querySelector('.pouch-circle.receiving') !== null &&
-        document.querySelector('.pile-flow')?.textContent?.includes('→ 주머니') === true,
+        document.querySelector(".pouch-circle.receiving") !== null &&
+        document
+          .querySelector(".pile-flow")
+          ?.textContent?.includes("→ 주머니") === true,
       undefined,
-      { timeout: 15000 }
+      { timeout: 15000 },
     )
     .then(() => true)
     .catch(() => false);
-  check('S11 버림 → 주머니 리셔플 피드백', sawShuffleFeedback);
-  await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, { timeout: 30000 });
-  check('S11 리셔플 후 버림 카운터 0', (await page.locator('.pile-button.discard').innerText()).includes('0'));
-  await page.locator('.pile-button.discard').click();
-  await pileSettled('.pile-pop.discard');
-  check('S11 리셔플 후 버림 인스펙터 비움', (await page.locator('.pile-pop.discard').innerText()).includes('아직 버린 동전이 없다'));
+  check("S11 버림 → 주머니 리셔플 피드백", sawShuffleFeedback);
+  await page.waitForFunction(
+    () => document.querySelector(".end-turn:not(:disabled)") !== null,
+    undefined,
+    { timeout: 30000 },
+  );
+  check(
+    "S11 리셔플 후 버림 카운터 0",
+    (await page.locator(".pile-button.discard").innerText()).includes("0"),
+  );
+  await page.locator(".pile-button.discard").click();
+  await pileSettled(".pile-pop.discard");
+  check(
+    "S11 리셔플 후 버림 인스펙터 비움",
+    (await page.locator(".pile-pop.discard").innerText()).includes(
+      "아직 버린 동전이 없다",
+    ),
+  );
   await page.screenshot({ path: `${outDir}/28-after-reshuffle.png` });
-  check('S11 전 구간 에러 0', errors.length === 0, errors.join(' | '));
+  check("S11 전 구간 에러 0", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+// ---------- 시나리오 12: 저장·보상·교체를 포함한 시드 5연전 완주 ----------
+{
+  const { page, errors } = await boot(
+    { width: 1280, height: 720 },
+    { fast: true },
+  );
+  const main = () => page.locator("main");
+  const bag = async () =>
+    (await main().getAttribute("data-bag"))?.split(",").filter(Boolean) ?? [];
+  const equipped = async () =>
+    (await main().getAttribute("data-equipped-skills"))
+      ?.split(",")
+      .filter(Boolean) ?? [];
+  const waitForOpaqueSkillCards = async () => {
+    const cardsAreStable = () => {
+      const row = document.querySelector(".skill-row");
+      const cards = [...document.querySelectorAll(".skill-card")];
+      return (
+        row !== null &&
+        !row.classList.contains("dimmed") &&
+        cards.length === 6 &&
+        cards.every(
+          (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
+        )
+      );
+    };
+    await page.waitForFunction(cardsAreStable);
+    await page.mouse.move(20, 200);
+    await page.waitForTimeout(350);
+    await page.waitForFunction(cardsAreStable);
+    await page.waitForTimeout(120);
+  };
+  const assertBoundaryLayout = async (tag, viewport) => {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(120);
+    const metrics = await page.evaluate(() => {
+      const panel = document.querySelector(".run-panel");
+      const panelRect = panel?.getBoundingClientRect() ?? null;
+      const controls = [
+        ...document.querySelectorAll(".run-panel button[data-testid]"),
+      ]
+        .filter((element) => {
+          const style = getComputedStyle(element);
+          return style.display !== "none" && style.visibility !== "hidden";
+        })
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            id: element.getAttribute("data-testid"),
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+          };
+        });
+      const overlaps = [];
+      for (let left = 0; left < controls.length; left += 1) {
+        for (let right = left + 1; right < controls.length; right += 1) {
+          const a = controls[left];
+          const b = controls[right];
+          if (
+            Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+            Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+          ) {
+            overlaps.push(`${a.id}/${b.id}`);
+          }
+        }
+      }
+      return {
+        hScroll:
+          document.documentElement.scrollWidth >
+          document.documentElement.clientWidth,
+        vScroll:
+          document.documentElement.scrollHeight >
+          document.documentElement.clientHeight,
+        panelClipped:
+          panelRect === null ||
+          panelRect.left < 0 ||
+          panelRect.top < 0 ||
+          panelRect.right > innerWidth ||
+          panelRect.bottom > innerHeight,
+        panelOverflow:
+          panel === null ||
+          panel.scrollWidth > panel.clientWidth + 1 ||
+          panel.scrollHeight > panel.clientHeight + 1,
+        clipped: controls
+          .filter(
+            (control) =>
+              control.left < 0 ||
+              control.top < 0 ||
+              control.right > innerWidth ||
+              control.bottom > innerHeight,
+          )
+          .map((control) => control.id),
+        overlaps,
+      };
+    });
+    check(
+      `S12 ${tag} 가로·세로 페이지 스크롤 없음`,
+      !metrics.hScroll && !metrics.vScroll,
+      JSON.stringify(metrics),
+    );
+    check(
+      `S12 ${tag} 패널·필수 제어 전부 뷰포트 안`,
+      !metrics.panelClipped && metrics.clipped.length === 0,
+      JSON.stringify({
+        panelClipped: metrics.panelClipped,
+        clipped: metrics.clipped,
+      }),
+    );
+    check(
+      `S12 ${tag} 내부 클리핑·제어 겹침 없음`,
+      !metrics.panelOverflow && metrics.overlaps.length === 0,
+      JSON.stringify({
+        panelOverflow: metrics.panelOverflow,
+        overlaps: metrics.overlaps,
+      }),
+    );
+  };
+
+  check(
+    "S12 첫 전투 진행 1/5",
+    (await page.locator('[data-testid="run-progress"] strong').innerText()) ===
+      "전투 1/5",
+  );
+  await winCurrentCombat(page);
+  check(
+    "S12 1전투 승리 후 코인 보상",
+    (await main().getAttribute("data-run-phase")) === "rewards" &&
+      (await page.locator('[data-testid="reward-stage"]').innerText()).includes(
+        "코인 추가",
+      ),
+  );
+  const hpAfterFirst = Number(await main().getAttribute("data-current-hp"));
+  check(
+    "S12 첫 전투에서 HP 손실 발생",
+    hpAfterFirst > 0 && hpAfterFirst < 70,
+    `hp=${hpAfterFirst}`,
+  );
+  const bagBeforeReward = await bag();
+  const coinIds = await page
+    .locator('[data-testid^="coin-reward-"]:not([data-testid$="skip"])')
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("data-testid")),
+    );
+  check(
+    "S12 코인 보상 3개·중복 없음",
+    coinIds.length === 3 && new Set(coinIds).size === 3,
+    coinIds.join(","),
+  );
+  await page.screenshot({ path: `${outDir}/30-m5-coin-reward-1280.png` });
+  await assertBoundaryLayout("1280x720 코인 보상", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 코인 보상", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/31-m5-coin-reward-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.locator('[data-testid="coin-reward-mana"]').click();
+  const bagAfterAdd = await bag();
+  check(
+    "S12 마나 코인 영구 추가",
+    bagAfterAdd.length === bagBeforeReward.length + 1 &&
+      bagAfterAdd.includes("mana"),
+    bagAfterAdd.join(","),
+  );
+  check(
+    "S12 추가 후 제거 단계",
+    (await page.locator('[data-testid="reward-stage"]').innerText()).includes(
+      "코인 제거",
+    ),
+  );
+  await page.screenshot({ path: `${outDir}/32-m5-removal-1280.png` });
+  await assertBoundaryLayout("1280x720 코인 제거", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 코인 제거", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/37-m5-removal-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.locator('[data-testid="bag-remove-0"]').click();
+  check(
+    "S12 제거 선택 취소 가능",
+    (await page.locator('[data-testid="removal-cancel"]').isEnabled()) === true,
+  );
+  await page.locator('[data-testid="removal-cancel"]').click();
+  check(
+    "S12 취소 후 확인 비활성",
+    (await page.locator('[data-testid="removal-confirm"]').isDisabled()) ===
+      true,
+  );
+  await page.locator('[data-testid="bag-remove-0"]').click();
+  await page.locator('[data-testid="removal-confirm"]').click();
+  const bagAfterRemoval = await bag();
+  check(
+    "S12 제거가 영구 주머니를 변경",
+    bagAfterRemoval.length === bagBeforeReward.length &&
+      bagAfterRemoval.includes("mana") &&
+      bagAfterRemoval.join(",") !== bagBeforeReward.join(","),
+    bagAfterRemoval.join(","),
+  );
+  check(
+    "S12 첫 전투는 스킬 보상 없이 다음 전투 준비",
+    (await main().getAttribute("data-run-phase")) === "ready",
+  );
+  await page.screenshot({ path: `${outDir}/38-m5-ready-1280.png` });
+  await assertBoundaryLayout("1280x720 다음 전투 준비", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 다음 전투 준비", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/39-m5-ready-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.locator('[data-testid="next-combat"]').click();
+  await waitForCombatOrBoundary(page);
+  check("S12 다음 전투에 마나 코인 보존", (await bag()).includes("mana"));
+  const carriedHp = Number(
+    (await page.locator(".unit.player .hp-num").innerText()).split("/")[0],
+  );
+  check(
+    "S12 전투 간 HP 자동 회복 없음",
+    carriedHp === hpAfterFirst,
+    `${carriedHp} vs ${hpAfterFirst}`,
+  );
+  let manaVisible = (await page.locator(".hand-tray .coin.mana").count()) > 0;
+  if (!manaVisible) {
+    await page.locator(".pouch-circle").click();
+    manaVisible = (await page.locator(".pouch-pop .pop-coin.mana").count()) > 0;
+    await page.keyboard.press("Escape");
+  }
+  check("S12 추가한 마나 코인이 다음 전투 UI에 표시", manaVisible);
+
+  const attemptBeforeReload = Number(await main().getAttribute("data-attempt"));
+  await page.reload({ waitUntil: "networkidle" });
+  await waitForCombatOrBoundary(page);
+  const attemptAfterReload = Number(await main().getAttribute("data-attempt"));
+  check(
+    "S12 전투 중 reload가 시도 횟수 증가",
+    attemptAfterReload === attemptBeforeReload + 1,
+    `${attemptBeforeReload} → ${attemptAfterReload}`,
+  );
+  check(
+    "S12 resume 후에도 이월 HP 유지",
+    (await page.locator(".unit.player .hp-num").innerText()).startsWith(
+      `${hpAfterFirst}/`,
+    ),
+  );
+  await waitForOpaqueSkillCards();
+  await page.screenshot({ path: `${outDir}/35-m5-combat-stable-1280.png` });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await waitForOpaqueSkillCards();
+  check(
+    "S12 1920 안정 전투 카드 opacity 1",
+    await page
+      .locator(".skill-card")
+      .evaluateAll((cards) =>
+        cards.every(
+          (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
+        ),
+      ),
+  );
+  await page.screenshot({ path: `${outDir}/36-m5-combat-stable-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await winCurrentCombat(page);
+  await page.locator('[data-testid="coin-reward-skip"]').click();
+  check(
+    "S12 코인 보상 skip 동작",
+    (await page.locator('[data-testid="reward-stage"]').innerText()).includes(
+      "코인 제거",
+    ),
+  );
+  await page.locator('[data-testid="removal-skip"]').click();
+  check(
+    "S12 제거 skip 후 스킬 보상",
+    (await page.locator('[data-testid="reward-stage"]').innerText()).includes(
+      "스킬 선택",
+    ),
+  );
+  const skillChoices = page.locator(
+    '[data-testid^="skill-reward-"]:not([data-testid$="skip"])',
+  );
+  const skillChoiceIds = await skillChoices.evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("data-testid")),
+  );
+  check(
+    "S12 스킬 보상 2개·중복 없음",
+    skillChoiceIds.length === 2 && new Set(skillChoiceIds).size === 2,
+    skillChoiceIds.join(","),
+  );
+  await page.screenshot({ path: `${outDir}/33-m5-skill-reward-1280.png` });
+  await assertBoundaryLayout("1280x720 스킬 보상", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 스킬 보상", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/42-m5-skill-reward-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const beforeDecline = await equipped();
+  await skillChoices.first().click();
+  check(
+    "S12 스킬 선택 후 명시적 6슬롯 교체 화면",
+    (await page.locator('[data-testid^="replace-slot-"]').count()) === 6,
+  );
+  await assertBoundaryLayout("1280x720 스킬 교체", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 스킬 교체", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/43-m5-skill-replace-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.screenshot({ path: `${outDir}/34-m5-skill-replace-1280.png` });
+  await page.locator('[data-testid="replace-cancel"]').click();
+  check(
+    "S12 교체 취소가 스킬 선택으로 복귀",
+    (await skillChoices.count()) === 2,
+  );
+  await skillChoices.first().click();
+  await page.locator('[data-testid="replace-decline"]').click();
+  check(
+    "S12 교체 거절이 장착 스킬을 유지하고 다음 전투로 진행",
+    (await main().getAttribute("data-run-phase")) === "ready" &&
+      (await equipped()).join(",") === beforeDecline.join(","),
+  );
+
+  await page.locator('[data-testid="next-combat"]').click();
+  await waitForCombatOrBoundary(page);
+  await winCurrentCombat(page);
+  await page.locator('[data-testid="coin-reward-skip"]').click();
+  await page.locator('[data-testid="removal-skip"]').click();
+  const nextSkillChoices = page.locator(
+    '[data-testid^="skill-reward-"]:not([data-testid$="skip"])',
+  );
+  const chosenSkill = String(
+    await nextSkillChoices.first().getAttribute("data-testid"),
+  ).replace("skill-reward-", "");
+  await nextSkillChoices.first().click();
+  const beforeReplacement = await equipped();
+  await page.locator('[data-testid="replace-slot-5"]').click();
+  const afterReplacement = await equipped();
+  check(
+    "S12 선택 스킬이 지정 슬롯을 교체",
+    afterReplacement[5] === chosenSkill &&
+      afterReplacement[5] !== beforeReplacement[5],
+    `${beforeReplacement[5]} → ${afterReplacement[5]}`,
+  );
+
+  await page.locator('[data-testid="next-combat"]').click();
+  await waitForCombatOrBoundary(page);
+  await winCurrentCombat(page);
+  await page.locator('[data-testid="coin-reward-skip"]').click();
+  await page.locator('[data-testid="removal-skip"]').click();
+  await page.locator('[data-testid="skill-reward-skip"]').click();
+  check(
+    "S12 스킬 보상 skip 동작",
+    (await main().getAttribute("data-run-phase")) === "ready",
+  );
+  await page.locator('[data-testid="next-combat"]').click();
+  await waitForCombatOrBoundary(page);
+  check(
+    "S12 마지막 전투 진행 5/5",
+    (await page.locator('[data-testid="run-progress"] strong').innerText()) ===
+      "전투 5/5",
+  );
+  await winCurrentCombat(page);
+  check(
+    "S12 5연전 최종 승리 도달",
+    (await main().getAttribute("data-run-phase")) === "victory" &&
+      (await page.locator('[data-testid="run-result"]').count()) === 1,
+  );
+  await page.screenshot({ path: `${outDir}/29-m5-run-victory.png` });
+  await assertBoundaryLayout("1280x720 최종 승리 결과", {
+    width: 1280,
+    height: 720,
+  });
+  await assertBoundaryLayout("1920x1080 최종 승리 결과", {
+    width: 1920,
+    height: 1080,
+  });
+  await page.screenshot({ path: `${outDir}/40-m5-run-victory-1920.png` });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const completedSeed = new globalThis.URL(page.url()).searchParams.get("seed");
+  await page.locator('[data-testid="new-seed"]').click();
+  await waitForCombatOrBoundary(page);
+  const restartedSeed = new globalThis.URL(page.url()).searchParams.get("seed");
+  check(
+    "S12 새 시드 동작이 다른 새 런 시작",
+    restartedSeed !== null &&
+      restartedSeed !== completedSeed &&
+      (await main().getAttribute("data-combat-index")) === "0",
+  );
+  check(
+    "S12 새 시드 동작이 HP·attempt 초기화",
+    (await page.locator(".unit.player .hp-num").innerText()) === "70/70" &&
+      (await main().getAttribute("data-attempt")) === "0",
+  );
+  check(
+    "S12 전 구간 콘솔/페이지 에러 0",
+    errors.length === 0,
+    errors.join(" | "),
+  );
   await page.close();
 }
 
@@ -619,57 +1480,106 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
 
   // 약탈자 고정 패턴(11, 4×2, 11)으로 아무 행동 없이 6턴을 넘기면 HP 10이 남는다.
   for (let attack = 0; attack < 6; attack += 1) {
-    await page.locator('.end-turn').click();
-    await page.waitForFunction(() => document.querySelector('.end-turn:not(:disabled)') !== null, undefined, {
-      timeout: 30000
-    });
+    await page.locator(".end-turn").click();
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      {
+        timeout: 30000,
+      },
+    );
   }
-  check('S10 최종 공격 직전 HP 10', (await page.locator('.unit.player .hp-num').innerText()) === '10/70');
+  check(
+    "S10 최종 공격 직전 HP 10",
+    (await page.locator(".unit.player .hp-num").innerText()) === "10/70",
+  );
 
   // 재시작 시 전투 외 UI 상태도 초기화되는지 보기 위해 주머니를 열린 채로 패배한다.
-  await page.locator('.pouch-circle').click();
-  check('S10 패배 직전 주머니 팝오버 열림', (await page.locator('.pouch-pop').count()) === 1);
+  await page.locator(".pouch-circle").click();
+  check(
+    "S10 패배 직전 주머니 팝오버 열림",
+    (await page.locator(".pouch-pop").count()) === 1,
+  );
 
-  await page.locator('.end-turn').click();
+  await page.locator(".end-turn").click();
   await page.waitForTimeout(100);
   const terminalTransition = await page.evaluate(() => ({
-    overlay: document.querySelector('.result-overlay') !== null,
-    locked: document.querySelector('.end-turn:disabled') !== null,
-    feedback: document.querySelector('.float-text') !== null
+    overlay: document.querySelector(".result-overlay") !== null,
+    locked: document.querySelector(".end-turn:disabled") !== null,
+    feedback: document.querySelector(".float-text") !== null,
   }));
   check(
-    'S10 최종 피해 연출 중 결과 화면 지연',
-    !terminalTransition.overlay && (terminalTransition.locked || terminalTransition.feedback),
-    JSON.stringify(terminalTransition)
+    "S10 최종 피해 연출 중 결과 화면 지연",
+    !terminalTransition.overlay &&
+      (terminalTransition.locked || terminalTransition.feedback),
+    JSON.stringify(terminalTransition),
   );
 
-  await page.waitForFunction(() => document.querySelector('.result-overlay') !== null, undefined, { timeout: 30000 });
+  await page.waitForFunction(
+    () => document.querySelector(".result-overlay") !== null,
+    undefined,
+    { timeout: 30000 },
+  );
   await page.screenshot({ path: `${outDir}/25-defeat-result.png` });
-  check('S10 결과 대화상자 aria-modal', (await page.locator('.result-overlay').getAttribute('aria-modal')) === 'true');
-  check('S10 결과 표시 시 잔여 피해 텍스트 0', (await page.locator('.float-text').count()) === 0);
-  check('S10 결과 표시 시 플립 중 코인 0', (await page.locator('.flipping').count()) === 0);
+  check(
+    "S10 결과 대화상자 aria-modal",
+    (await page.locator(".result-overlay").getAttribute("aria-modal")) ===
+      "true",
+  );
+  check(
+    "S10 결과 표시 시 잔여 피해 텍스트 0",
+    (await page.locator(".float-text").count()) === 0,
+  );
+  check(
+    "S10 결과 표시 시 플립 중 코인 0",
+    (await page.locator(".flipping").count()) === 0,
+  );
   const primaryFocused = await page
-    .waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '같은 시드로 재시작', undefined, {
-      timeout: 2000
-    })
+    .waitForFunction(
+      () =>
+        document.activeElement?.getAttribute("aria-label") ===
+        "같은 시드로 재시작",
+      undefined,
+      {
+        timeout: 2000,
+      },
+    )
     .then(() => true)
     .catch(() => false);
-  check('S10 결과 기본 동작에 키보드 포커스', primaryFocused);
+  check("S10 결과 기본 동작에 키보드 포커스", primaryFocused);
 
-  const seedBefore = new globalThis.URL(page.url()).searchParams.get('seed');
-  await page.getByRole('button', { name: '같은 시드로 재시작' }).click();
+  const seedBefore = new globalThis.URL(page.url()).searchParams.get("seed");
+  await page.getByRole("button", { name: "같은 시드로 재시작" }).click();
   await page.waitForFunction(
-    () => document.querySelector('.end-turn:not(:disabled)') !== null && document.querySelector('.float-text') === null,
+    () =>
+      document.querySelector(".end-turn:not(:disabled)") !== null &&
+      document.querySelector(".float-text") === null,
     undefined,
-    { timeout: 15000 }
+    { timeout: 15000 },
   );
-  check('S10 재시작 후 결과 화면 닫힘', (await page.locator('.result-overlay').count()) === 0);
-  check('S10 같은 시드 유지', new globalThis.URL(page.url()).searchParams.get('seed') === seedBefore, String(seedBefore));
-  check('S10 재시작 후 HP 초기화', (await page.locator('.unit.player .hp-num').innerText()) === '70/70');
-  check('S10 재시작 후 손패 5개', (await handCount(page)) === 5);
-  check('S10 재시작 후 주머니 팝오버 닫힘', (await page.locator('.pouch-pop').count()) === 0);
-  check('S10 재시작 후 낡은 얼굴 0', (await page.locator('.coin-face-mark').count()) === 0);
-  check('S10 전 구간 에러 0', errors.length === 0, errors.join(' | '));
+  check(
+    "S10 재시작 후 결과 화면 닫힘",
+    (await page.locator(".result-overlay").count()) === 0,
+  );
+  check(
+    "S10 같은 시드 유지",
+    new globalThis.URL(page.url()).searchParams.get("seed") === seedBefore,
+    String(seedBefore),
+  );
+  check(
+    "S10 재시작 후 HP 초기화",
+    (await page.locator(".unit.player .hp-num").innerText()) === "70/70",
+  );
+  check("S10 재시작 후 손패 5개", (await handCount(page)) === 5);
+  check(
+    "S10 재시작 후 주머니 팝오버 닫힘",
+    (await page.locator(".pouch-pop").count()) === 0,
+  );
+  check(
+    "S10 재시작 후 낡은 얼굴 0",
+    (await page.locator(".coin-face-mark").count()) === 0,
+  );
+  check("S10 전 구간 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 
@@ -680,16 +1590,23 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
     { width: 1600, height: 900 },
     { width: 1440, height: 900 },
     { width: 1280, height: 720 },
-    { width: 1024, height: 720 }
+    { width: 1024, height: 720 },
   ];
   for (const viewport of viewports) {
     const { page, errors } = await boot(viewport);
     const metrics = await page.evaluate(() => {
-      const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect() ?? null;
-      const shell = rect('main.combat-shell');
-      const backdrop = rect('.backdrop-img');
-      const hud = rect('.bottom-hud');
-      const sprites = [...document.querySelectorAll('.sprite-frame')].map((el) => Math.round(el.getBoundingClientRect().bottom));
+      const rect = (selector) =>
+        document.querySelector(selector)?.getBoundingClientRect() ?? null;
+      const shell = rect("main.combat-shell");
+      const backdrop = rect(".backdrop-img");
+      const hud = rect(".bottom-hud");
+      const runMeta = rect(".run-meta");
+      const unitPlates = [...document.querySelectorAll(".unit-plate")].map(
+        (element) => element.getBoundingClientRect(),
+      );
+      const sprites = [...document.querySelectorAll(".sprite-frame")].map(
+        (el) => Math.round(el.getBoundingClientRect().bottom),
+      );
       return {
         vw: window.innerWidth,
         vh: window.innerHeight,
@@ -697,45 +1614,74 @@ const handCount = (page) => page.locator('.hand-tray .coin').count();
         backdropW: backdrop === null ? 0 : Math.round(backdrop.width),
         backdropH: backdrop === null ? 0 : Math.round(backdrop.height),
         hudH: hud === null ? 0 : Math.round(hud.height),
+        topHudClear:
+          runMeta !== null &&
+          unitPlates.length === 2 &&
+          unitPlates.every(
+            (plate) =>
+              plate.right <= runMeta.left ||
+              plate.left >= runMeta.right ||
+              plate.bottom <= runMeta.top ||
+              plate.top >= runMeta.bottom,
+          ),
         spriteBottoms: sprites,
-        hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth
+        hScroll:
+          document.documentElement.scrollWidth >
+          document.documentElement.clientWidth,
+        vScroll:
+          document.documentElement.scrollHeight >
+          document.documentElement.clientHeight,
       };
     });
     const tag = `${viewport.width}x${viewport.height}`;
     check(`S6 ${tag} 가로 스크롤 없음`, !metrics.hScroll);
-    check(`S6 ${tag} 무대 풀블리드 (셸=뷰포트)`, metrics.shellW >= metrics.vw, `shell=${metrics.shellW} vw=${metrics.vw}`);
+    check(`S6 ${tag} 세로 스크롤 없음`, !metrics.vScroll);
+    check(
+      `S6 ${tag} 무대 풀블리드 (셸=뷰포트)`,
+      metrics.shellW >= metrics.vw,
+      `shell=${metrics.shellW} vw=${metrics.vw}`,
+    );
     check(
       `S6 ${tag} 배경 풀블리드`,
       metrics.backdropW >= metrics.vw && metrics.backdropH >= metrics.vh,
-      `bg=${metrics.backdropW}x${metrics.backdropH}`
+      `bg=${metrics.backdropW}x${metrics.backdropH}`,
     );
-    if (viewport.width === 1280) check(`S6 ${tag} HUD ≤78px`, metrics.hudH <= 78, `hud=${metrics.hudH}`);
+    if (viewport.width === 1280)
+      check(`S6 ${tag} HUD ≤78px`, metrics.hudH <= 78, `hud=${metrics.hudH}`);
+    check(`S6 ${tag} 상단 HUD 겹침 없음`, metrics.topHudClear);
     check(
       `S6 ${tag} 지면선 정합 (양 유닛 발 y 동일)`,
-      metrics.spriteBottoms.length === 2 && Math.abs(metrics.spriteBottoms[0] - metrics.spriteBottoms[1]) <= 2,
-      metrics.spriteBottoms.join(',')
+      metrics.spriteBottoms.length === 2 &&
+        Math.abs(metrics.spriteBottoms[0] - metrics.spriteBottoms[1]) <= 2,
+      metrics.spriteBottoms.join(","),
     );
-    check(`S6 ${tag} 에러 0`, errors.length === 0, errors.join(' | '));
+    check(`S6 ${tag} 에러 0`, errors.length === 0, errors.join(" | "));
     await page.screenshot({ path: `${outDir}/vp-${tag}.png` });
     if (viewport.width === 1920 || viewport.width === 1024) {
-      await page.locator('.pouch-circle').click();
-      check(`S6 ${tag} 팝오버 열림`, (await page.locator('.pouch-pop').count()) === 1);
+      await page.locator(".pouch-circle").click();
+      check(
+        `S6 ${tag} 팝오버 열림`,
+        (await page.locator(".pouch-pop").count()) === 1,
+      );
       await page.waitForFunction(() => {
-        const pop = document.querySelector('.pouch-pop');
-        return pop !== null && getComputedStyle(pop).opacity === '1';
+        const pop = document.querySelector(".pouch-pop");
+        return pop !== null && getComputedStyle(pop).opacity === "1";
       });
       await page.screenshot({ path: `${outDir}/vp-${tag}-pouch.png` });
-      await page.keyboard.press('Escape');
+      await page.keyboard.press("Escape");
     }
     await page.close();
   }
 }
 
 await browser.close();
-await new Promise((resolveClose) => server.httpServer.close(resolveClose));
+if (server !== null)
+  await new Promise((resolveClose) => server.httpServer.close(resolveClose));
 
 if (failures.length > 0) {
-  console.error(`\n${failures.length}건 실패:\n${failures.map((line) => ` - ${line}`).join('\n')}`);
+  console.error(
+    `\n${failures.length}건 실패:\n${failures.map((line) => ` - ${line}`).join("\n")}`,
+  );
   process.exit(1);
 }
-console.log('\n플레이테스트 전 항목 통과');
+console.log("\n플레이테스트 전 항목 통과");

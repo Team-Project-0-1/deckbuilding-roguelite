@@ -1,0 +1,281 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "run_dir": "D:\\Documents\\GitHub\\deckbuilding-roguelite\\apps\\ui\\src\\assets\\generated\\sprites\\shaman",
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "cyan",
+    "hex": "#00FFFF",
+    "rgb": [
+      0,
+      255,
+      255
+    ],
+    "selection": "auto",
+    "score": 246.93,
+    "min_subject_distance": 237.55,
+    "background": {
+      "mode": "flat",
+      "hex": "#F803EC",
+      "rgb": [
+        248,
+        3,
+        236
+      ],
+      "opaque_border_fraction": 1.0,
+      "border_coverage": 1.0,
+      "enclosed_background_pixels": 493,
+      "enclosed_material_pixels": 6,
+      "subject_pixels": 7700
+    },
+    "candidates": [
+      {
+        "name": "magenta",
+        "hex": "#FF00FF",
+        "score": 232.86,
+        "min_subject_distance": 222.57,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "green",
+        "hex": "#00FF00",
+        "score": 190.73,
+        "min_subject_distance": 186.39,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "cyan",
+        "hex": "#00FFFF",
+        "score": 246.93,
+        "min_subject_distance": 237.55,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "blue",
+        "hex": "#004DFF",
+        "score": 222.07,
+        "min_subject_distance": 212.77,
+        "clears_erase_radius": true
+      }
+    ],
+    "selection_reason": "highest 1st-percentile subject distance among the 4 candidate(s) clearing the 96 erase radius"
+  },
+  "rows": [
+    {
+      "state": "idle",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/idle/frame-0.png",
+        "frames/idle/frame-1.png",
+        "frames/idle/frame-2.png",
+        "frames/idle/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 11444,
+          "bbox": [
+            40,
+            24,
+            166,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 11284,
+          "bbox": [
+            40,
+            26,
+            166,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 11480,
+          "bbox": [
+            40,
+            24,
+            164,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 11492,
+          "bbox": [
+            40,
+            24,
+            166,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/idle/frame-0.plain.png",
+        "frames/idle/frame-1.plain.png",
+        "frames/idle/frame-2.plain.png",
+        "frames/idle/frame-3.plain.png"
+      ]
+    },
+    {
+      "state": "attack",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/attack/frame-0.png",
+        "frames/attack/frame-1.png",
+        "frames/attack/frame-2.png",
+        "frames/attack/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 11584,
+          "bbox": [
+            58,
+            24,
+            180,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 12688,
+          "bbox": [
+            0,
+            76,
+            206,
+            232
+          ],
+          "edge_pixels": 8,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 11368,
+          "bbox": [
+            20,
+            72,
+            190,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 10672,
+          "bbox": [
+            60,
+            32,
+            172,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/attack/frame-0.plain.png",
+        "frames/attack/frame-1.plain.png",
+        "frames/attack/frame-2.plain.png",
+        "frames/attack/frame-3.plain.png"
+      ]
+    },
+    {
+      "state": "hurt",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/hurt/frame-0.png",
+        "frames/hurt/frame-1.png",
+        "frames/hurt/frame-2.png",
+        "frames/hurt/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 11764,
+          "bbox": [
+            46,
+            24,
+            170,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 11048,
+          "bbox": [
+            44,
+            34,
+            184,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 11164,
+          "bbox": [
+            46,
+            38,
+            186,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 10976,
+          "bbox": [
+            46,
+            30,
+            170,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/hurt/frame-0.plain.png",
+        "frames/hurt/frame-1.plain.png",
+        "frames/hurt/frame-2.plain.png",
+        "frames/hurt/frame-3.plain.png"
+      ]
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "pixel-perfect: pitch=1,1,1 scale=2x logical<=128x104 palette=48"
+  ]
+}

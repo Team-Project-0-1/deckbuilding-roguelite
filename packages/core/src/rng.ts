@@ -110,6 +110,9 @@ export const rngFrom = (snap: RngSnapshot): Rng => {
 /**
  * Derive independent deterministic streams in layers:
  * runSeed -> combat(index, attempt) -> flip/shuffle/ai.
+ * Existing one-index calls retain their original serialized seed input.
  */
-export const derive = (parent: RngSnapshot, label: string, index = 0): RngSnapshot =>
-  seedFromString(`${parent.s.map((x) => x >>> 0).join(':')}|${label}|${index}`);
+export const derive = (parent: RngSnapshot, label: string, index = 0, ...salts: number[]): RngSnapshot =>
+  seedFromString(
+    `${parent.s.map((x) => x >>> 0).join(':')}|${label}|${[index, ...salts].join('|')}`
+  );

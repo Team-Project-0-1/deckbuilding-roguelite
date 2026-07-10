@@ -1,5 +1,5 @@
 import type { ContentDb } from '../content-types';
-import type { CharacterId, CoinUid, EnemyDefId, SlotId } from '../ids';
+import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, SkillId, SlotId } from '../ids';
 import { derive, rngFrom, seedFromString } from '../rng';
 import type { Command } from './commands';
 import { initialIntent, runEnemyPhase } from './enemy';
@@ -14,6 +14,12 @@ export type StepResult = { ok: true; state: CombatState; events: CombatEvent[] }
 export interface CreateCombatConfig {
   character: CharacterId;
   enemies: EnemyDefId[];
+  bag?: readonly CoinDefId[];
+  equippedSkills?: readonly SkillId[];
+  currentHp?: number;
+  maxHp?: number;
+  combatIndex?: number;
+  attempt?: number;
 }
 
 const slot = (value: number): SlotId => value as SlotId;
@@ -90,14 +96,40 @@ const startPlayerTurn = (input: CombatState): { state: CombatState; events: Comb
 export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: string): CombatState => {
   const character = db.characters[String(cfg.character)];
   if (character === undefined) throw new Error('unknown character');
+  if (cfg.combatIndex !== undefined && (!Number.isInteger(cfg.combatIndex) || cfg.combatIndex < 0)) {
+    throw new Error('combatIndex must be a non-negative integer');
+  }
+  if (cfg.attempt !== undefined && (!Number.isInteger(cfg.attempt) || cfg.attempt < 0)) {
+    throw new Error('attempt must be a non-negative integer');
+  }
+  const bag = cfg.bag === undefined ? character.startingBag : [...cfg.bag];
+  for (const coin of bag) {
+    if (db.coins[String(coin)] === undefined) throw new Error(`unknown coin: ${String(coin)}`);
+  }
+  if (cfg.equippedSkills !== undefined && cfg.equippedSkills.length !== 6) {
+    throw new Error('equippedSkills must contain exactly six skills');
+  }
+  const skills = cfg.equippedSkills === undefined ? character.startingSkills : [...cfg.equippedSkills];
+  for (const skill of skills) {
+    if (db.skills[String(skill)] === undefined) throw new Error(`unknown skill: ${String(skill)}`);
+  }
+  const maxHp = cfg.maxHp ?? character.maxHp;
+  const currentHp = cfg.currentHp ?? maxHp;
+  if (!Number.isInteger(maxHp) || maxHp <= 0) throw new Error('maxHp must be a positive integer');
+  if (!Number.isInteger(currentHp) || currentHp <= 0 || currentHp > maxHp) {
+    throw new Error('currentHp must be an integer in [1, maxHp]');
+  }
   const run = seedFromString(seed);
-  const combat = derive(run, 'combat', 0);
+  const hasRunContext = cfg.combatIndex !== undefined || cfg.attempt !== undefined;
+  const combat = hasRunContext
+    ? derive(run, 'combat', cfg.combatIndex ?? 0, cfg.attempt ?? 0)
+    : derive(run, 'combat', 0);
   const shuffle = derive(combat, 'shuffle');
   const shuffleRng = rngFrom(shuffle);
-  const shuffledBag = shuffleRng.shuffle(character.startingBag.map((coinDefId, index) => uid(index + 1)));
+  const shuffledBag = shuffleRng.shuffle(bag.map((_coinDefId, index) => uid(index + 1)));
 
   const coins = Object.fromEntries(
-    character.startingBag.map((defId, index) => [
+    bag.map((defId, index) => [
       index + 1,
       { uid: uid(index + 1), defId, permanent: true, grants: [] }
     ])
@@ -121,18 +153,18 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   const base: CombatState = {
     turn: 1,
     phase: 'player',
-    player: { hp: character.maxHp, maxHp: character.maxHp, block: 0, statuses: {}, nextDrawPenalty: 0 },
+    player: { hp: currentHp, maxHp, block: 0, statuses: {}, nextDrawPenalty: 0 },
     enemies,
     coins,
     zones: { draw: shuffledBag, hand: [], placed: emptyPlaced(), discard: [], exhausted: [] },
     slots: Array.from({ length: 6 }, (_, index) => ({
-      skillId: character.startingSkills[index] ?? ('' as never),
+      skillId: skills[index] ?? ('' as never),
       usedThisTurn: false,
       usedThisCombat: false
     })),
     skillUsesThisTurn: 0,
     rng: { flip: derive(combat, 'flip'), shuffle: shuffleRng.snapshot(), ai: derive(combat, 'ai') },
-    nextUid: character.startingBag.length + 1,
+    nextUid: bag.length + 1,
     events: []
   };
 

@@ -12,11 +12,12 @@
 | [03_PHASES.md](./03_PHASES.md) | 3-Phase 계획 + 게이트 + 시작 프롬프트 | 개발 순서 정할 때 |
 | [04_PROJECT_SPEC.md](./04_PROJECT_SPEC.md) | AI 행동 규칙 (절대 하지 마 / 항상 해) | AI에게 코드 시킬 때마다 |
 | [PHASE1_HOLDS.md](./PHASE1_HOLDS.md) | Phase 1 사람 게이트·폴리시·증거 보류 원장 | Phase 2 진행 중 미완 항목 추적 |
+| [M5_PLAYTEST_NOTES.md](./M5_PLAYTEST_NOTES.md) | 수문장·화상 빌드의 Fable 보조 리뷰와 사람 질문 | M6 지표·사람 테스트 설계 |
 | [references/](./references/) | 픽셀 아트 무드보드 4장 + sources.json | 아트 방향 잡을 때 |
 
 ## 다음 단계
 
-Phase 1 자동 구현·검증·배포는 완료됐다. 사람 검증과 후속 폴리시는 [PHASE1_HOLDS.md](./PHASE1_HOLDS.md)에 보류 상태로 유지하고, Phase 2(M5~M6)는 Pumasi 작업으로 단계별 진행한다.
+Phase 1 자동 구현·검증·배포와 Phase 2의 M5 런·보상 구현은 완료됐다. Phase 1 사람 검증은 [PHASE1_HOLDS.md](./PHASE1_HOLDS.md)에, M5 체감 질문은 [M5_PLAYTEST_NOTES.md](./M5_PLAYTEST_NOTES.md)에 보류 상태로 유지한다. 다음은 Pumasi로 M6 봇 정책·지표·튜닝을 진행하며, 사람 N≥5 게이트 전에는 Phase 3로 넘어가지 않는다.
 
 ## 미결 사항 (가정 원장 요약 — 상세는 01_PRD.md)
 

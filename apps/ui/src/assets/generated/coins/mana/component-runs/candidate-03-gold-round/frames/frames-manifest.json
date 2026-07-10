@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "run_dir": "D:\\Documents\\GitHub\\deckbuilding-roguelite\\apps\\ui\\src\\assets\\generated\\coins\\mana\\component-runs\\candidate-03-gold-round",
+  "cell": {
+    "shape": "rect",
+    "width": 122,
+    "height": 128,
+    "safe_margin_x": 2,
+    "safe_margin_y": 2
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "manual"
+  },
+  "rows": [
+    {
+      "state": "candidate",
+      "frames": 1,
+      "method": "components",
+      "files": [
+        "frames/candidate/frame-0.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 11264,
+          "bbox": [
+            4,
+            2,
+            118,
+            126
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/candidate/frame-0.plain.png"
+      ]
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "pixel-perfect: pitch=12 scale=2x logical<=61x62 palette=24"
+  ]
+}

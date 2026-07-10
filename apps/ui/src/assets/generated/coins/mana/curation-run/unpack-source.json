@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-unpack-source",
+  "layout_source": "imported-pngs",
+  "cell": {
+    "width": 122,
+    "height": 128
+  },
+  "source_dir": "D:\\Documents\\GitHub\\deckbuilding-roguelite\\apps\\ui\\src\\assets\\generated\\coins\\mana\\curation-input",
+  "files": [
+    "candidate-01-dark-tabs.png",
+    "candidate-02-dark-round.png",
+    "coin-mana.png"
+  ],
+  "labels": [
+    "candidate-01-dark-tabs",
+    "candidate-02-dark-round",
+    "coin-mana"
+  ],
+  "groups": [
+    "candidates"
+  ]
+}

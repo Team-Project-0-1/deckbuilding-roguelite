@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "asset": "apps/ui/src/assets/coin-mana.png",
+  "references": [
+    {
+      "path": "apps/ui/src/assets/coin-basic.png",
+      "sha256": "cb38db1422c4be18d97b14d9ad7c4a313bad91b146cb2f72c3388ab4e9f95788"
+    },
+    {
+      "path": "apps/ui/src/assets/coin-fire.png",
+      "sha256": "16cbfa94ebaeffc64304574b1205f93bdcb15d2bc897c8939d473ea19b828db0"
+    }
+  ],
+  "prompt": {
+    "plugin": "gongnyang-prompt-kit/image-prompt",
+    "plugin_dir": "/home/khh5660/.claude/skill-repos/gongnyang-prompt-kit/skills/image-prompt",
+    "raw": "prompts/plugin-raw.txt",
+    "validated": "prompts/validated-format-a.txt",
+    "validation": "prompts/validation.json",
+    "validator": "skills/image-prompt/scripts/check_prompt.mjs",
+    "plugin_defect": "The installed SKILL.md contains TODO placeholder text, so the plugin output was normalized to Format A and verified on the kit's validator surface."
+  },
+  "generation": {
+    "tool": "OpenAI image_gen",
+    "candidates": [
+      {
+        "id": "candidate-01-dark-tabs",
+        "raw": "raw-candidates/candidate-01-dark-tabs.png",
+        "source_id": "exec-39dde6a8-6ee7-4408-88d1-6bb79765c7f9.png"
+      },
+      {
+        "id": "candidate-02-dark-round",
+        "raw": "raw-candidates/candidate-02-dark-round.png",
+        "source_id": "exec-56d20b37-1be3-44a7-a219-3afb1ad36313.png"
+      },
+      {
+        "id": "candidate-03-gold-round",
+        "raw": "raw-candidates/candidate-03-gold-round.png",
+        "source_id": "exec-db641891-b51b-481e-816a-c6a75e59bf94.png",
+        "selected": true
+      }
+    ]
+  },
+  "deterministic_pipeline": {
+    "skill": "sprite-gen 1.56.1",
+    "engine": "component-row plus imported-PNG static curation",
+    "component_request": "component-request-template.json",
+    "selected_component_run": "component-runs/candidate-03-gold-round",
+    "curation_run": "curation-run",
+    "selection": {
+      "state": "candidates",
+      "index": 2,
+      "label": "coin-mana",
+      "transform": "identity",
+      "pixel_perfect": true
+    },
+    "export": "export_curated_pngs.py --selected-only"
+  },
+  "final": {
+    "sha256": "a4b3f60bad6dad7246ca18f64c25403c2761f1edf4e32d5edf85cb04ee096497",
+    "width": 122,
+    "height": 128,
+    "mode": "RGBA"
+  }
+}

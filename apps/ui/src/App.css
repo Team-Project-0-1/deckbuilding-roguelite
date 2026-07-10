@@ -7,8 +7,8 @@
 
 /* 확정 픽셀 폰트 (PRD 가정 원장 #1): Neo둥근모 — 셀프호스팅, OFL 라이선스 */
 @font-face {
-  font-family: 'NeoDunggeunmo';
-  src: url('./fonts/neodgm.ttf') format('truetype');
+  font-family: "NeoDunggeunmo";
+  src: url("./fonts/neodgm.ttf") format("truetype");
   font-display: swap;
 }
 
@@ -23,7 +23,10 @@
   --hp: #d43c50;
   --guard: #4f7fd4;
   --ink: #2a2436;
-  font-family: 'NeoDunggeunmo', ui-monospace, Menlo, Consolas, monospace;
+  --frame-edge: #6e552d;
+  --frame-light: #d7ad55;
+  --panel-deep: #171a23;
+  font-family: "NeoDunggeunmo", ui-monospace, Menlo, Consolas, monospace;
   color: var(--paper);
   font-synthesis: none;
 }
@@ -82,9 +85,53 @@ button:focus-visible {
 .battlefield,
 .skill-row,
 .bottom-hud,
-.seed-strip {
+.seed-strip,
+.run-meta {
   position: relative;
   z-index: 1;
+}
+
+.run-meta {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 11;
+  transform: translateX(-50%);
+  width: clamp(520px, 42vw, 760px);
+  min-height: clamp(34px, 2.4vw, 42px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 0.8vw, 14px);
+  padding: 5px 12px;
+  font-size: clamp(11px, 0.72vw, 14px);
+  letter-spacing: 0.3px;
+  color: #d9e7ff;
+  background: linear-gradient(#303545, #1b1e29 58%, #12151d);
+  border: 3px solid var(--out);
+  box-shadow:
+    inset 0 2px 0 var(--frame-edge),
+    inset 0 -2px 0 #0d0f15,
+    0 4px 0 rgba(28, 23, 36, 0.5);
+  white-space: nowrap;
+}
+
+.run-meta strong {
+  color: var(--gold-2);
+  font-size: clamp(13px, 0.9vw, 17px);
+  text-shadow: 2px 2px 0 #11131a;
+}
+
+.run-context {
+  color: #fff1bf;
+}
+
+.run-meta small {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: #aeb7cf;
+  text-overflow: ellipsis;
 }
 
 /* ---- 상단: 유닛 ---- */
@@ -95,7 +142,8 @@ button:focus-visible {
   align-items: stretch; /* 유닛 컬럼을 늘려 스프라이트를 공유 지면선(하단)에 고정 */
   flex: 1; /* HUD·카드에서 회수한 세로 공간을 전장이 흡수 */
   min-height: 306px;
-  padding: 4px 40px 0;
+  /* 중앙 진행 메타는 첫 행, 양쪽 유닛 패널은 둘째 행에 둬 폭과 무관하게 충돌하지 않는다. */
+  padding: 50px clamp(40px, 6vw, 116px) 0;
 }
 
 .unit {
@@ -104,18 +152,23 @@ button:focus-visible {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  min-width: 240px;
+  min-width: clamp(240px, 22vw, 340px);
 }
 
 .unit-plate {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 230px;
-  padding: 8px 12px;
-  background: var(--slate);
-  border: 3px solid var(--out);
-  box-shadow: 0 4px 0 rgba(28, 23, 36, 0.45);
+  width: clamp(240px, 20vw, 330px);
+  min-width: 0;
+  padding: 9px 13px;
+  background: linear-gradient(#383e50, #252a38 52%, #181c26);
+  border: 4px solid var(--out);
+  box-shadow:
+    inset 0 0 0 2px #735b34,
+    inset 0 3px 0 #b08a48,
+    inset 0 -2px 0 #0b0d12,
+    0 5px 0 rgba(28, 23, 36, 0.5);
 }
 
 .plate-row {
@@ -125,7 +178,7 @@ button:focus-visible {
 }
 
 .unit-name {
-  font-size: 18px;
+  font-size: clamp(19px, 1.25vw, 24px);
   letter-spacing: 1px;
   margin-right: auto;
 }
@@ -159,7 +212,7 @@ button:focus-visible {
 
 .hp-track {
   flex: 1;
-  height: 14px;
+  height: clamp(16px, 1.1vw, 20px);
   background: #171320;
   border: 2px solid var(--out);
   overflow: hidden;
@@ -167,12 +220,17 @@ button:focus-visible {
 
 .hp-fill {
   height: 100%;
-  background: linear-gradient(var(--hp) 0 55%, #a32438 55% 100%);
+  background: linear-gradient(
+    #f06476 0 28%,
+    var(--hp) 28% 62%,
+    #8f1e31 62% 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(255, 220, 224, 0.25);
   transition: width 0.35s steps(6);
 }
 
 .hp-num {
-  font-size: 15px;
+  font-size: clamp(15px, 1vw, 19px);
   font-variant-numeric: tabular-nums;
   color: #ffe9a8;
 }
@@ -182,12 +240,14 @@ button:focus-visible {
   gap: 8px;
   align-self: flex-start;
   margin-left: 8px;
-  padding: 4px 9px;
-  font-size: 17px;
-  background: var(--gold-2);
+  padding: 5px 10px;
+  font-size: clamp(17px, 1.1vw, 21px);
+  background: linear-gradient(#ffe887, var(--gold-2) 52%, #b98226);
   color: var(--ink);
   border: 3px solid var(--out);
-  box-shadow: 0 3px 0 rgba(28, 23, 36, 0.45);
+  box-shadow:
+    inset 0 -3px 0 #9b6b20,
+    0 4px 0 rgba(28, 23, 36, 0.45);
 }
 
 .unit.enemy .intent {
@@ -209,17 +269,17 @@ button:focus-visible {
 }
 
 .unit.player .sprite {
-  width: 250px;
-  height: 197px;
+  width: clamp(250px, 23vw, 360px);
+  height: clamp(197px, 17vw, 250px);
 }
 
 .unit.enemy .sprite {
-  width: 250px;
-  height: 158px;
+  width: clamp(250px, 23vw, 360px);
+  height: clamp(165px, 15vw, 220px);
 }
 
 .sprite::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 50%;
   bottom: -9px;
@@ -241,8 +301,8 @@ button:focus-visible {
   position: absolute;
   left: 50%;
   bottom: -23px;
-  width: 250px;
-  height: 250px;
+  width: clamp(250px, 23vw, 360px);
+  height: clamp(250px, 23vw, 360px);
   transform: translateX(-50%);
 }
 
@@ -292,13 +352,17 @@ button:focus-visible {
    상승은 transform 전용 — 레이아웃 시프트 0, 이웃 카드 가림 최소. */
 
 .skill-row {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  gap: 0;
-  padding: 22px 0 6px;
+  gap: 8px;
+  /* 기존 190px 레일 높이 안에서 하단 26px를 안내 전용 행으로 예약한다. */
+  padding: 2px 0 26px;
   isolation: isolate;
-  transition: opacity 0.25s, filter 0.25s;
+  transition:
+    opacity 0.25s,
+    filter 0.25s;
 }
 
 /* 해결 연출 중에는 카드 단위로 디밍 — 플립 중인 카드(.resolving)는 밝게 남아 무대가 된다 */
@@ -314,28 +378,35 @@ button:focus-visible {
 .skill-card {
   position: relative;
   width: 120px;
-  min-height: 162px;
+  flex: 0 0 120px;
+  height: 190px;
+  min-height: 190px;
   padding: 16px 8px 8px;
-  margin-left: -14px; /* 겹침 완화 — 제목·소켓 가독 보존 */
-  background: var(--slate);
-  border: 3px solid var(--out);
-  box-shadow: 0 5px 0 rgba(28, 23, 36, 0.5);
+  margin-left: 0;
+  background: linear-gradient(#353b4c, #242936 56%, #171a23);
+  border: 3px solid #17141e;
+  box-shadow:
+    inset 0 0 0 2px #685536,
+    inset 0 3px 0 #8e7040,
+    0 5px 0 rgba(28, 23, 36, 0.55);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  transition: transform 0.14s steps(3), opacity 0.25s, filter 0.25s;
+  transition:
+    transform 0.14s steps(3),
+    opacity 0.25s,
+    filter 0.25s;
 }
 
 .skill-card:first-child {
   margin-left: 0;
 }
 
-/* 장전(.lifted)은 절제된 리프트+금테 상시 표식 — 확대 없음. 여러 장이 동시에 장전돼도
-   서로의 제목·소켓을 가리지 않는다 (겹침은 휴식 레일의 -14px 그대로) */
+/* 장전(.lifted)은 절제된 리프트+금테 상시 표식 — 확대·가로 겹침 없음. */
 .skill-card.lifted {
-  transform: translateY(-12px);
+  transform: translateY(-10px);
   z-index: 5;
   border-color: var(--gold);
 }
@@ -348,10 +419,21 @@ button:focus-visible {
 .skill-card:focus-visible,
 .skill-card:has(:focus-visible),
 .skill-card.resolving {
-  transform: translateY(-34px);
+  transform: translateY(-28px);
   z-index: 7;
   border-color: var(--gold-2);
-  box-shadow: 0 0 0 2px var(--gold-2), 0 8px 0 rgba(28, 23, 36, 0.55);
+  box-shadow:
+    0 0 0 2px var(--gold-2),
+    0 8px 0 rgba(28, 23, 36, 0.55);
+}
+
+/* 키보드 포커스는 장전(-10px)→검사(-28px) 중간 step을 노출하지 않는다.
+   느린 호스트에서도 Tab 직후 hover와 동일한 최종 위치를 보장한다. */
+.skill-card:focus-visible,
+.skill-card:has(:focus-visible) {
+  transition:
+    opacity 0.25s,
+    filter 0.25s;
 }
 
 .skill-card:hover p,
@@ -363,20 +445,25 @@ button:focus-visible {
 
 .skill-card.ready {
   border-color: var(--gold-2);
-  box-shadow: 0 0 0 2px var(--gold), 0 5px 0 rgba(28, 23, 36, 0.5);
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 5px 0 rgba(28, 23, 36, 0.5);
 }
 
 .skill-card.spent,
 .skill-card.combat-locked {
   filter: saturate(0.35) brightness(0.72);
+  border-color: #765248;
 }
 
 /* 드래그 중 합법 목적지 위에 있을 때 — 포인터 캡처로 :hover가 안 붙으므로 클래스로 상승 */
 .skill-card.drop-target {
-  transform: translateY(-34px);
+  transform: translateY(-28px);
   z-index: 7;
   border-color: var(--gold-2);
-  box-shadow: 0 0 0 3px var(--gold-2), 0 5px 0 rgba(28, 23, 36, 0.5);
+  box-shadow:
+    0 0 0 3px var(--gold-2),
+    0 5px 0 rgba(28, 23, 36, 0.5);
 }
 
 .skill-card.drop-target p {
@@ -390,10 +477,11 @@ button:focus-visible {
   text-align: center;
   font-size: 13px;
   letter-spacing: 0.5px;
-  background: var(--gold);
+  background: linear-gradient(#f1c85d, var(--gold) 60%, #a87524);
   color: var(--ink);
   border: none;
   border-bottom: 3px solid var(--out);
+  text-shadow: 1px 1px 0 rgba(255, 238, 175, 0.45);
 }
 
 .card-title:focus-visible {
@@ -401,7 +489,7 @@ button:focus-visible {
   outline-offset: -3px;
 }
 
-.card-title[aria-disabled='true'] {
+.card-title[aria-disabled="true"] {
   cursor: default;
 }
 
@@ -422,7 +510,11 @@ button:focus-visible {
   height: 24px;
   border-radius: 50%;
   border: 3px solid var(--out);
-  background: radial-gradient(circle at 35% 30%, var(--gold-2), var(--gold) 70%);
+  background: radial-gradient(
+    circle at 35% 30%,
+    var(--gold-2),
+    var(--gold) 70%
+  );
   color: var(--ink);
   font-size: 12px;
   display: inline-flex;
@@ -444,7 +536,8 @@ button:focus-visible {
 .socket.loaded:hover .socket-coin,
 .socket.loaded:focus-visible .socket-coin {
   transform: translateY(2px);
-  filter: drop-shadow(0 2px 0 rgba(28, 23, 36, 0.4)) drop-shadow(0 0 3px var(--gold-2));
+  filter: drop-shadow(0 2px 0 rgba(28, 23, 36, 0.4))
+    drop-shadow(0 0 3px var(--gold-2));
 }
 
 @keyframes socket-pulse {
@@ -464,7 +557,7 @@ button:focus-visible {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: url('./assets/coin-basic.png') center / contain no-repeat;
+  background: url("./assets/coin-basic.png") center / contain no-repeat;
   image-rendering: auto;
 }
 
@@ -482,7 +575,11 @@ button:focus-visible {
 
 .socket-coin.fire,
 .socket-coin.granted-fire {
-  background-image: url('./assets/coin-fire.png');
+  background-image: url("./assets/coin-fire.png");
+}
+
+.socket-coin.mana {
+  background-image: url("./assets/coin-mana.png");
 }
 
 .socket-coin.granted-fire {
@@ -551,21 +648,24 @@ button:focus-visible {
 }
 
 .skill-card p {
+  width: 100%;
   margin: 0;
+  padding: 3px 4px;
   font-size: 11px;
   line-height: 1.45;
   text-align: center;
-  color: #e6ddc2;
+  color: #f3ead2;
+  background: #141820;
+  border-top: 2px solid #5d4d34;
   min-height: 3.2em;
-  /* rest 규칙: 완전 숨김(회색 노이즈 금지) — 상승(hover/focus/장전) 시 완전 노출 */
-  opacity: 0;
+  opacity: 0.82;
   transition: opacity 0.14s;
 }
 
 .once-badge {
   position: absolute;
   top: 24px;
-  right: -5px;
+  right: 4px;
   padding: 1px 4px;
   font-size: 10px;
   background: var(--flame);
@@ -630,9 +730,12 @@ button:focus-visible {
   gap: 12px;
   margin-top: auto;
   padding: 5px 12px;
-  background: rgba(28, 23, 36, 0.92);
+  background: linear-gradient(rgba(47, 50, 65, 0.97), rgba(18, 16, 26, 0.97));
   border: 3px solid var(--out);
-  box-shadow: 0 5px 0 rgba(28, 23, 36, 0.5);
+  box-shadow:
+    inset 0 2px 0 var(--frame-edge),
+    inset 0 -2px 0 #0d0e14,
+    0 5px 0 rgba(28, 23, 36, 0.55);
 }
 
 .pouch {
@@ -653,15 +756,17 @@ button:focus-visible {
   padding: 0 0 6px;
   font-size: 17px;
   color: var(--paper);
-  text-shadow: 1px 1px 0 var(--out), -1px -1px 0 var(--out);
-  background: url('./assets/pouch.png') center / contain no-repeat transparent;
+  text-shadow:
+    1px 1px 0 var(--out),
+    -1px -1px 0 var(--out);
+  background: url("./assets/pouch.png") center / contain no-repeat transparent;
   image-rendering: auto;
   border: none;
   transition: transform 0.1s steps(2);
 }
 
 .pouch-circle:hover,
-.pouch-circle[aria-expanded='true'] {
+.pouch-circle[aria-expanded="true"] {
   transform: translateY(-2px);
   filter: drop-shadow(0 0 3px var(--gold-2));
 }
@@ -728,13 +833,17 @@ button:focus-visible {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: url('./assets/coin-basic.png') center / contain no-repeat;
+  background: url("./assets/coin-basic.png") center / contain no-repeat;
   image-rendering: auto;
   flex: none;
 }
 
 .pop-coin.fire {
-  background-image: url('./assets/coin-fire.png');
+  background-image: url("./assets/coin-fire.png");
+}
+
+.pop-coin.mana {
+  background-image: url("./assets/coin-mana.png");
 }
 
 .pop-coin.granted-fire {
@@ -767,8 +876,9 @@ button:focus-visible {
   gap: 9px;
   min-height: 58px;
   padding: 4px 10px;
-  background: #12101a;
-  border: 3px solid #3a3348;
+  background: linear-gradient(#1e202b, #0d0c12);
+  border: 3px solid #4c4258;
+  box-shadow: inset 0 0 0 2px #09080d;
 }
 
 .coin {
@@ -777,7 +887,8 @@ button:focus-visible {
   height: 46px;
   border: none;
   border-radius: 50%;
-  background: url('./assets/coin-basic.png') center / contain no-repeat transparent;
+  background: url("./assets/coin-basic.png") center / contain no-repeat
+    transparent;
   color: #fdf3d0;
   display: flex;
   flex-direction: column;
@@ -800,10 +911,12 @@ button:focus-visible {
 
 .coin.fire,
 .coin.granted-fire {
-  background-image: url('./assets/coin-fire.png');
+  background-image: url("./assets/coin-fire.png");
 }
 
-
+.coin.mana {
+  background-image: url("./assets/coin-mana.png");
+}
 
 .coin.granted-fire {
   outline: 3px solid var(--flame);
@@ -817,7 +930,8 @@ button:focus-visible {
 
 .coin.selected {
   transform: translateY(-7px);
-  filter: drop-shadow(0 0 3px var(--gold-2)) drop-shadow(0 8px 0 rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 0 3px var(--gold-2))
+    drop-shadow(0 8px 0 rgba(0, 0, 0, 0.3));
 }
 
 .coin:disabled {
@@ -899,7 +1013,7 @@ button:focus-visible {
 }
 
 .pile-button:hover,
-.pile-button[aria-expanded='true'] {
+.pile-button[aria-expanded="true"] {
   color: var(--gold-2);
   background: rgba(48, 53, 73, 0.88);
   border-color: var(--slate-2);
@@ -979,16 +1093,19 @@ button:focus-visible {
 /* 문맥 힌트 — 동사를 한 번 수행하면 다음 단계로, 첫 스킬 사용 후 사라진다 */
 .hint-strip {
   position: absolute;
-  bottom: 118px;
+  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   z-index: 4;
-  padding: 5px 12px;
-  font-size: 12px;
+  min-height: 22px;
+  padding: 3px 12px;
+  font-size: 11px;
+  line-height: 1.25;
   letter-spacing: 0.5px;
-  background: rgba(28, 23, 36, 0.86);
-  border: 2px solid var(--slate-2);
-  color: #e6ddc2;
+  white-space: nowrap;
+  background: #1c1724;
+  border: 2px solid #6b5938;
+  color: #fff1bf;
   pointer-events: none;
   animation: hint-in 0.35s steps(4);
 }
@@ -1006,6 +1123,13 @@ button:focus-visible {
 
 /* ---- 결과 오버레이 ---- */
 
+.run-stage-shell {
+  position: relative;
+  width: 100%;
+  min-height: max(720px, 100vh);
+  overflow: hidden;
+}
+
 .result-overlay {
   position: absolute;
   inset: 0;
@@ -1013,25 +1137,51 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(18, 14, 26, 0.72);
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(36, 35, 46, 0.28),
+      rgba(10, 10, 15, 0.76) 68%
+    ),
+    rgba(18, 14, 26, 0.6);
 }
 
 .result-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: clamp(10px, 0.85vw, 16px);
   min-width: 320px;
-  padding: 26px 30px;
+  padding: clamp(24px, 2vw, 40px) clamp(28px, 2.4vw, 48px);
   text-align: center;
-  background: var(--slate);
+  background:
+    linear-gradient(135deg, transparent 8px, #303544 0) top left,
+    linear-gradient(225deg, transparent 8px, #303544 0) top right,
+    linear-gradient(315deg, transparent 8px, #1a1d27 0) bottom right,
+    linear-gradient(45deg, transparent 8px, #1a1d27 0) bottom left;
+  background-size: 52% 52%;
+  background-repeat: no-repeat;
   border: 4px solid var(--gold);
-  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 0 3px #5f451e,
+    inset 0 0 0 3px #151721,
+    inset 0 4px 0 rgba(255, 228, 143, 0.16),
+    0 10px 0 rgba(0, 0, 0, 0.55),
+    0 18px 32px rgba(0, 0, 0, 0.38);
+}
+
+.result-panel::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px solid rgba(215, 173, 85, 0.42);
+  pointer-events: none;
 }
 
 .result-panel h1 {
   margin: 0;
-  font-size: 40px;
-  letter-spacing: 6px;
+  font-size: clamp(36px, 2.7vw, 54px);
+  letter-spacing: clamp(4px, 0.45vw, 8px);
   color: var(--gold-2);
   text-shadow: 3px 3px 0 var(--out);
 }
@@ -1039,19 +1189,455 @@ button:focus-visible {
 .result-panel p {
   margin: 0;
   color: #d8d2c0;
+  font-size: clamp(14px, 0.95vw, 18px);
+  line-height: 1.45;
 }
 
 .result-panel button {
-  padding: 10px 14px;
-  font-size: 15px;
-  background: var(--gold);
+  min-height: clamp(44px, 3vw, 56px);
+  padding: 10px clamp(14px, 1.2vw, 22px);
+  font-size: clamp(14px, 0.95vw, 18px);
+  background: linear-gradient(#f4d06c, var(--gold) 58%, #a16d20);
   color: var(--ink);
   border: 3px solid var(--out);
-  box-shadow: 0 3px 0 rgba(28, 23, 36, 0.6);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 246, 203, 0.7),
+    inset 0 -4px 0 #8e5e1b,
+    0 4px 0 rgba(9, 8, 12, 0.75);
+  transition:
+    transform 0.1s steps(2),
+    filter 0.1s steps(2);
 }
 
-.result-panel button:hover {
-  background: var(--gold-2);
+.result-panel button:not(:disabled):hover,
+.result-panel button:not(:disabled):focus-visible {
+  filter: brightness(1.12);
+  transform: translateY(-2px);
+}
+
+.result-panel button:not(:disabled):active {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 0 #8e5e1b,
+    0 1px 0 rgba(9, 8, 12, 0.75);
+}
+
+.result-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  filter: saturate(0.35);
+}
+
+/* ---- 런 경계·보상 ---- */
+
+.run-overlay {
+  padding: 56px 24px 24px;
+}
+
+.run-panel {
+  width: min(clamp(720px, 61vw, 980px), calc(100vw - 48px));
+  max-height: calc(100vh - 82px);
+  min-width: 0;
+  overflow-y: auto;
+  text-align: center;
+}
+
+.run-panel h1 {
+  font-size: clamp(36px, 2.7vw, 54px);
+}
+
+.run-kicker,
+.reward-step {
+  font-size: clamp(12px, 0.78vw, 15px);
+  letter-spacing: 1px;
+  color: #aeb7cf;
+}
+
+.run-kicker {
+  color: #fff1bf;
+  text-transform: uppercase;
+}
+
+.reward-step {
+  padding: clamp(6px, 0.55vw, 10px) 10px;
+  background: linear-gradient(90deg, #202430, #3a4053 50%, #202430);
+  border: 2px solid #151821;
+  box-shadow: inset 0 0 0 1px #5d4d34;
+  color: var(--gold-2);
+}
+
+.reward-step[data-reward-stage="fallback-coin"] {
+  color: #b8e6ff;
+  border-color: #416b8f;
+  box-shadow: inset 0 0 0 1px #75bde8;
+}
+
+.reward-body {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 0.85vw, 16px);
+}
+
+.reward-body > p {
+  margin: 0;
+}
+
+.reward-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(9px, 0.75vw, 14px);
+}
+
+.reward-choice {
+  position: relative;
+  min-height: clamp(112px, 8vw, 154px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(6px, 0.55vw, 10px);
+  color: var(--paper) !important;
+  background: linear-gradient(#343a4b, #20242f 60%, #171a22) !important;
+  border-color: #9b7637 !important;
+  box-shadow:
+    inset 0 0 0 2px #171922,
+    inset 0 3px 0 #bc9147,
+    inset 0 -3px 0 #11131a,
+    0 5px 0 rgba(8, 7, 11, 0.7) !important;
+}
+
+.reward-choice:not(:disabled):hover,
+.reward-choice:not(:disabled):focus-visible {
+  border-color: var(--gold-2) !important;
+  box-shadow:
+    inset 0 0 0 3px #171922,
+    inset 0 4px 0 var(--gold-2),
+    inset 0 -3px 0 #11131a,
+    0 6px 0 rgba(8, 7, 11, 0.72) !important;
+}
+
+.reward-choice small,
+.replacement-list small,
+.bag-choice small {
+  color: #c8c3b3;
+}
+
+.reward-choice em {
+  color: var(--gold-2);
+  font-size: clamp(11px, 0.7vw, 13px);
+  font-style: normal;
+}
+
+.reward-choice.coin-fire {
+  box-shadow:
+    inset 0 4px 0 var(--flame),
+    inset 0 0 0 2px #171922,
+    0 5px 0 rgba(8, 7, 11, 0.7) !important;
+}
+
+.reward-choice.coin-mana {
+  box-shadow:
+    inset 0 4px 0 #55b9ed,
+    inset 0 0 0 2px #171922,
+    0 5px 0 rgba(8, 7, 11, 0.7) !important;
+}
+
+.reward-coin {
+  width: clamp(48px, 3.8vw, 72px);
+  height: clamp(48px, 3.8vw, 72px);
+  border-radius: 50%;
+  background: url("./assets/coin-basic.png") center / contain no-repeat;
+  image-rendering: auto;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.42));
+}
+
+.reward-choice.coin-fire .reward-coin {
+  background-image: url("./assets/coin-fire.png");
+}
+
+.reward-choice.coin-mana .reward-coin {
+  background-image: url("./assets/coin-mana.png");
+}
+
+.skill-rewards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skill-choice {
+  min-height: clamp(118px, 8.4vw, 162px);
+  padding-top: clamp(24px, 2vw, 34px) !important;
+}
+
+.skill-choice small {
+  line-height: 1.35;
+  color: #ddd8c8;
+}
+
+.skill-reward-mark {
+  display: grid;
+  place-items: center;
+  width: clamp(58px, 4.2vw, 78px);
+  height: clamp(58px, 4.2vw, 78px);
+  background: linear-gradient(#252a37, #11141b);
+  border: 3px solid var(--gold);
+  box-shadow:
+    inset 0 0 0 2px #3f4659,
+    inset 0 3px 0 #806536,
+    0 3px 0 #0a0b0f;
+}
+
+.rarity {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 7px;
+  font-size: clamp(10px, 0.65vw, 12px);
+  font-style: normal;
+  color: #251c0f;
+  background: #c7b583;
+  border: 2px solid var(--out);
+}
+
+.rarity-advanced {
+  color: #10253a;
+  background: #87c9ea;
+}
+
+.rarity-rare {
+  color: #fff0c7;
+  background: #8a3c31;
+}
+
+.bag-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(7px, 0.6vw, 11px);
+}
+
+.bag-choice {
+  min-height: clamp(46px, 3vw, 56px) !important;
+  padding: 5px 9px !important;
+  font-size: clamp(11px, 0.75vw, 14px) !important;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  color: #eee8d5 !important;
+  background: linear-gradient(#343947, #20232d) !important;
+  border-color: #151720 !important;
+  box-shadow:
+    inset 0 0 0 2px #514835,
+    0 3px 0 #0a0a0e !important;
+}
+
+.bag-choice.selected {
+  color: #231b10 !important;
+  background: linear-gradient(#ffe887, var(--gold)) !important;
+  outline: 3px solid #fff3c4;
+  outline-offset: -6px;
+}
+
+.bag-choice-coin {
+  width: clamp(26px, 1.9vw, 34px);
+  height: clamp(26px, 1.9vw, 34px);
+  flex: none;
+  background: url("./assets/coin-basic.png") center / contain no-repeat;
+}
+
+.bag-choice-coin.coin-fire {
+  background-image: url("./assets/coin-fire.png");
+}
+
+.bag-choice-coin.coin-mana {
+  background-image: url("./assets/coin-mana.png");
+}
+
+.bag-choice-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.reward-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.reward-actions button,
+.secondary-action {
+  min-height: clamp(42px, 3vw, 54px);
+}
+
+.secondary-action {
+  color: #e9e2cf !important;
+  background: linear-gradient(#444959, #282c38 58%, #1b1e26) !important;
+  border-color: #151720 !important;
+  box-shadow:
+    inset 0 0 0 2px #675b45,
+    inset 0 -3px 0 #11131a,
+    0 4px 0 #090a0e !important;
+}
+
+.destructive-action {
+  color: #ffe5d7 !important;
+  background: linear-gradient(#a84b39, #743126 60%, #4f211a) !important;
+  box-shadow:
+    inset 0 2px 0 #d67a62,
+    inset 0 -4px 0 #3a1713,
+    0 4px 0 #090a0e !important;
+}
+
+.decline-action {
+  border-color: #8f4c3f !important;
+}
+
+.replacement-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.replacement-list button {
+  min-height: clamp(62px, 4.5vw, 82px);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: clamp(8px, 0.65vw, 12px);
+  padding: 8px 10px;
+  text-align: left;
+  color: #eee8d5;
+  background: linear-gradient(#383e4e, #222631 62%, #171a22);
+  border-color: #806231;
+  box-shadow:
+    inset 0 0 0 2px #171922,
+    inset 0 3px 0 #9c7840,
+    0 4px 0 #090a0e;
+}
+
+.replacement-mark {
+  display: grid;
+  place-items: center;
+  width: clamp(42px, 3vw, 52px);
+  height: clamp(42px, 3vw, 52px);
+  flex: none;
+  color: #fff1bf;
+  background: #151923;
+  border: 2px solid var(--gold);
+  box-shadow: inset 0 0 0 2px #3d4354;
+}
+
+.replacement-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.replacement-copy strong {
+  color: #fff3c4;
+  font-size: clamp(12px, 0.82vw, 15px);
+}
+
+.replacement-list button:hover,
+.replacement-list button:focus-visible {
+  border-color: var(--gold-2);
+  box-shadow:
+    inset 0 0 0 3px var(--gold-2),
+    0 5px 0 #090a0e;
+}
+
+@media (min-width: 1440px) {
+  .skill-row {
+    gap: 10px;
+    padding-bottom: 30px;
+  }
+
+  .skill-card {
+    width: clamp(134px, 8.1vw, 154px);
+    flex-basis: clamp(134px, 8.1vw, 154px);
+    height: 236px;
+    min-height: 236px;
+    padding-inline: 10px;
+  }
+
+  .card-title {
+    width: calc(100% + 20px);
+    margin-inline: -10px;
+    font-size: clamp(14px, 0.82vw, 16px);
+  }
+
+  .card-art {
+    width: calc(100% - 8px);
+    height: clamp(76px, 5vw, 96px);
+  }
+
+  .skill-card p {
+    font-size: clamp(11px, 0.7vw, 13px);
+  }
+
+  .unit-name {
+    font-size: 26px;
+  }
+
+  .hp-track {
+    height: 22px;
+  }
+
+  .hp-num {
+    font-size: 20px;
+  }
+
+  .intent {
+    padding: 6px 12px;
+    font-size: 23px;
+    border-color: #6c4b1e;
+  }
+
+  .hand-tray {
+    gap: 12px;
+  }
+
+  .coin {
+    width: 52px;
+    height: 52px;
+  }
+
+  .coin small {
+    margin-top: 22px;
+  }
+
+  .hint-strip {
+    min-height: 25px;
+    padding: 4px 14px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .run-meta {
+    width: 480px;
+    min-width: 480px;
+    gap: 7px;
+    font-size: 10px;
+  }
+
+  .run-meta small {
+    max-width: 120px;
+  }
+
+  .unit {
+    min-width: 230px;
+  }
+
+  .unit-plate {
+    width: 230px;
+  }
+
+  .battlefield {
+    padding-inline: 38px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

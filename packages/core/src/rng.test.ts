@@ -58,6 +58,18 @@ describe('rng', () => {
     );
   });
 
+  it('derives combat attempts without contaminating the reward stream', () => {
+    const run = seedFromString('BRAVE-EMBER-42');
+    const rewardBefore = rngFrom(derive(run, 'reward', 2)).shuffle(['basic', 'fire', 'mana']);
+
+    expect(flips(derive(run, 'combat', 2, 0), 100)).not.toEqual(
+      flips(derive(run, 'combat', 2, 1), 100)
+    );
+
+    const rewardAfter = rngFrom(derive(run, 'reward', 2)).shuffle(['basic', 'fire', 'mana']);
+    expect(rewardAfter).toEqual(rewardBefore);
+  });
+
   it('keeps int in range and shuffle preserves multisets', () => {
     fc.assert(
       fc.property(

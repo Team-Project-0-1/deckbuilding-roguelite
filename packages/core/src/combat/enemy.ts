@@ -45,8 +45,13 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           state = applyDamage(state, { type: 'player' }, action.damage, 'enemy', events);
           if (state.phase === 'defeat') return { state, events };
         }
-      } else {
+      } else if (action.kind === 'block') {
         state = applyBlock(state, { type: 'enemy', index: enemyIndex }, action.amount, events);
+      } else {
+        if (action.amount < 0) throw new Error('next draw penalty amount cannot be negative');
+        const nextDrawPenalty = state.player.nextDrawPenalty + action.amount;
+        state = { ...state, player: { ...state.player, nextDrawPenalty } };
+        events.push({ type: 'witherApplied', enemy: enemyIndex, amount: action.amount, nextDrawPenalty });
       }
     }
   }

@@ -1,0 +1,26 @@
+{
+  "states": {
+    "candidate": {
+      "frames": 1,
+      "fps": 1,
+      "loop": false,
+      "action": "one static front-facing mana coin candidate"
+    }
+  },
+  "cell": {
+    "shape": "rect",
+    "width": 122,
+    "height": 128,
+    "safe_margin_x": 2,
+    "safe_margin_y": 2
+  },
+  "fit": {
+    "pixel_perfect": true,
+    "logical_height": 62,
+    "palette_size": 24,
+    "detail_bias": true,
+    "outline": 0.62,
+    "align_x": "bbox-center",
+    "align_y": "center"
+  }
+}

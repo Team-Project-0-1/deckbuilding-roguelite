@@ -1,0 +1,11 @@
+Scene: a single centered front-facing mana coin is the sole object in frame, built as one closed connected circular silhouette matching the sibling coins' scale, rim weight, and even outer padding. A dark metal rim carries restrained antique-gold construction accents, while the face carries only a centered blue-cyan enamel rune-energy motif. The coin floats against a perfectly flat pure magenta chroma field #FF00FF that fills every background pixel.
+
+Camera: fixed orthographic straight-on icon view at eye level, square centered framing, complete circular silhouette fully contained with generous balanced padding on every side.
+
+Lighting: flat even studio illumination across the face, one hard stepped highlight on the upper rim, restrained cyan energy accents contained inside the front-face motif, matte sprite presentation.
+
+Color grading: limited retro palette with dark metal #242936, antique gold #C79A3B, deep mana blue #164B72, bright cyan #3ED6E6, and chroma magenta #FF00FF.
+
+Texture/Medium: crisp chunky thirty-two-pixel-era pixel-art icon, hard opaque pixel clusters, integer-like stepped contours, sparse one-pixel highlights, solid flat color bands, connected construction, and clean sprite-sheet finish.
+
+AR 1:1

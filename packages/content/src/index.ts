@@ -2,7 +2,7 @@ import type { CharacterId, CoinDefId, EnemyDefId, SkillId } from '@game/core';
 import { validateContentDb } from '@game/core';
 import type { CharacterDef, CoinDef, ContentDb, EnemyDef, SkillDef } from '@game/core';
 
-export const CONTENT_VERSION = '0.3.0-m3';
+export const CONTENT_VERSION = '0.5.0-m5';
 
 const coin = (value: string) => value as CoinDefId;
 const skill = (value: string) => value as SkillId;
@@ -15,6 +15,11 @@ export const coins = {
     id: coin('fire'),
     element: 'fire',
     proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] }
+  },
+  mana: {
+    id: coin('mana'),
+    element: 'mana',
+    proc: { face: 'heads', effects: [{ kind: 'block', amount: 2 }] }
   }
 } satisfies Record<string, CoinDef>;
 
@@ -92,6 +97,40 @@ export const skills = {
     base: [{ kind: 'grantElement', element: 'fire', scope: 'allBasicInHand' }],
     heads: { mode: 'any', effects: [{ kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 1 }] },
     tails: { mode: 'any', effects: [{ kind: 'selfDamage', amount: 2 }] }
+  },
+  smash: {
+    id: skill('smash'),
+    name: '강타',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 2,
+    base: [{ kind: 'damage', amount: 8 }],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 5 }] }
+  },
+  'fire-infusion': {
+    id: skill('fire-infusion'),
+    name: '화염 주입',
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack', 'utility'],
+    targetType: 'single-enemy',
+    cost: 1,
+    base: [{ kind: 'addCoin', coin: coin('fire'), zone: 'draw', count: 1 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] },
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 4 }] }
+  },
+  furnace: {
+    id: skill('furnace'),
+    name: '용광로',
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack', 'utility'],
+    targetType: 'single-enemy',
+    cost: 1,
+    base: [{ kind: 'grantElement', element: 'fire', scope: 'allBasicInHand' }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] }
   }
 } satisfies Record<string, SkillDef>;
 
@@ -104,6 +143,81 @@ export const enemies = {
       { id: 'slam', actions: [{ kind: 'attack', damage: 11 }] },
       { id: 'double-strike', actions: [{ kind: 'attack', damage: 4, hits: 2 }] },
       { id: 'slam-2', actions: [{ kind: 'attack', damage: 11 }] }
+    ]
+  },
+  gatekeeper: {
+    id: enemy('gatekeeper'),
+    name: '수문장',
+    maxHp: 70,
+    intents: [
+      {
+        id: 'guarded-strike',
+        actions: [
+          { kind: 'block', amount: 8 },
+          { kind: 'attack', damage: 5 }
+        ]
+      },
+      {
+        id: 'guarded-strike-2',
+        actions: [
+          { kind: 'block', amount: 8 },
+          { kind: 'attack', damage: 5 }
+        ]
+      },
+      {
+        id: 'fortified-strike',
+        actions: [
+          { kind: 'block', amount: 12 },
+          { kind: 'attack', damage: 5 }
+        ]
+      }
+    ]
+  },
+  shaman: {
+    id: enemy('shaman'),
+    name: '주술사',
+    maxHp: 60,
+    intents: [
+      { id: 'wither', actions: [{ kind: 'nextDrawPenalty', amount: 1 }] },
+      { id: 'hex-strike', actions: [{ kind: 'attack', damage: 9 }] }
+    ]
+  },
+  'raider-plus': {
+    id: enemy('raider-plus'),
+    name: '강화 약탈자',
+    maxHp: 84,
+    intents: [
+      { id: 'slam', actions: [{ kind: 'attack', damage: 12 }] },
+      { id: 'double-strike', actions: [{ kind: 'attack', damage: 5, hits: 2 }] },
+      { id: 'slam-2', actions: [{ kind: 'attack', damage: 12 }] }
+    ]
+  },
+  'gatekeeper-plus': {
+    id: enemy('gatekeeper-plus'),
+    name: '강화 수문장',
+    maxHp: 78,
+    intents: [
+      {
+        id: 'guarded-strike',
+        actions: [
+          { kind: 'block', amount: 9 },
+          { kind: 'attack', damage: 5 }
+        ]
+      },
+      {
+        id: 'guarded-strike-2',
+        actions: [
+          { kind: 'block', amount: 9 },
+          { kind: 'attack', damage: 6 }
+        ]
+      },
+      {
+        id: 'fortified-strike',
+        actions: [
+          { kind: 'block', amount: 13 },
+          { kind: 'attack', damage: 6 }
+        ]
+      }
     ]
   }
 } satisfies Record<string, EnemyDef>;

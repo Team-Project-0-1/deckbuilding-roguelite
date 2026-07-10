@@ -1,0 +1,68 @@
+{
+  "comparison": {
+    "coin-basic.png": {
+      "sha256": "cb38db1422c4be18d97b14d9ad7c4a313bad91b146cb2f72c3388ab4e9f95788",
+      "mode": "RGBA",
+      "dimensions": [117, 128],
+      "alpha_bbox": [0, 0, 117, 128],
+      "bbox_size": [117, 128],
+      "padding": [0, 0, 0, 0],
+      "visible_pixels": 12302,
+      "edge_visible_pixels": 174,
+      "unique_rgba": 7010,
+      "opaque_exact_magenta": 13,
+      "opaque_magenta_adjacent_d96": 21,
+      "stale_rgb_under_alpha_zero": 30
+    },
+    "coin-fire.png": {
+      "sha256": "16cbfa94ebaeffc64304574b1205f93bdcb15d2bc897c8939d473ea19b828db0",
+      "mode": "RGBA",
+      "dimensions": [122, 128],
+      "alpha_bbox": [0, 0, 122, 128],
+      "bbox_size": [122, 128],
+      "padding": [0, 0, 0, 0],
+      "visible_pixels": 12692,
+      "edge_visible_pixels": 172,
+      "unique_rgba": 8867,
+      "opaque_exact_magenta": 11,
+      "opaque_magenta_adjacent_d96": 13,
+      "stale_rgb_under_alpha_zero": 64
+    },
+    "coin-mana.png": {
+      "sha256": "a4b3f60bad6dad7246ca18f64c25403c2761f1edf4e32d5edf85cb04ee096497",
+      "mode": "RGBA",
+      "dimensions": [122, 128],
+      "alpha_bbox": [4, 2, 118, 126],
+      "bbox_size": [114, 124],
+      "padding": [4, 2, 4, 2],
+      "visible_pixels": 11264,
+      "edge_visible_pixels": 0,
+      "unique_rgba": 25,
+      "unique_alpha": 2,
+      "opaque_exact_magenta": 0,
+      "opaque_magenta_adjacent_d96": 0,
+      "stale_rgb_under_alpha_zero": 0
+    }
+  },
+  "selected_component_run": {
+    "frames_manifest_ok": true,
+    "method": "components",
+    "declared_frames": 1,
+    "extracted_frames": 1,
+    "pixel_pitch": 12,
+    "display_scale": 2,
+    "logical_height": 62,
+    "palette_size": 24,
+    "frame_edge_pixels": 0,
+    "frame_chroma_adjacent_pixels": 0
+  },
+  "curation": {
+    "import_ok": true,
+    "candidate_count": 3,
+    "selected_index": 2,
+    "selected_label": "coin-mana",
+    "identity_transform": true,
+    "selected_export_count": 1
+  },
+  "result": "pass"
+}

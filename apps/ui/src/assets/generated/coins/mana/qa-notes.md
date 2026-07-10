@@ -1,0 +1,10 @@
+# Mana coin QA
+
+- Prompt gate: PASS. `gongnyang-prompt-kit/image-prompt` was loaded explicitly. Its installed `SKILL.md` is a TODO-only placeholder, so the plugin-compiled prompt was normalized to Format A and checked with the kit's `check_prompt.mjs`: `ok=true`, tier 0, zero errors, zero warnings.
+- Candidate generation: three fresh candidates used the shipped Basic and Fire coins as style, scale, silhouette, rim-weight, and padding references.
+- Deterministic conversion: PASS. Every candidate went through `sprite-gen` component extraction with a magenta key, 122x128 cell, logical height 62, 2x integer display scale, shared 24-color palette, and pixel-perfect output.
+- Selection: candidate 3 (`gold-round`) was selected because its circular gold/dark construction, apparent diameter, compact cyan mana mark, and blue enamel face best match the sibling coins. Candidate 1 was rejected for four protruding tabs; candidate 2 was rejected because its oversized dark rim under-emphasized the shared gold construction.
+- Static curation/export: PASS. The three deterministic frames were imported through `unpack_atlas_run.py`; explicit `curation.json` selects index 2 with identity transform; `export_curated_pngs.py --selected-only` produced exactly one `coin-mana.png`.
+- Final technical gate: PASS. 122x128 RGBA; alpha bbox 114x124 with balanced 4px horizontal and 2px vertical padding; 0 edge pixels; 0 exact or distance-96 magenta pixels; 0 stale RGB pixels under alpha 0; 25 RGBA colors and binary alpha.
+- Original-resolution sibling comparison: PASS. The final height and canvas equal Fire (122x128) and sit within Basic/Fire's shipped width range (117-122). Its 114x124 visible silhouette remains within a few pixels of Basic's apparent round body, its concentric rim weight reads consistently at native size, and the small cyan droplet stays legible without competing with the rim.
+- Visual risks: the new asset is intentionally crisper and uses a much smaller palette than the older antialiased sibling PNGs. This is consistent with the requested chunky pixel-art contract and avoids their existing chroma-adjacent and stale-transparent-RGB residue.

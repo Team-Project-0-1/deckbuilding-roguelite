@@ -8,6 +8,7 @@ import {
   zoneCoinCount
 } from '@game/core';
 import type { Command, CombatEvent, CombatState } from '@game/core';
+import { simulateRun } from './run-sim';
 
 declare const process: {
   argv: string[];
@@ -135,12 +136,19 @@ const runFuzz = () => {
   console.log(`fuzz ok games=${games} seed=${seed}`);
 };
 
+const runFullRun = () => {
+  const seed = arg('--seed', '42') ?? '42';
+  console.log(JSON.stringify(simulateRun(seed).summary));
+};
+
 const mode = process.argv[2];
-if (mode === 'play' && process.argv.includes('--auto')) {
+if (mode === 'run' && process.argv.includes('--auto')) {
+  runFullRun();
+} else if (mode === 'play' && process.argv.includes('--auto')) {
   runPlay();
 } else if (mode === 'fuzz') {
   runFuzz();
 } else {
-  console.error('usage: play --seed S --auto | fuzz --games N --seed S');
+  console.error('usage: run --seed S --auto | play --seed S --auto | fuzz --games N --seed S');
   process.exit(1);
 }
