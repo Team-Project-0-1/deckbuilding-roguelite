@@ -5,7 +5,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "shot": "node scripts/screenshot.mjs"
+    "shot": "node scripts/screenshot.mjs",
+    "playtest": "node scripts/playtest.mjs"
   },
   "dependencies": {
     "@game/content": "workspace:*",

@@ -35,7 +35,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #6ba24e;
+  /* 셸이 뷰포트를 전부 덮는다 — 이 색은 로드 직전/오버스크롤에만 보이는 어두운 숲 톤 */
+  background: #23301d;
   image-rendering: pixelated;
 }
 
@@ -51,23 +52,24 @@ button:focus-visible {
 
 /* ---- 무대 ---- */
 
+/* 풀블리드 무대: 배경(.backdrop)은 뷰포트 전체를 채우고, 콘텐츠는 좌우 패딩으로
+   1280px 안전폭에 중앙 정렬된다 — 큰 화면에서 초록 여백 대신 숲이 계속된다 */
 .combat-shell {
   position: relative;
-  max-width: 1280px;
-  min-height: 720px;
-  margin: 0 auto;
-  padding: 14px 18px 18px;
+  width: 100%;
+  min-height: max(720px, 100vh);
+  padding: 14px max(18px, calc((100vw - 1280px) / 2)) 18px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border: 4px solid var(--out);
 }
 
 .backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
+  pointer-events: none;
 }
 
 .backdrop-img {
@@ -90,8 +92,9 @@ button:focus-visible {
 .battlefield {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  min-height: 250px;
+  align-items: stretch; /* 유닛 컬럼을 늘려 스프라이트를 공유 지면선(하단)에 고정 */
+  flex: 1; /* HUD·카드에서 회수한 세로 공간을 전장이 흡수 */
+  min-height: 306px;
   padding: 4px 40px 0;
 }
 
@@ -200,7 +203,9 @@ button:focus-visible {
 
 .sprite {
   position: relative;
-  margin-top: 2px;
+  /* 지면선 고정: 유닛 컬럼 하단으로 밀착 → 양측 발이 같은 y에 닿는다 */
+  margin-top: auto;
+  margin-bottom: var(--ground-lift, 10px);
 }
 
 .unit.player .sprite {
@@ -282,29 +287,65 @@ button:focus-visible {
   }
 }
 
-/* ---- 중단: 스킬 카드 ---- */
+/* ---- 중단: 컴팩트 스킬 레일 ----
+   전폭 6열(≈1010px) 대신 중앙 겹침 레일(≈600px).
+   상승은 transform 전용 — 레이아웃 시프트 0, 이웃 카드 가림 최소. */
 
 .skill-row {
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  gap: 12px;
-  padding-top: 14px;
+  align-items: flex-end;
+  gap: 0;
+  padding: 22px 0 6px;
+  isolation: isolate;
+  transition: opacity 0.25s, filter 0.25s;
+}
+
+/* 해결 연출 중에는 카드 단위로 디밍 — 플립 중인 카드(.resolving)는 밝게 남아 무대가 된다 */
+.skill-row.dimmed {
+  pointer-events: none;
+}
+
+.skill-row.dimmed .skill-card:not(.resolving) {
+  opacity: 0.48;
+  filter: saturate(0.55);
 }
 
 .skill-card {
   position: relative;
-  width: 158px;
-  min-height: 218px;
-  padding: 20px 10px 10px;
+  width: 120px;
+  min-height: 162px;
+  padding: 16px 8px 8px;
+  margin-left: -14px; /* 겹침 완화 — 제목·소켓 가독 보존 */
   background: var(--slate);
   border: 3px solid var(--out);
   box-shadow: 0 5px 0 rgba(28, 23, 36, 0.5);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
-  transition: transform 0.12s steps(2);
+  gap: 5px;
+  cursor: pointer;
+  transition: transform 0.14s steps(3), opacity 0.25s, filter 0.25s;
+}
+
+.skill-card:first-child {
+  margin-left: 0;
+}
+
+/* hover 단독 의존 금지 — 키보드 포커스·장전 중(lifted) 카드도 동일하게 상승 */
+.skill-card:hover,
+.skill-card:focus-visible,
+.skill-card:focus-within,
+.skill-card.lifted {
+  transform: translateY(-34px) scale(1.3);
+  z-index: 6;
+}
+
+.skill-card:hover p,
+.skill-card:focus-visible p,
+.skill-card:focus-within p,
+.skill-card.lifted p {
+  opacity: 1;
 }
 
 .skill-card.ready {
@@ -312,25 +353,43 @@ button:focus-visible {
   box-shadow: 0 0 0 2px var(--gold), 0 5px 0 rgba(28, 23, 36, 0.5);
 }
 
-.skill-card.ready:hover {
-  transform: translateY(-4px);
-}
-
 .skill-card.spent,
 .skill-card.combat-locked {
   filter: saturate(0.35) brightness(0.72);
 }
 
-.skill-card header {
-  width: calc(100% + 20px);
-  margin: -20px -10px 0;
-  padding: 12px 6px 4px;
+/* 드래그 중 합법 목적지 위에 있을 때 — 포인터 캡처로 :hover가 안 붙으므로 클래스로 상승 */
+.skill-card.drop-target {
+  transform: translateY(-34px) scale(1.3);
+  z-index: 6;
+  border-color: var(--gold-2);
+  box-shadow: 0 0 0 3px var(--gold-2), 0 5px 0 rgba(28, 23, 36, 0.5);
+}
+
+.skill-card.drop-target p {
+  opacity: 1;
+}
+
+.card-title {
+  width: calc(100% + 16px);
+  margin: -16px -8px 0;
+  padding: 10px 4px 3px;
   text-align: center;
-  font-size: 16px;
-  letter-spacing: 1px;
+  font-size: 13px;
+  letter-spacing: 0.5px;
   background: var(--gold);
   color: var(--ink);
+  border: none;
   border-bottom: 3px solid var(--out);
+}
+
+.card-title:focus-visible {
+  outline: 3px solid #fdf3d0;
+  outline-offset: -3px;
+}
+
+.card-title[aria-disabled='true'] {
+  cursor: default;
 }
 
 /* 소켓은 카드 상단 모서리에 얹힘 — 제목은 아래쪽 패딩으로 분리 */
@@ -345,8 +404,9 @@ button:focus-visible {
 }
 
 .socket {
-  width: 26px;
-  height: 26px;
+  position: relative;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 3px solid var(--out);
   background: radial-gradient(circle at 35% 30%, var(--gold-2), var(--gold) 70%);
@@ -356,6 +416,7 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   padding: 0;
+  touch-action: none;
 }
 
 .socket.accept {
@@ -363,7 +424,14 @@ button:focus-visible {
 }
 
 .socket.loaded {
-  background: radial-gradient(circle at 35% 30%, #fdf3d0, var(--gold-2) 70%);
+  background: none;
+}
+
+/* 회수 가능 어포던스 — 장전된 소켓에 포인터/포커스가 닿으면 동전이 살짝 눌리며 빛난다 */
+.socket.loaded:hover .socket-coin,
+.socket.loaded:focus-visible .socket-coin {
+  transform: translateY(2px);
+  filter: drop-shadow(0 2px 0 rgba(28, 23, 36, 0.4)) drop-shadow(0 0 3px var(--gold-2));
 }
 
 @keyframes socket-pulse {
@@ -375,9 +443,85 @@ button:focus-visible {
   }
 }
 
+/* ---- 동전 원판 (소켓·드래그 프록시 공용) ---- */
+
+.socket-coin {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: url('./assets/coin-basic.png') center / contain no-repeat;
+  image-rendering: auto;
+}
+
+/* 장전된 동전은 소켓 위로 솟아오른 34px 원판 — 히트 타깃(24px 버튼)과 제목 가독성은 그대로,
+   정체(기본/화염/임시/취급)와 플립 결과 면이 카드 위에서 읽힌다 */
+.socket .socket-coin {
+  position: absolute;
+  left: -5px;
+  top: -11px;
+  width: 34px;
+  height: 34px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 0 rgba(28, 23, 36, 0.4));
+}
+
+.socket-coin.fire,
+.socket-coin.granted-fire {
+  background-image: url('./assets/coin-fire.png');
+}
+
+.socket-coin.granted-fire {
+  outline: 2px solid var(--flame);
+  outline-offset: -1px;
+}
+
+.socket-coin.temporary {
+  outline: 2px dashed #fdf3d0;
+  outline-offset: 1px;
+}
+
+.socket-coin.flipping {
+  animation: coin-flip 0.6s steps(6);
+}
+
+/* 플립 결과 면 — 앞면(양각 금화·햇살)과 뒷면(음각 암청·초승달)은 색·명도·글리프 3중으로 구분 */
+.coin-face-mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.coin-face-mark.heads {
+  background: radial-gradient(circle at 35% 30%, #fff3c4, var(--gold) 78%);
+  color: var(--ink);
+  border: 2px solid #fff3c4;
+  box-shadow: 0 0 7px 2px rgba(242, 207, 91, 0.8);
+}
+
+.coin-face-mark.tails {
+  background: radial-gradient(circle at 62% 72%, #59627f, #2b3047 78%);
+  color: #cfe0ff;
+  border: 2px solid #7f8ab0;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55);
+}
+
+/* 화염 코인의 앞면은 속성 발동 면 — 불꽃 테두리로 proc을 알린다 */
+.socket-coin.fire .coin-face-mark.heads,
+.socket-coin.granted-fire .coin-face-mark.heads {
+  border-color: var(--flame);
+  box-shadow: 0 0 9px 3px rgba(240, 144, 44, 0.9);
+}
+
 .card-art {
-  width: 134px;
-  height: 92px;
+  width: 100px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -395,19 +539,22 @@ button:focus-visible {
 
 .skill-card p {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 11px;
   line-height: 1.45;
   text-align: center;
   color: #e6ddc2;
-  min-height: 3.6em;
+  min-height: 3.2em;
+  /* rest 규칙: 완전 숨김(회색 노이즈 금지) — 상승(hover/focus/장전) 시 완전 노출 */
+  opacity: 0;
+  transition: opacity 0.14s;
 }
 
 .once-badge {
   position: absolute;
-  top: 34px;
-  right: -6px;
-  padding: 2px 6px;
-  font-size: 11px;
+  top: 24px;
+  right: -5px;
+  padding: 1px 4px;
+  font-size: 10px;
   background: var(--flame);
   color: var(--ink);
   border: 2px solid var(--out);
@@ -417,9 +564,9 @@ button:focus-visible {
 .consume-condition {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  font-size: 13px;
+  gap: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
   background: #3a2a22;
   color: #d8c8b8;
   border: 2px solid var(--out);
@@ -436,8 +583,8 @@ button:focus-visible {
   bottom: 42%;
   left: 50%;
   transform: translate(-50%, 50%) rotate(-8deg);
-  padding: 3px 10px;
-  font-size: 15px;
+  padding: 2px 8px;
+  font-size: 13px;
   background: var(--out);
   color: var(--paper);
   border: 2px solid var(--paper);
@@ -462,55 +609,133 @@ button:focus-visible {
 
 /* ---- 하단 HUD ---- */
 
+/* 컴팩트 HUD — 목표 ≤78px @1280×720. 코인은 1급 의사결정 표면: 5개 동시 표시,
+   상태(기본/화염/면/임시/취급/선택/잠금) 가독 유지. 리프트·플립은 overflow로 위로 튀어나옴(클립 없음) */
 .bottom-hud {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   margin-top: auto;
-  padding: 12px 14px;
+  padding: 5px 12px;
   background: rgba(28, 23, 36, 0.92);
   border: 3px solid var(--out);
   box-shadow: 0 5px 0 rgba(28, 23, 36, 0.5);
 }
 
 .pouch {
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: 12px;
   color: #cfc8b8;
 }
 
 .pouch-circle {
-  width: 66px;
-  height: 66px;
+  width: 52px;
+  height: 52px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding-bottom: 8px;
-  font-size: 20px;
+  padding: 0 0 6px;
+  font-size: 17px;
   color: var(--paper);
   text-shadow: 1px 1px 0 var(--out), -1px -1px 0 var(--out);
-  background: url('./assets/pouch.png') center / contain no-repeat;
+  background: url('./assets/pouch.png') center / contain no-repeat transparent;
   image-rendering: auto;
+  border: none;
+  transition: transform 0.1s steps(2);
+}
+
+.pouch-circle:hover,
+.pouch-circle[aria-expanded='true'] {
+  transform: translateY(-2px);
+  filter: drop-shadow(0 0 3px var(--gold-2));
+}
+
+/* 뽑을 더미 구성 팝오버 — 종류·매수만. 주머니 위로 열려 중앙 전장을 가리지 않는다 */
+.pouch-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+  min-width: 168px;
+  max-width: min(240px, 60vw);
+  padding: 9px 12px 10px;
+  background: var(--slate);
+  border: 3px solid var(--out);
+  box-shadow: 0 5px 0 rgba(28, 23, 36, 0.5);
+  animation: hint-in 0.2s steps(3);
+}
+
+.pouch-pop strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  color: #cfc8b8;
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+  border-bottom: 2px solid var(--slate-2);
+}
+
+.pouch-pop ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--paper);
+}
+
+.pouch-pop li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pop-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #cfc8b8;
+}
+
+.pop-coin {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: url('./assets/coin-basic.png') center / contain no-repeat;
+  image-rendering: auto;
+  flex: none;
+}
+
+.pop-coin.fire {
+  background-image: url('./assets/coin-fire.png');
+}
+
+.pop-coin.temporary {
+  outline: 2px dashed #fdf3d0;
+  outline-offset: 1px;
 }
 
 .hand-tray {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 74px;
-  padding: 7px 12px;
+  justify-content: center; /* 코인 = 1급 의사결정 표면 — 중앙 무대 배치, 좌측 클러스터 금지 */
+  gap: 9px;
+  min-height: 58px;
+  padding: 4px 10px;
   background: #12101a;
   border: 3px solid #3a3348;
 }
 
 .coin {
   position: relative;
-  width: 58px;
-  height: 58px;
+  width: 46px;
+  height: 46px;
   border: none;
   border-radius: 50%;
   background: url('./assets/coin-basic.png') center / contain no-repeat transparent;
@@ -523,6 +748,7 @@ button:focus-visible {
   filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.35));
   transition: transform 0.1s steps(2);
   image-rendering: auto;
+  touch-action: none;
 }
 
 .coin small {
@@ -530,7 +756,7 @@ button:focus-visible {
   line-height: 1;
   color: #fdf3d0;
   text-shadow: 1px 1px 0 var(--out);
-  margin-top: 26px;
+  margin-top: 19px;
 }
 
 .coin.fire,
@@ -560,17 +786,41 @@ button:focus-visible {
   filter: brightness(0.85);
 }
 
-.coin.flipping {
-  animation: coin-flip 0.6s steps(6);
+/* 드래그 중 원본 자리 표시 — 프록시가 진짜처럼 보이게 원본은 흐려진다 */
+.coin.drag-origin {
+  opacity: 0.35;
 }
 
-.coin-face {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 17px;
-  text-shadow: 1px 1px 0 var(--out), -1px -1px 0 var(--out);
+.coin.drag-cancel {
+  animation: drag-shake 0.32s steps(4);
+}
+
+@keyframes drag-shake {
+  0% {
+    translate: 0 0;
+  }
+  25% {
+    translate: -5px 0;
+  }
+  50% {
+    translate: 5px 0;
+  }
+  75% {
+    translate: -3px 0;
+  }
+  100% {
+    translate: 0 0;
+  }
+}
+
+.drag-proxy {
+  position: fixed;
+  z-index: 30;
+  width: 46px;
+  height: 46px;
+  transform: translate(-50%, -58%) scale(1.1);
+  pointer-events: none;
+  filter: drop-shadow(0 7px 3px rgba(0, 0, 0, 0.4));
 }
 
 @keyframes coin-flip {
@@ -588,8 +838,9 @@ button:focus-visible {
 .pile-counts {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 14px;
+  gap: 3px;
+  font-size: 12px;
+  min-width: 68px;
   color: #d8d2c0;
 }
 
@@ -601,9 +852,10 @@ button:focus-visible {
 }
 
 .end-turn {
-  padding: 14px 22px;
-  font-size: 19px;
-  letter-spacing: 2px;
+  padding: 8px 16px;
+  min-height: 44px;
+  font-size: 16px;
+  letter-spacing: 1px;
   background: linear-gradient(var(--paper), #d9cfa8);
   color: var(--ink);
   border: 3px solid var(--out);
@@ -631,6 +883,34 @@ button:focus-visible {
   border: 2px solid var(--out);
   color: #cfe0ff;
   z-index: 2;
+}
+
+/* 문맥 힌트 — 동사를 한 번 수행하면 다음 단계로, 첫 스킬 사용 후 사라진다 */
+.hint-strip {
+  position: absolute;
+  bottom: 118px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  padding: 5px 12px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  background: rgba(28, 23, 36, 0.86);
+  border: 2px solid var(--slate-2);
+  color: #e6ddc2;
+  pointer-events: none;
+  animation: hint-in 0.35s steps(4);
+}
+
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 /* ---- 결과 오버레이 ---- */
@@ -684,16 +964,21 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .coin.flipping,
+  .socket-coin.flipping,
   .socket.accept,
-  .float-text {
+  .float-text,
+  .coin.drag-cancel,
+  .hint-strip {
     animation-duration: 0.01s;
     animation-iteration-count: 1;
   }
 
   .hp-fill,
   .skill-card,
-  .coin {
+  .skill-row,
+  .skill-card p,
+  .coin,
+  .socket {
     transition: none;
   }
 }

@@ -25,6 +25,11 @@ try {
   await page.waitForFunction(
     () => document.querySelector('.end-turn:not(:disabled)') !== null && document.querySelector('.float-text') === null
   );
+  // 잠금 해제 직후 카드 디밍 페이드-인이 끝날 때까지 대기 (캡처 레이스 방지 — 디밍은 카드 단위)
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll('.skill-card')];
+    return cards.length > 0 && cards.every((card) => getComputedStyle(card).opacity === '1');
+  });
   await mkdir(dirname(output), { recursive: true });
   await page.screenshot({ path: output, fullPage: false });
 } finally {

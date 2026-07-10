@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContentDb } from '../content-types';
 import type { CharacterId, CoinDefId, EnemyDefId, SkillId, SlotId } from '../ids';
+import { legalCommands } from './commands';
 import { createCombat, step } from './reducer';
 import type { CombatState } from './state';
 import { previewFlip } from './preview';
@@ -35,6 +36,17 @@ const testDb = (): ContentDb => ({
       cost: 1,
       base: [{ kind: 'block', amount: 5 }],
       tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
+    },
+    strike: {
+      id: id<SkillId>('strike'),
+      name: '불타는 일격',
+      type: 'flip',
+      rarity: 'common',
+      tags: ['attack'],
+      targetType: 'single-enemy',
+      cost: 2,
+      base: [{ kind: 'damage', amount: 8 }],
+      heads: { mode: 'per', effects: [{ kind: 'damage', amount: 3 }] }
     }
   },
   enemies: {
@@ -51,7 +63,7 @@ const testDb = (): ContentDb => ({
       name: '전사',
       maxHp: 70,
       startingBag: Array.from({ length: 10 }, () => id<CoinDefId>('basic')),
-      startingSkills: [id<SkillId>('slash'), id<SkillId>('guard')],
+      startingSkills: [id<SkillId>('slash'), id<SkillId>('guard'), id<SkillId>('strike')],
       trait: {
         id: 'ember-pouch',
         name: '불씨 주머니',
@@ -98,5 +110,43 @@ describe('previewFlip', () => {
     previewFlip(state, slot(0), testDb());
 
     expect(state).toEqual(before);
+  });
+
+  // 회귀 (불타는 일격 화면 소멸): 코스트 미달 장전 상태의 프리뷰는 코어가 해결을 거부한다.
+  // UI는 반드시 placed.length === cost일 때만 previewFlip을 호출해야 한다.
+  it('throws on partial placement — cost 2 slot with 1 coin', () => {
+    const db = testDb();
+    const state = combatWithPlacedCoin(2); // strike (cost 2)에 1개만 장전
+
+    expect(() => previewFlip(state, slot(2), db)).toThrow('placed coin count must equal skill cost');
+    // 사용 커맨드도 합법 목록에 없다 — UI 가드와 같은 판정
+    expect(
+      legalCommands(state, db).some((command) => command.type === 'useFlipSkill' && Number(command.slot) === 2)
+    ).toBe(false);
+  });
+
+  // 회귀 (다중 스킬 장전 화면 소멸): 완충 장전이어도 턴 3회 캡에 걸리면 코어가 해결을 거부한다.
+  // UI는 placed==cost만이 아니라 "useFlipSkill이 legalCommands에 있는가"로 프리뷰를 가드해야 한다.
+  it('throws at the 3-per-turn cap even when fully loaded — legality gate contract', () => {
+    const db = testDb();
+    const state = { ...combatWithPlacedCoin(0), skillUsesThisTurn: 3 };
+
+    expect(() => previewFlip(state, slot(0), db)).toThrow('skill use cap reached');
+    expect(legalCommands(state, db).some((command) => command.type === 'useFlipSkill')).toBe(false);
+  });
+
+  it('enumerates 4 branches once the cost-2 slot is fully loaded', () => {
+    const db = testDb();
+    const partial = combatWithPlacedCoin(2);
+    const coin = partial.zones.hand[0];
+    if (coin === undefined) throw new Error('missing hand coin');
+    const full = step(partial, { type: 'placeCoin', coin, slot: slot(2) }, db);
+    if (!full.ok) throw new Error(full.error);
+
+    const preview = previewFlip(full.state, slot(2), db);
+    expect(preview.branches).toHaveLength(4);
+    // per 모드: HH=14, HT/TH=11, TT=8
+    expect(preview.byAxis.damage).toEqual({ min: 8, max: 14 });
+    expect(preview.expected.damage).toBe(11);
   });
 });
