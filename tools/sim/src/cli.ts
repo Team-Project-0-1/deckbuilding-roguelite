@@ -8,6 +8,14 @@ import {
   zoneCoinCount
 } from '@game/core';
 import type { Command, CombatEvent, CombatState } from '@game/core';
+import {
+  M6_VARIANT_IDS,
+  runBulk,
+  runCrnComparison,
+  type M6BulkReport,
+  type M6VariantId
+} from './bulk';
+import { POLICY_IDS, type PolicyId } from './policies';
 import { simulateRun } from './run-sim';
 
 declare const process: {
@@ -141,14 +149,114 @@ const runFullRun = () => {
   console.log(JSON.stringify(simulateRun(seed).summary));
 };
 
+const positiveIntegerArg = (name: string): number => {
+  const raw = arg(name);
+  const parsed = Number(raw);
+  if (raw === undefined || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    console.error(`${name} must be a positive integer`);
+    process.exit(1);
+  }
+  return parsed;
+};
+
+const policyArgs = (): PolicyId[] => {
+  const raw = arg('--policy');
+  if (raw === undefined) {
+    console.error('--policy is required with --games');
+    process.exit(1);
+  }
+  if (raw === 'all') return [...POLICY_IDS];
+  const values = raw.split(',');
+  const allowed = new Set<string>(POLICY_IDS);
+  if (values.length === 0 || values.some((value) => !allowed.has(value))) {
+    console.error(`--policy must be all or one/more of ${POLICY_IDS.join(',')}`);
+    process.exit(1);
+  }
+  return values as PolicyId[];
+};
+
+const variantArg = (name: string, fallback: M6VariantId): M6VariantId => {
+  const value = arg(name, fallback) ?? fallback;
+  if (!(M6_VARIANT_IDS as readonly string[]).includes(value)) {
+    console.error(`${name} must be one of ${M6_VARIANT_IDS.join(',')}`);
+    process.exit(1);
+  }
+  return value as M6VariantId;
+};
+
+const printBulkTable = (report: M6BulkReport): void => {
+  const outcomes = report.metrics.outcomes;
+  const turns = report.metrics.turns.overall;
+  console.error('M6 bulk simulation');
+  console.error(`seed=${report.baseSeed} games=${report.games} traces=${outcomes.runs}`);
+  console.error(
+    `terminal=${outcomes.terminalRuns}/${outcomes.runs} wins=${outcomes.wins} crashes=${outcomes.crashRuns} invariants=${outcomes.invariantViolationCount}`
+  );
+  console.error(
+    `turns mean=${turns.mean ?? 'n/a'} p50=${turns.p50 ?? 'n/a'} p99=${turns.p99 ?? 'n/a'} anomalies=${report.anomalySeeds.length}`
+  );
+};
+
+const runBulkCli = () => {
+  const seed = arg('--seed', '1') ?? '1';
+  const games = positiveIntegerArg('--games');
+  const policies = policyArgs();
+  const variant = variantArg('--variant', 'baseline');
+  const compareValue = arg('--compare');
+
+  if (compareValue !== undefined) {
+    if (policies.length !== 1) {
+      console.error('--compare requires exactly one policy');
+      process.exit(1);
+    }
+    const policy = policies[0];
+    if (policy === undefined) process.exit(1);
+    const compareVariant = variantArg('--compare', 'basic-first');
+    const report = runCrnComparison({
+      baseSeed: seed,
+      games,
+      policyId: policy,
+      variantA: variant,
+      variantB: compareVariant
+    });
+    if (process.argv.includes('--table')) {
+      printBulkTable(report.a);
+      printBulkTable(report.b);
+      console.error(`A=A ${report.aa.fingerprint} bytes=${report.aa.byteLength}`);
+    }
+    console.log(JSON.stringify(report));
+    return;
+  }
+
+  const result = runBulk({
+    baseSeed: seed,
+    games,
+    policyIds: policies,
+    variantIds: [variant],
+    captureTranscripts: process.argv.includes('--include-traces')
+  });
+  if (process.argv.includes('--table')) printBulkTable(result.report);
+  console.log(
+    JSON.stringify(
+      process.argv.includes('--include-traces')
+        ? result
+        : result.report
+    )
+  );
+};
+
 const mode = process.argv[2];
 if (mode === 'run' && process.argv.includes('--auto')) {
   runFullRun();
+} else if (mode === 'run' && process.argv.includes('--games')) {
+  runBulkCli();
 } else if (mode === 'play' && process.argv.includes('--auto')) {
   runPlay();
 } else if (mode === 'fuzz') {
   runFuzz();
 } else {
-  console.error('usage: run --seed S --auto | play --seed S --auto | fuzz --games N --seed S');
+  console.error(
+    'usage: run --seed S --auto | run --games N --policy random|aggro|turtle|greedy|all --seed S [--variant baseline|basic-first] [--compare basic-first] [--table] [--include-traces] | play --seed S --auto | fuzz --games N --seed S'
+  );
   process.exit(1);
 }

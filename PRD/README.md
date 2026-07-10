@@ -13,11 +13,12 @@
 | [04_PROJECT_SPEC.md](./04_PROJECT_SPEC.md) | AI 행동 규칙 (절대 하지 마 / 항상 해) | AI에게 코드 시킬 때마다 |
 | [PHASE1_HOLDS.md](./PHASE1_HOLDS.md) | Phase 1 사람 게이트·폴리시·증거 보류 원장 | Phase 2 진행 중 미완 항목 추적 |
 | [M5_PLAYTEST_NOTES.md](./M5_PLAYTEST_NOTES.md) | 수문장·화상 빌드의 Fable 보조 리뷰와 사람 질문 | M6 지표·사람 테스트 설계 |
+| [M6_BALANCE_REPORT.md](./M6_BALANCE_REPORT.md) | 정책×적 지표·CRN·경고와 수치 무변경 판정 | 사람 N≥5 플레이테스트 준비 |
 | [references/](./references/) | 픽셀 아트 무드보드 4장 + sources.json | 아트 방향 잡을 때 |
 
 ## 다음 단계
 
-Phase 1 자동 구현·검증·배포와 Phase 2의 M5 런·보상 구현은 완료됐다. Phase 1 사람 검증은 [PHASE1_HOLDS.md](./PHASE1_HOLDS.md)에, M5 체감 질문은 [M5_PLAYTEST_NOTES.md](./M5_PLAYTEST_NOTES.md)에 보류 상태로 유지한다. 다음은 Pumasi로 M6 봇 정책·지표·튜닝을 진행하며, 사람 N≥5 게이트 전에는 Phase 3로 넘어가지 않는다.
+Phase 1 자동 구현·검증·배포와 Phase 2의 M5~M6 자동화는 완료됐다. Phase 1 사람 검증은 [PHASE1_HOLDS.md](./PHASE1_HOLDS.md)에, M5 체감 질문은 [M5_PLAYTEST_NOTES.md](./M5_PLAYTEST_NOTES.md)에 보류 상태로 유지한다. 다음 단계는 로컬 JSON 로그를 이용한 사람 N≥5 플레이테스트이며, 그 전에는 수치 변경이나 Phase 3 확장을 시작하지 않는다.
 
 ## 미결 사항 (가정 원장 요약 — 상세는 01_PRD.md)
 

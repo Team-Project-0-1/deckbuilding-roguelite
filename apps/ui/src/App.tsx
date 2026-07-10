@@ -70,6 +70,16 @@ import type {
   DragSource,
 } from "./interaction";
 import { clearRun, loadRun, saveRun } from "./run-storage";
+import {
+  beginHumanCombat,
+  createHumanRunTrace,
+  downloadHumanRunTrace,
+  finishHumanCombat,
+  finishHumanRun,
+  recordHumanDecision,
+  recordHumanReward,
+} from "./telemetry";
+import type { HumanRunTrace, RecordHumanRewardInput } from "./telemetry";
 
 // 생성 에셋 (docs/ui/combat-ui-v2.png 앵커 스타일 — image_gen 산출, 후처리: 크로마 키·리사이즈)
 const CARD_ART: Record<string, string> = {
@@ -514,6 +524,20 @@ export const App = () => {
   const [selectedSkill, setSelectedSkill] = useState<SkillId | null>(null);
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   const { run, combat } = session;
+  const telemetryRef = useRef<HumanRunTrace | null>(null);
+  if (telemetryRef.current === null) {
+    telemetryRef.current = createHumanRunTrace({
+      runSeed: run.runSeed,
+      contentVersion: CONTENT_VERSION,
+      maxHp: run.maxHp,
+    });
+  }
+  const currentTelemetry = (): HumanRunTrace => {
+    if (telemetryRef.current === null) {
+      throw new Error("human telemetry was not initialized");
+    }
+    return telemetryRef.current;
+  };
   const rewardStage = rewardViewStage(run);
   const isCoinStage = rewardStage === "coin" || rewardStage === "fallback-coin";
 
@@ -533,6 +557,11 @@ export const App = () => {
     setSession({ run: next, combat: null });
   };
 
+  const commitReward = (next: RunState, reward: RecordHumanRewardInput) => {
+    telemetryRef.current = recordHumanReward(currentTelemetry(), reward);
+    commitRun(next);
+  };
+
   const startNextCombat = () => {
     const started = startRunCombat(run, contentDb);
     persistRun(started.run);
@@ -541,9 +570,56 @@ export const App = () => {
 
   const completeCombat = (completed: CombatState) => {
     if (run.phase !== "combat") return;
+    telemetryRef.current = finishHumanCombat(
+      currentTelemetry(),
+      run.combatIndex,
+      run.attempt,
+      completed,
+    );
     const settled = settleRunCombat(run, completed, contentDb);
+    if (settled.phase === "victory" || settled.phase === "defeat") {
+      telemetryRef.current = finishHumanRun(currentTelemetry(), {
+        result: settled.phase,
+        finalHp: settled.currentHp,
+        maxHp: settled.maxHp,
+      });
+    }
     persistRun(settled);
     setSession({ run: settled, combat: null });
+  };
+
+  const beginTelemetryCombat = (started: CombatState) => {
+    telemetryRef.current = beginHumanCombat(currentTelemetry(), {
+      combatIndex: run.combatIndex,
+      attempt: run.attempt,
+      combat: started,
+    });
+  };
+
+  const recordTelemetryDecision = (
+    before: CombatState,
+    commands: readonly Command[],
+    after: CombatState,
+    events: readonly CombatEvent[],
+  ) => {
+    telemetryRef.current = recordHumanDecision(currentTelemetry(), {
+      combatIndex: run.combatIndex,
+      attempt: run.attempt,
+      before,
+      commands,
+      after,
+      events,
+    });
+  };
+
+  const exportPlayLog = () => {
+    if (run.phase !== "victory" && run.phase !== "defeat") return;
+    telemetryRef.current = finishHumanRun(currentTelemetry(), {
+      result: run.phase,
+      finalHp: run.currentHp,
+      maxHp: run.maxHp,
+    });
+    downloadHumanRunTrace(currentTelemetry());
   };
 
   const restartRun = (seed: string) => {
@@ -556,6 +632,11 @@ export const App = () => {
     setRemovalIndex(null);
     setSelectedSkill(null);
     const fresh = freshSession(seed);
+    telemetryRef.current = createHumanRunTrace({
+      runSeed: fresh.run.runSeed,
+      contentVersion: CONTENT_VERSION,
+      maxHp: fresh.run.maxHp,
+    });
     persistRun(fresh.run);
     setSession(fresh);
   };
@@ -565,6 +646,8 @@ export const App = () => {
       <CombatBoard
         combat={combat}
         key={`${run.runSeed}-${run.combatIndex}-${run.attempt}`}
+        onTelemetryCombatStart={beginTelemetryCombat}
+        onTelemetryDecision={recordTelemetryDecision}
         onComplete={completeCombat}
         run={run}
       />
@@ -649,7 +732,18 @@ export const App = () => {
                         key={String(coin)}
                         ref={index === 0 ? primaryRef : undefined}
                         type="button"
-                        onClick={() => commitRun(chooseCoinReward(run, coin))}
+                        onClick={() =>
+                          commitReward(chooseCoinReward(run, coin), {
+                            combatIndex: run.combatIndex - 1,
+                            stage:
+                              rewardStage === "fallback-coin"
+                                ? "fallback-coin"
+                                : "coin",
+                            options: pending.coinOptions.map(String),
+                            choice: String(coin),
+                            resolution: "selected",
+                          })
+                        }
                       >
                         <span className="reward-coin" aria-hidden="true" />
                         <strong>{coinName(coin)}</strong>
@@ -662,7 +756,18 @@ export const App = () => {
                     className="secondary-action"
                     data-testid="coin-reward-skip"
                     type="button"
-                    onClick={() => commitRun(chooseCoinReward(run, null))}
+                    onClick={() =>
+                      commitReward(chooseCoinReward(run, null), {
+                        combatIndex: run.combatIndex - 1,
+                        stage:
+                          rewardStage === "fallback-coin"
+                            ? "fallback-coin"
+                            : "coin",
+                        options: pending.coinOptions.map(String),
+                        choice: null,
+                        resolution: "skipped",
+                      })
+                    }
                   >
                     {rewardStage === "fallback-coin"
                       ? "대체 코인 건너뛰기"
@@ -701,9 +806,17 @@ export const App = () => {
                       data-testid="removal-confirm"
                       disabled={removalIndex === null}
                       type="button"
-                      onClick={() =>
-                        commitRun(resolveCoinRemoval(run, removalIndex))
-                      }
+                      onClick={() => {
+                        if (removalIndex === null) return;
+                        commitReward(resolveCoinRemoval(run, removalIndex), {
+                          combatIndex: run.combatIndex - 1,
+                          stage: "removal",
+                          options: run.bag.map(String),
+                          choice: String(run.bag[removalIndex]),
+                          resolution: "selected",
+                          bagIndex: removalIndex,
+                        });
+                      }}
                     >
                       선택한 코인 제거
                     </button>
@@ -720,7 +833,15 @@ export const App = () => {
                       className="secondary-action"
                       data-testid="removal-skip"
                       type="button"
-                      onClick={() => commitRun(resolveCoinRemoval(run, null))}
+                      onClick={() =>
+                        commitReward(resolveCoinRemoval(run, null), {
+                          combatIndex: run.combatIndex - 1,
+                          stage: "removal",
+                          options: run.bag.map(String),
+                          choice: null,
+                          resolution: "skipped",
+                        })
+                      }
                     >
                       제거 건너뛰기
                     </button>
@@ -766,7 +887,15 @@ export const App = () => {
                         className="secondary-action"
                         data-testid="skill-reward-skip"
                         type="button"
-                        onClick={() => commitRun(skipSkillReward(run))}
+                        onClick={() =>
+                          commitReward(skipSkillReward(run), {
+                            combatIndex: run.combatIndex - 1,
+                            stage: "skill",
+                            options: pending.skillOptions.map(String),
+                            choice: null,
+                            resolution: "skipped",
+                          })
+                        }
                       >
                         스킬 보상 건너뛰기
                       </button>
@@ -792,8 +921,16 @@ export const App = () => {
                             ref={index === 0 ? primaryRef : undefined}
                             type="button"
                             onClick={() =>
-                              commitRun(
+                              commitReward(
                                 chooseSkillReward(run, selectedSkill, index),
+                                {
+                                  combatIndex: run.combatIndex - 1,
+                                  stage: "skill",
+                                  options: pending.skillOptions.map(String),
+                                  choice: String(selectedSkill),
+                                  resolution: "selected",
+                                  replacedSlot: index,
+                                },
                               )
                             }
                           >
@@ -828,7 +965,15 @@ export const App = () => {
                           className="secondary-action decline-action"
                           data-testid="replace-decline"
                           type="button"
-                          onClick={() => commitRun(skipSkillReward(run))}
+                          onClick={() =>
+                            commitReward(skipSkillReward(run), {
+                              combatIndex: run.combatIndex - 1,
+                              stage: "skill",
+                              options: pending.skillOptions.map(String),
+                              choice: null,
+                              resolution: "declined",
+                            })
+                          }
                         >
                           교체하지 않고 거절
                         </button>
@@ -876,6 +1021,14 @@ export const App = () => {
               </button>
               <button
                 className="secondary-action"
+                data-testid="play-log-download"
+                type="button"
+                onClick={exportPlayLog}
+              >
+                플레이 로그 저장
+              </button>
+              <button
+                className="secondary-action"
                 data-testid="new-seed"
                 type="button"
                 onClick={() => restartRun(randomSeed())}
@@ -894,9 +1047,22 @@ interface CombatBoardProps {
   combat: CombatState;
   run: RunState;
   onComplete: (combat: CombatState) => void;
+  onTelemetryCombatStart: (combat: CombatState) => void;
+  onTelemetryDecision: (
+    before: CombatState,
+    commands: readonly Command[],
+    after: CombatState,
+    events: readonly CombatEvent[],
+  ) => void;
 }
 
-const CombatBoard = ({ combat, run, onComplete }: CombatBoardProps) => {
+const CombatBoard = ({
+  combat,
+  run,
+  onComplete,
+  onTelemetryCombatStart,
+  onTelemetryDecision,
+}: CombatBoardProps) => {
   const [state, dispatchState] = useReducer(combatReducer, combat);
   const [selectedCoin, setSelectedCoin] = useState<CoinUid | null>(null);
   const [queue, setQueue] = useState<CombatEvent[]>([]);
@@ -919,6 +1085,10 @@ const CombatBoard = ({ combat, run, onComplete }: CombatBoardProps) => {
   const completionSent = useRef(false);
   const suppressClick = useRef(false);
   const legal = useMemo(() => legalCommands(state, contentDb), [state]);
+
+  useEffect(() => {
+    onTelemetryCombatStart(combat);
+  }, [combat, onTelemetryCombatStart]);
 
   useEffect(() => {
     if (!initialEventsQueued.current && state.events.length > 0) {
@@ -977,6 +1147,7 @@ const CombatBoard = ({ combat, run, onComplete }: CombatBoardProps) => {
     if (legalCommand === undefined) return false;
     const result = step(state, legalCommand, contentDb);
     if (!result.ok) return false;
+    onTelemetryDecision(state, [legalCommand], result.state, result.events);
     commit(result.state, result.events);
     return true;
   };
@@ -985,6 +1156,7 @@ const CombatBoard = ({ combat, run, onComplete }: CombatBoardProps) => {
     if (locked || commands.length === 0) return false;
     const result = stepSequence(state, commands, contentDb);
     if (result === null) return false;
+    onTelemetryDecision(state, commands, result.state, result.events);
     commit(result.state, result.events);
     return true;
   };
