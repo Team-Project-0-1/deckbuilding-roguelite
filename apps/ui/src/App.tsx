@@ -25,6 +25,7 @@ import {
   skipSkillReward,
   startRunCombat,
   statusStacks,
+  statusTurns,
   step,
 } from "@game/core";
 import type { CombatEvent, CombatState, Command } from "@game/core";
@@ -60,6 +61,7 @@ import {
   SkullIcon,
   SwordIcon,
 } from "./icons";
+import { coinNameFor, coinRewardDetailFor } from "./coin-info";
 import { Keyword } from "./keywords";
 import { buildResolutionSummary } from "./resolution-summary";
 import { ResolutionTicket } from "./resolution-ticket";
@@ -88,6 +90,17 @@ import cardFurnace from "./assets/card-furnace.webp";
 import cardFlameSword from "./assets/card-flame-sword.webp";
 import cardHeartOfFlame from "./assets/card-heart-of-flame.webp";
 import cardConflagration from "./assets/card-conflagration.webp";
+import cardSparkStrike from "./assets/card-spark-strike.webp";
+import cardChainSurge from "./assets/card-chain-surge.webp";
+import cardStaticField from "./assets/card-static-field.webp";
+import cardVoltLash from "./assets/card-volt-lash.webp";
+import cardOverload from "./assets/card-overload.webp";
+import cardFrostSlash from "./assets/card-frost-slash.webp";
+import cardGlacialWall from "./assets/card-glacial-wall.webp";
+import cardChillingField from "./assets/card-chilling-field.webp";
+import cardGlacierStrike from "./assets/card-glacier-strike.webp";
+import cardWintersGrasp from "./assets/card-winters-grasp.webp";
+import cardAegisSurge from "./assets/card-aegis-surge.webp";
 import goblinAtlas from "./assets/generated/sprites/goblin/sprite-sheet-alpha.png";
 import goblinManifestJson from "./assets/generated/sprites/goblin/manifest.json";
 import gatekeeperAtlas from "./assets/generated/sprites/gatekeeper/sprite-sheet-alpha.png";
@@ -98,6 +111,10 @@ import warriorAtlas from "./assets/generated/sprites/warrior/sprite-sheet-alpha.
 import warriorManifestJson from "./assets/generated/sprites/warrior/manifest.json";
 import guardianAtlas from "./assets/generated/sprites/guardian/sprite-sheet-alpha.png";
 import guardianManifestJson from "./assets/generated/sprites/guardian/manifest.json";
+import sorcererAtlas from "./assets/generated/sprites/sorcerer/sprite-sheet-alpha.png";
+import sorcererManifestJson from "./assets/generated/sprites/sorcerer/manifest.json";
+import frostKnightAtlas from "./assets/generated/sprites/frost-knight/sprite-sheet-alpha.png";
+import frostKnightManifestJson from "./assets/generated/sprites/frost-knight/manifest.json";
 import { spriteMotionForEvent } from "./sprite-motion";
 import type { SpriteManifest } from "./AtlasSprite";
 import {
@@ -146,6 +163,17 @@ const CARD_ART: Record<string, string> = {
   "flame-sword": cardFlameSword,
   "heart-of-flame": cardHeartOfFlame,
   conflagration: cardConflagration,
+  "spark-strike": cardSparkStrike,
+  "chain-surge": cardChainSurge,
+  "static-field": cardStaticField,
+  "volt-lash": cardVoltLash,
+  overload: cardOverload,
+  "frost-slash": cardFrostSlash,
+  "glacial-wall": cardGlacialWall,
+  "chilling-field": cardChillingField,
+  "glacier-strike": cardGlacierStrike,
+  "winters-grasp": cardWintersGrasp,
+  "aegis-surge": cardAegisSurge,
 };
 
 const WORDS = [
@@ -166,7 +194,7 @@ interface SpriteAsset {
 }
 
 const SPRITES: Record<
-  "player" | "guardian" | "raider" | "shaman" | "gatekeeper",
+  "player" | "guardian" | "sorcerer" | "frost-knight" | "raider" | "shaman" | "gatekeeper",
   SpriteAsset
 > = {
   player: {
@@ -176,6 +204,14 @@ const SPRITES: Record<
   guardian: {
     atlasUrl: guardianAtlas,
     manifest: guardianManifestJson as SpriteManifest,
+  },
+  sorcerer: {
+    atlasUrl: sorcererAtlas,
+    manifest: sorcererManifestJson as SpriteManifest,
+  },
+  "frost-knight": {
+    atlasUrl: frostKnightAtlas,
+    manifest: frostKnightManifestJson as SpriteManifest,
   },
   raider: {
     atlasUrl: goblinAtlas,
@@ -199,6 +235,8 @@ const enemySprite = (enemyId: string): SpriteAsset => {
 
 const playerSprite = (character: CharacterId): SpriteAsset => {
   if (String(character) === "guardian") return SPRITES.guardian;
+  if (String(character) === "sorcerer") return SPRITES.sorcerer;
+  if (String(character) === "frost-knight") return SPRITES["frost-knight"];
   return SPRITES.player;
 };
 
@@ -352,6 +390,8 @@ const coinVisualClasses = (state: CombatState, coin: CoinUid): string => {
   return [
     def?.element === "fire" ? "fire" : "",
     def?.element === "mana" ? "mana" : "",
+    def?.element === "frost" ? "frost" : "",
+    def?.element === "lightning" ? "lightning" : "",
     instance?.grants.includes("fire") === true && def?.element !== "fire"
       ? "granted-fire"
       : "",
@@ -426,7 +466,7 @@ const PilePopover = ({
               >
                 <span
                   aria-hidden="true"
-                  className={`pop-coin ${group.element === "fire" ? "fire" : ""} ${group.element === "mana" ? "mana" : ""} ${granted.includes("fire") ? "granted-fire" : ""} ${group.temporary ? "temporary" : ""}`}
+                  className={`pop-coin ${group.element ?? ""} ${granted.includes("fire") ? "granted-fire" : ""} ${group.temporary ? "temporary" : ""}`}
                 />
                 <span className="pile-item-copy">
                   {group.element === null ? "기본" : elementKo(group.element)}
@@ -606,23 +646,11 @@ const bootState = (): BootState => {
   return { mode: "run", session: { run: started.run, combat: started.combat } };
 };
 
-const coinName = (coin: CoinDefId): string => {
-  const element = contentDb.coins[String(coin)]?.element;
-  return element === null || element === undefined
-    ? "기본 코인"
-    : `${elementKo(element)} 코인`;
-};
+const coinName = (coin: CoinDefId): string =>
+  coinNameFor(contentDb, String(coin));
 
-const coinRewardDetail = (coin: CoinDefId): string => {
-  const proc = contentDb.coins[String(coin)]?.proc;
-  if (proc === undefined) return "속성 효과 없음";
-  const effect = proc.effects[0];
-  const face = proc.face === "heads" ? "앞면" : "뒷면";
-  if (effect?.kind === "block") return `${face} · 방어 +${effect.amount}`;
-  if (effect?.kind === "applyStatus" && effect.status === "burn")
-    return `${face} · 화상 +${effect.stacks}`;
-  return `${face} · 속성 효과`;
-};
+const coinRewardDetail = (coin: CoinDefId): string =>
+  coinRewardDetailFor(contentDb, String(coin));
 
 const skillRarityName = (skill: SkillId): string => {
   const rarity = contentDb.skills[String(skill)]?.rarity;
@@ -2681,6 +2709,26 @@ const UnitPanel = ({
             >
               <EmberIcon scale={1.4} />
               {statusStacks(statuses, "burn")}
+            </em>
+          </Keyword>
+        ) : null}
+        {statusTurns(statuses, "frostbite") > 0 ? (
+          <Keyword term="frostbite" className="chip-keyword">
+            <em
+              aria-label={`동상 ${statusTurns(statuses, "frostbite")}턴`}
+              className="frost-chip"
+            >
+              동상 {statusTurns(statuses, "frostbite")}
+            </em>
+          </Keyword>
+        ) : null}
+        {statusTurns(statuses, "shock") > 0 ? (
+          <Keyword term="shock" className="chip-keyword">
+            <em
+              aria-label={`감전 ${statusTurns(statuses, "shock")}턴`}
+              className="shock-chip"
+            >
+              감전 {statusTurns(statuses, "shock")}
             </em>
           </Keyword>
         ) : null}

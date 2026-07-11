@@ -2820,6 +2820,86 @@ const winCurrentCombat = async (page) => {
   await page.close();
 }
 
+// ---------- 시나리오 24: P3.4 신규 캐릭터 부팅·전용 스킬 스모크 ----------
+{
+  for (const [character, skillName, coinClass, statusName, chipSelector] of [
+    // 정전기장·한파: base가 상태를 확정 부여 — 면 결과 무관한 결정론 검증
+    ["sorcerer", "정전기장", "lightning", "감전", ".shock-chip"],
+    ["frost-knight", "한파", "frost", "동상", ".frost-chip"],
+  ]) {
+    const { page, errors } = await boot(undefined, {
+      url: `${baseUrl}?seed=${SEED}&character=${character}`,
+    });
+    check(
+      `S24 ${character} 부팅 대표 코인 2닢`,
+      ((await page.locator(".combat-shell").getAttribute("data-bag")) ?? "")
+        .split(",")
+        .filter((id) => id === coinClass).length === 2,
+    );
+    check(
+      `S24 ${character} 전용 스킬 카드 렌더`,
+      (await page.locator(".skill-card .card-title").allInnerTexts()).includes(
+        skillName,
+      ),
+    );
+    check(
+      `S24 ${character} 전용 스프라이트 렌더`,
+      (await page.locator(".unit.player .sprite-frame").count()) >= 1,
+    );
+    // 주머니 인스펙터 — 신규 원소 그룹이 정본 element 클래스로 유색 렌더 (감사 2)
+    await page.locator(".pouch-circle").click();
+    check(
+      `S24 ${character} 주머니 인스펙터 ${coinClass} 코인 시각`,
+      (await page.locator(`.pouch-pop .pop-coin.${coinClass}`).count()) === 1,
+    );
+    await page.locator(".pouch-circle").click();
+    check(
+      `S24 ${character} 팝오버 닫힘`,
+      (await page.locator(".pouch-pop").count()) === 0,
+    );
+    // 전용 공격 스킬 사용 → 상태 부여 확인 (앞면이면 상태, 뒷면이어도 크래시 0)
+    await page.locator(".hand-tray .coin").first().click();
+    const card = page.locator(".skill-card", { hasText: skillName }).first();
+    await card.locator(".socket").first().click();
+    await card.locator(".card-title").click();
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 15000 },
+    );
+    check(`S24 ${character} 전용 스킬 해결 생존`, await shellAlive(page));
+    // 카드 행 가독성: 기본 배지 + 상태 문구(raw id 아님)
+    const cardText = (
+      await page
+        .locator(".skill-card", { hasText: skillName })
+        .first()
+        .locator(".card-effects")
+        .innerText()
+    ).replace(/\s+/g, " ");
+    check(
+      `S24 ${character} 카드 행 상태 문구 한국어 (${statusName})`,
+      cardText.includes("기본") && cardText.includes(statusName),
+      cardText.slice(0, 80),
+    );
+    // 결정론 상태 부여: 적 상태 칩 + 결산 티켓 상태 라인
+    check(
+      `S24 ${character} 적 ${statusName} 칩 표시`,
+      (await page.locator(`.unit.enemy ${chipSelector}`).count()) === 1,
+    );
+    const ticket = await page
+      .locator(".resolution-ticket")
+      .innerText()
+      .catch(() => "");
+    check(
+      `S24 ${character} 결산 티켓 ${statusName} 반영`,
+      ticket.includes(statusName),
+      ticket.replace(/\n/g, " | ").slice(0, 100),
+    );
+    check(`S24 ${character} 에러 0`, errors.length === 0, errors.join(" | "));
+    await page.close();
+  }
+}
+
 await browser.close();
 if (server !== null)
   await new Promise((resolveClose) => server.httpServer.close(resolveClose));

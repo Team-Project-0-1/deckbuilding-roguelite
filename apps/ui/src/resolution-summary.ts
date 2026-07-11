@@ -21,7 +21,7 @@ const elementKo = (value: string): string =>
     blood: '혈액'
   })[value] ?? value;
 
-const statusKo = (value: string): string =>
+export const statusKo = (value: string): string =>
   ({
     burn: '화상',
     frostbite: '동상',

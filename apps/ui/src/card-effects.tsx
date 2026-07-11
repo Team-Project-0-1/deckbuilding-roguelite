@@ -33,6 +33,12 @@ const atomSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => 
   if (atom.kind === "applyStatus" && atom.status === "burn") {
     return { text: `화상 ${atom.stacks}`, term: "burn" };
   }
+  if (atom.kind === "applyStatus" && atom.status === "frostbite") {
+    return { text: `동상 ${atom.stacks}`, term: "frostbite" };
+  }
+  if (atom.kind === "applyStatus" && atom.status === "shock") {
+    return { text: `감전 ${atom.stacks}`, term: "shock" };
+  }
   if (atom.kind === "applyStatus") {
     return { text: `${atom.status} ${atom.stacks}` };
   }
@@ -74,6 +80,12 @@ const bonusSegment = (
   if (atom.kind === "block") return { text: `방어 +${atom.amount}` };
   if (atom.kind === "applyStatus" && atom.status === "burn") {
     return { text: `화상 +${atom.stacks}`, term: "burn" };
+  }
+  if (atom.kind === "applyStatus" && atom.status === "frostbite") {
+    return { text: `동상 +${atom.stacks}`, term: "frostbite" };
+  }
+  if (atom.kind === "applyStatus" && atom.status === "shock") {
+    return { text: `감전 +${atom.stacks}`, term: "shock" };
   }
   if (atom.kind === "selfDamage") return { text: `자신 피해 +${atom.amount}` };
   return atomSegment(atom);

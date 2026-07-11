@@ -44,3 +44,27 @@
 
 원문·결과: `card-art-prompt-validation/{flame-sword,heart-of-flame,conflagration}.{txt,result.json}`.
 이번 배치부터 선컴파일 프로세스 적용 (P3.2 감사 후속 — 사후 정련이 아니라 생성 전 검증).
+
+## P3.4 추가분 (2026-07-12) — 킷 선컴파일 준수, 11종
+
+생성·후처리 규격은 상단과 동일 (codex `image_gen`, 스타일 ref 2장, LANCZOS+중앙 크롭 264×198 webp q88).
+모든 프롬프트는 생성 **전** `check_prompt.mjs` ok=true·errors 0 확인 후 사용 —
+원문·결과: `card-art-prompt-validation/<skill-id>.{txt,result.json}`.
+
+| 파일 | 스타일 ref | 모티프 |
+|------|-----------|--------|
+| card-spark-strike.webp | card-slash + card-ignite | 전격 일섬 — 검신을 타는 감전 아크 |
+| card-chain-surge.webp | 동일 | 연쇄 뇌전 — 적들 사이를 잇는 번개 사슬 |
+| card-static-field.webp | 동일 | 정전기장 — 대지에 퍼지는 감전 파문 |
+| card-volt-lash.webp | 동일 | 전압 채찍 — 휘어지는 뇌전 채찍 궤적 |
+| card-overload.webp | 동일 | 과부하 — 백열 방전 코어·감전 증폭 |
+| card-frost-slash.webp | card-guard + card-slash | 서리 베기 — 성에가 맺히는 냉기 검격 |
+| card-glacial-wall.webp | 동일 | 빙벽 — 융기하는 얼음 방벽 |
+| card-chilling-field.webp | 동일 | 한파 — 지면을 얼리는 동상 냉기장 |
+| card-glacier-strike.webp | 동일 | 빙하 강타 — 빙괴를 두른 내리찍기 |
+| card-winters-grasp.webp | 동일 | 겨울의 손아귀 — 옥죄는 서리 손톱·동상 결정 |
+| card-aegis-surge.webp | 동일 | 이지스 서지 — 마나 소비 방패 파동 |
+
+스프라이트 2종(sorcerer·frost-knight)은 `apps/ui/src/assets/generated/sprites/<id>/`에
+component-row 전 과정 보존 — 행 프롬프트 킷 선검증(ok=true·0E·0W)·Base Lock·Motion QA 기록은
+각 폴더 `prompt-kit-validation/`·`qa-notes.md` (dual-tool provenance).

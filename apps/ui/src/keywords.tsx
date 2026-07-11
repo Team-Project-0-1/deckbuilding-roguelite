@@ -9,6 +9,8 @@ export type KeywordTerm =
   | "block"
   | "flip"
   | "consume"
+  | "frostbite"
+  | "shock"
   | "trigger"
   | "temporary"
   | "elementCoin";
@@ -40,6 +42,14 @@ export const KEYWORD_GLOSSARY: Record<
     label: "소비",
     description:
       "동전을 던지지 않고 그대로 지불한다. 앞·뒤 효과는 발동하지 않는다.",
+  },
+  frostbite: {
+    label: "동상",
+    description: "남은 턴 동안 대상이 가하는 공격 피해가 25% 줄어든다. 자기 턴이 끝날 때 1턴씩 줄어든다.",
+  },
+  shock: {
+    label: "감전",
+    description: "남은 턴 동안 대상이 받는 피해가 50% 늘어난다. 자기 턴이 끝날 때 1턴씩 줄어든다.",
   },
   trigger: {
     label: "턴 버프",
