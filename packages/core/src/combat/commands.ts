@@ -32,6 +32,12 @@ const suggestedChosen = (state: CombatState, db: ContentDb): CoinUid[] | undefin
   return coin === undefined ? undefined : [coin];
 };
 
+// UI가 기본 코인 규칙을 중복 구현하지 않도록 공개하는 조회 헬퍼 (판정 정본은 여전히 step)
+export const chooseBasicCandidates = (state: CombatState, db: ContentDb): CoinUid[] =>
+  state.zones.hand.filter((candidate) => isBasicCoinInHand(state, db, candidate));
+
+export const skillRequiresCoinChoice = (skill: FlipSkillDef): boolean => hasChooseBasicInHand(skill);
+
 export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
   if (state.phase !== 'player') return [];
   const commands: Command[] = [{ type: 'endTurn' }];
