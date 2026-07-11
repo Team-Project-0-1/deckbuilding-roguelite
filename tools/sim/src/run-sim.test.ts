@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   M6_BUILD_POLICIES,
-  expectedEncounterOrder,
   resolveBuildPolicy,
   simulateRun,
 } from './run-sim';
@@ -21,17 +20,21 @@ describe('M5 full-run simulator', () => {
 
     expect(guardian.summary.seed).toBe('42');
     expect(guardian.summary.result === 'victory' || guardian.summary.result === 'defeat').toBe(true);
-    expect(guardian.summary.finalBag).toHaveLength(10);
+    // P4.2b 재고정: 10레이어 그래프에서 guardian은 9전투(보스 포함)까지 진행하며
+    // 보상 코인으로 가방이 11까지 자란다 — balance-provisional 관측치.
+    expect(guardian.summary.finalBag).toHaveLength(11);
     expect(guardian.summary.finalEquippedSkills).toHaveLength(6);
   });
 
-  it('completes the deterministic five-combat run with boundary state intact', () => {
+  it('completes the deterministic generated-graph run with boundary state intact', () => {
+    // P4.2b/P4.3 재고정 (0.9.0-p4 결속): D9 10레이어 그래프 활성화 — seed 42 fight-first는
+    // 6전투(3마리 조우)에서 패배한다. 난이도 관측치는 P4.5 경제 Monte Carlo가 판정한다
+    // (balance-provisional — 상점 미사용 기본 정책 기준).
     const simulation = simulateRun('42');
 
-    expect(simulation.summary.result).toBe('victory');
-    expect(simulation.summary.combatsCompleted).toBe(5);
-    expect(simulation.summary.encounterOrder).toEqual(expectedEncounterOrder());
-    expect(simulation.combats).toHaveLength(5);
+    expect(simulation.summary.result).toBe('defeat');
+    expect(simulation.summary.combatsCompleted).toBe(6);
+    expect(simulation.combats).toHaveLength(6);
     for (let index = 0; index < simulation.combats.length; index += 1) {
       const combat = simulation.combats[index];
       if (combat === undefined) throw new Error('missing combat record');
@@ -44,18 +47,22 @@ describe('M5 full-run simulator', () => {
 
     expect(simulation.combats[1]?.startingBag.filter((coin) => coin === 'fire')).toHaveLength(3);
     expect(simulation.combats[1]?.startingBag.filter((coin) => coin === 'basic')).toHaveLength(7);
-    expect(simulation.summary.finalBag).toHaveLength(10);
-    expect(simulation.summary.finalEquippedSkills).toHaveLength(6);
-    expect(simulation.summary.carriedHp).toBeGreaterThan(0);
     expect(simulation.summary).toEqual({
       seed: '42',
-      result: 'victory',
-      combatsCompleted: 5,
-      turnsPerCombat: [4, 3, 4, 5, 9],
-      carriedHp: 35,
-      finalBag: ['basic', 'basic', 'basic', 'basic', 'fire', 'fire', 'fire', 'fire', 'basic', 'fire'],
-      finalEquippedSkills: ['slash', 'guard', 'burning-strike', 'flame-sword', 'ignite-sword', 'conflagration'],
-      encounterOrder: [['raider'], ['shaman'], ['gatekeeper'], ['raider-plus'], ['gatekeeper-plus']]
+      result: 'defeat',
+      combatsCompleted: 6,
+      turnsPerCombat: [4, 4, 4, 4, 6, 3],
+      carriedHp: 0,
+      finalBag: ['basic', 'basic', 'basic', 'fire', 'fire', 'fire', 'fire', 'basic', 'fire', 'fire'],
+      finalEquippedSkills: ['fire-infusion', 'guard', 'burning-strike', 'flame-sword', 'ignite-sword', 'conflagration'],
+      encounterOrder: [
+        ['raider'],
+        ['goblin', 'ghoul'],
+        ['goblin', 'ghoul'],
+        ['thief', 'goblin'],
+        ['raider-plus'],
+        ['ghoul', 'goblin', 'slime']
+      ]
     });
   });
 });

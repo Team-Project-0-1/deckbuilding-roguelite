@@ -1,6 +1,8 @@
 import type { CombatEvent, CombatState, Command } from "@game/core";
 
-export const HUMAN_RUN_SCHEMA_VERSION = 1 as const;
+// v2 (P4.3): 런 그래프 경로 사실(path) 추가 — 갈림길 선택·상점 행동이 없으면
+// 리플레이가 비전투 노드를 통과할 수 없다. v1은 그래프 이전 세대라 거부한다.
+export const HUMAN_RUN_SCHEMA_VERSION = 2 as const;
 export const UI_BUILD_IDENTIFIER = "m6-ui-local-telemetry";
 
 type RunResult = "in-progress" | "victory" | "defeat";
@@ -70,6 +72,16 @@ export interface HumanRewardFact {
   replacedSlot?: number;
 }
 
+export type HumanShopAction =
+  | { kind: "buy-coin"; option: number }
+  | { kind: "buy-skill"; option: number; slot: number }
+  | { kind: "remove-coin"; bagIndex: number }
+  | { kind: "leave" };
+
+export type HumanPathFact =
+  | { layer: number; type: "choose-node"; choice: number }
+  | { layer: number; type: "shop"; actions: HumanShopAction[] };
+
 export interface HumanRunTrace {
   schemaVersion: typeof HUMAN_RUN_SCHEMA_VERSION;
   source: "human";
@@ -80,6 +92,7 @@ export interface HumanRunTrace {
   maxHp: number;
   combats: HumanCombatTrace[];
   rewards: HumanRewardFact[];
+  path: HumanPathFact[];
   result: RunResult;
   endedAtLocal?: string;
   finalHp?: number;
@@ -181,6 +194,7 @@ export const createHumanRunTrace = (
   input: CreateHumanRunTraceInput,
 ): HumanRunTrace => ({
   schemaVersion: HUMAN_RUN_SCHEMA_VERSION,
+  path: [],
   source: "human",
   runSeed: input.runSeed,
   contentVersion: input.contentVersion,
@@ -345,6 +359,35 @@ export const finishHumanRun = (
     result: input.result,
     endedAtLocal: localTimestamp(input.endedAt ?? new Date()),
     finalHp: input.finalHp,
+  };
+};
+
+export const recordHumanNodeChoice = (
+  trace: HumanRunTrace,
+  input: { layer: number; choice: number },
+): HumanRunTrace => ({
+  ...trace,
+  path: [
+    ...trace.path,
+    { layer: input.layer, type: "choose-node", choice: input.choice },
+  ],
+});
+
+export const recordHumanShopAction = (
+  trace: HumanRunTrace,
+  input: { layer: number; action: HumanShopAction },
+): HumanRunTrace => {
+  const last = trace.path[trace.path.length - 1];
+  if (last !== undefined && last.type === "shop" && last.layer === input.layer) {
+    const merged = { ...last, actions: [...last.actions, input.action] };
+    return { ...trace, path: [...trace.path.slice(0, -1), merged] };
+  }
+  return {
+    ...trace,
+    path: [
+      ...trace.path,
+      { layer: input.layer, type: "shop", actions: [input.action] },
+    ],
   };
 };
 
@@ -650,6 +693,47 @@ const timestampValue = (
   return value;
 };
 
+const sanitizePathFact = (input: unknown, label: string): HumanPathFact => {
+  const object = objectValue(input, label);
+  const layer = nonNegativeInteger(object, "layer", label);
+  if (object.type === "choose-node") {
+    return {
+      layer,
+      type: "choose-node",
+      choice: nonNegativeInteger(object, "choice", label),
+    };
+  }
+  if (object.type !== "shop") throw new Error(`${label}.type is unsupported`);
+  if (!Array.isArray(object.actions) || object.actions.length > 64) {
+    throw new Error(`${label}.actions must be a bounded array`);
+  }
+  const actions = object.actions.map((action, index) => {
+    const entry = objectValue(action, `${label}.actions[${index}]`);
+    if (entry.kind === "buy-coin") {
+      return {
+        kind: "buy-coin" as const,
+        option: nonNegativeInteger(entry, "option", label),
+      };
+    }
+    if (entry.kind === "buy-skill") {
+      return {
+        kind: "buy-skill" as const,
+        option: nonNegativeInteger(entry, "option", label),
+        slot: nonNegativeInteger(entry, "slot", label),
+      };
+    }
+    if (entry.kind === "remove-coin") {
+      return {
+        kind: "remove-coin" as const,
+        bagIndex: nonNegativeInteger(entry, "bagIndex", label),
+      };
+    }
+    if (entry.kind === "leave") return { kind: "leave" as const };
+    throw new Error(`${label}.actions[${index}].kind is unsupported`);
+  });
+  return { layer, type: "shop", actions };
+};
+
 export const sanitizeHumanRunTrace = (input: unknown): HumanRunTrace => {
   const object = objectValue(input, "trace");
   if (object.schemaVersion !== HUMAN_RUN_SCHEMA_VERSION) {
@@ -661,6 +745,9 @@ export const sanitizeHumanRunTrace = (input: unknown): HumanRunTrace => {
   }
   if (!Array.isArray(object.rewards) || object.rewards.length > 256) {
     throw new Error("trace.rewards must be a bounded array");
+  }
+  if (!Array.isArray(object.path) || object.path.length > 64) {
+    throw new Error("trace.path must be a bounded array");
   }
   const result = literalValue(
     object.result,
@@ -680,6 +767,9 @@ export const sanitizeHumanRunTrace = (input: unknown): HumanRunTrace => {
     ),
     rewards: object.rewards.map((reward, index) =>
       sanitizeReward(reward, `trace.rewards[${index}]`),
+    ),
+    path: object.path.map((fact, index) =>
+      sanitizePathFact(fact, `trace.path[${index}]`),
     ),
     result,
   };

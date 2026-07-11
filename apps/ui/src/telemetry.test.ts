@@ -92,7 +92,7 @@ describe("human telemetry capture", () => {
     const trace = terminalTrace();
     const initial = bootCombat();
     expect(trace).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       source: "human",
       runSeed: "telemetry-seed",
       contentVersion: "test-content",

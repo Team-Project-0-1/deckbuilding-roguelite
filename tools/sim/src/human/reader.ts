@@ -278,7 +278,8 @@ const sanitizeReward = (value: unknown, label: string): HumanRewardFact => {
   return {
     combatIndex: nonNegativeInteger(object, "combatIndex", label),
     stage,
-    options: stringArray(object.options, `${label}.options`, 16),
+    // v2: 10레이어 런은 가방이 16을 넘는다 (10 시작 + 전투 보상 + 상점 구매) — 32로 상향
+    options: stringArray(object.options, `${label}.options`, 32),
     choice,
     resolution: literalValue(
       object.resolution,
@@ -294,9 +295,35 @@ const sanitizeReward = (value: unknown, label: string): HumanRewardFact => {
   };
 };
 
+const sanitizePathFact = (value: unknown, label: string): HumanRunTraceLike["path"][number] => {
+  const object = objectValue(value, label);
+  const layer = nonNegativeInteger(object, "layer", label);
+  if (object.type === "choose-node") {
+    return { layer, type: "choose-node", choice: nonNegativeInteger(object, "choice", label) };
+  }
+  if (object.type !== "shop") throw new Error(`${label}.type is unsupported`);
+  const actions = boundedArray(object.actions, `${label}.actions`, 64).map((action, index) => {
+    const entry = objectValue(action, `${label}.actions[${index}]`);
+    if (entry.kind === "buy-coin")
+      return { kind: "buy-coin" as const, option: nonNegativeInteger(entry, "option", label) };
+    if (entry.kind === "buy-skill")
+      return {
+        kind: "buy-skill" as const,
+        option: nonNegativeInteger(entry, "option", label),
+        slot: nonNegativeInteger(entry, "slot", label)
+      };
+    if (entry.kind === "remove-coin")
+      return { kind: "remove-coin" as const, bagIndex: nonNegativeInteger(entry, "bagIndex", label) };
+    if (entry.kind === "leave") return { kind: "leave" as const };
+    throw new Error(`${label}.actions[${index}].kind is unsupported`);
+  });
+  return { layer, type: "shop", actions };
+};
+
 const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
   const object = objectValue(value, "trace");
-  if (object.schemaVersion !== 1) throw new Error("schemaVersion is unsupported");
+  // v2 (P4.3): path 사실 필수 — v1(그래프 이전) 로그는 콘텐츠 드리프트와 같은 이유로 거부
+  if (object.schemaVersion !== 2) throw new Error("schemaVersion is unsupported");
   if (object.source !== "human") throw new Error("source must be human");
   const contentVersion = stringValue(object, "contentVersion", "trace");
   if (contentVersion !== CONTENT_VERSION) {
@@ -309,7 +336,7 @@ const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
       ? undefined
       : nonNegativeInteger(object, "finalHp", "trace");
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     source: "human",
     runSeed: stringValue(object, "runSeed", "trace"),
     contentVersion,
@@ -321,6 +348,9 @@ const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
     ),
     rewards: boundedArray(object.rewards, "trace.rewards", 128).map(
       (reward, index) => sanitizeReward(reward, `trace.rewards[${index}]`),
+    ),
+    path: boundedArray(object.path, "trace.path", 64).map((fact, index) =>
+      sanitizePathFact(fact, `trace.path[${index}]`),
     ),
     result: literalValue(
       object.result,

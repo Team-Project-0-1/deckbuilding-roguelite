@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
+  chooseRunNode,
+  leaveShop,
   chooseCoinReward,
   createRun,
   resolveCoinRemoval,
@@ -120,7 +122,7 @@ const resolveRewards = (trace: HumanRunTraceLike, input: RunState): RunState => 
     choice: coinChoice === null ? null : String(coinChoice),
     resolution: coinChoice === null ? "skipped" : "selected",
   });
-  let run = chooseCoinReward(input, coinChoice);
+  let run = chooseCoinReward(input, coinChoice, contentDb);
   trace.rewards.push({
     combatIndex: completedCombatIndex,
     stage: "removal",
@@ -128,7 +130,7 @@ const resolveRewards = (trace: HumanRunTraceLike, input: RunState): RunState => 
     choice: null,
     resolution: "skipped",
   });
-  run = resolveCoinRemoval(run, null);
+  run = resolveCoinRemoval(run, null, contentDb);
   if (
     run.phase === "rewards" &&
     run.pendingRewards?.coinChoiceResolved === false &&
@@ -142,7 +144,7 @@ const resolveRewards = (trace: HumanRunTraceLike, input: RunState): RunState => 
       choice: fallback === null ? null : String(fallback),
       resolution: fallback === null ? "skipped" : "selected",
     });
-    run = chooseCoinReward(run, fallback);
+    run = chooseCoinReward(run, fallback, contentDb);
   }
   if (run.phase === "rewards" && run.pendingRewards?.skillChoiceResolved === false) {
     trace.rewards.push({
@@ -152,7 +154,7 @@ const resolveRewards = (trace: HumanRunTraceLike, input: RunState): RunState => 
       choice: null,
       resolution: "skipped",
     });
-    run = skipSkillReward(run);
+    run = skipSkillReward(run, contentDb);
   }
   return run;
 };
@@ -163,7 +165,7 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
     contentDb,
   );
   const trace: HumanRunTraceLike = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     source: "human",
     runSeed: seed,
     contentVersion: CONTENT_VERSION,
@@ -172,6 +174,7 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
     maxHp: run.maxHp,
     combats: [],
     rewards: [],
+    path: [],
     result: "in-progress",
   };
 
@@ -210,6 +213,19 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
     });
     run = settleRunCombat(started.run, state, contentDb);
     run = resolveRewards(trace, run);
+    while (run.phase === "choose-node" || run.phase === "shop") {
+      const layer = run.combatIndex;
+      if (run.phase === "choose-node") {
+        const options = run.graph.layers[layer] ?? [];
+        const found = options.findIndex((node) => node.kind !== "shop");
+        const choice = found < 0 ? 0 : found;
+        trace.path.push({ layer, type: "choose-node", choice });
+        run = chooseRunNode(run, choice, contentDb);
+      } else {
+        trace.path.push({ layer, type: "shop", actions: [{ kind: "leave" }] });
+        run = leaveShop(run, contentDb);
+      }
+    }
   }
 
   trace.result = run.phase;

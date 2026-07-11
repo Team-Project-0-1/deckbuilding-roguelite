@@ -6,7 +6,6 @@ import {
   type ConsumeSkillDef,
   type ContentDb,
   type EffectAtom,
-  type SlotId,
 } from "@game/core";
 
 import { commandKey, stableCommandOrder } from "./command-key";
@@ -75,12 +74,29 @@ const neutralOutcome = (
 
 const flipOutcome = (
   state: CombatState,
-  slot: SlotId,
+  command: Extract<Command, { type: "useFlipSkill" }>,
   db: ContentDb,
 ): PublicOutcome => {
   // Policy evaluation must never consume an injected runtime RNG. The core
   // preview reconstructs its deterministic oracle from the public snapshots.
-  const preview = previewFlip({ ...state, rngImpl: undefined }, slot, db);
+  const previewState =
+    command.target === undefined || command.target === 0
+      ? state
+      : {
+          ...state,
+          enemies: state.enemies.map((enemy, index) =>
+            index === 0
+              ? state.enemies[command.target!]!
+              : index === command.target
+                ? state.enemies[0]!
+                : enemy,
+          ),
+        };
+  const preview = previewFlip(
+    { ...previewState, rngImpl: undefined },
+    command.slot,
+    db,
+  );
   const baseLoss = incomingHpLoss(state);
   const expectedSelfDamage = preview.branches.reduce(
     (total, branch) => total + branch.selfDamage * branch.probability,
@@ -91,7 +107,7 @@ const flipOutcome = (
       total + Math.min(baseLoss, branch.block) * branch.probability,
     0,
   );
-  const committed = state.zones.placed[slot]?.length ?? 0;
+  const committed = state.zones.placed[command.slot]?.length ?? 0;
 
   return {
     expectedDamage: preview.expected.damage,
@@ -318,11 +334,11 @@ const placementOutcomes = (
     }
     if (!valid) continue;
     const use = legalCommands(planned, db).find(
-      (candidate) =>
+      (candidate): candidate is Extract<Command, { type: "useFlipSkill" }> =>
         candidate.type === "useFlipSkill" && candidate.slot === command.slot,
     );
     if (use === undefined) continue;
-    outcomes.push(flipOutcome(planned, command.slot, db));
+    outcomes.push(flipOutcome(planned, use, db));
   }
   return outcomes;
 };
@@ -335,7 +351,7 @@ const outcomesForCommand = (
 ): PublicOutcome[] => {
   switch (command.type) {
     case "useFlipSkill":
-      return [flipOutcome(state, command.slot, db)];
+      return [flipOutcome(state, command, db)];
     case "useConsumeSkill":
       return [consumeOutcome(state, command, db)];
     case "placeCoin": {

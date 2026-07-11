@@ -58,8 +58,18 @@ export interface HumanRewardFact {
   replacedSlot?: number;
 }
 
+export type HumanShopActionFact =
+  | { kind: "buy-coin"; option: number }
+  | { kind: "buy-skill"; option: number; slot: number }
+  | { kind: "remove-coin"; bagIndex: number }
+  | { kind: "leave" };
+
+export type HumanPathFact =
+  | { layer: number; type: "choose-node"; choice: number }
+  | { layer: number; type: "shop"; actions: HumanShopActionFact[] };
+
 export interface HumanRunTraceLike {
-  schemaVersion: 1;
+  schemaVersion: 2;
   source: "human";
   runSeed: string;
   contentVersion: string;
@@ -68,6 +78,7 @@ export interface HumanRunTraceLike {
   maxHp: number;
   combats: HumanCombatTrace[];
   rewards: HumanRewardFact[];
+  path: HumanPathFact[];
   result: RunResult;
   endedAtLocal?: string;
   finalHp?: number;

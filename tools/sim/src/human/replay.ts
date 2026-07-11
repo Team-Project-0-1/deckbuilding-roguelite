@@ -1,8 +1,13 @@
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
+  buyShopCoin,
+  buyShopRemoval,
+  buyShopSkill,
   chooseCoinReward,
+  chooseRunNode,
   chooseSkillReward,
   createRun,
+  leaveShop,
   resolveCoinRemoval,
   settleRunCombat,
   skipSkillReward,
@@ -210,7 +215,7 @@ const resolveReward = (
     }
     const choice = reward.choice === null ? null : (reward.choice as CoinDefId);
     try {
-      return chooseCoinReward(input, choice);
+      return chooseCoinReward(input, choice, contentDb);
     } catch (error) {
       mismatches.push(`${path} resolution failed: ${error instanceof Error ? error.message : String(error)}`);
       return input;
@@ -230,7 +235,7 @@ const resolveReward = (
     );
   }
   try {
-    if (reward.choice === null) return skipSkillReward(input);
+    if (reward.choice === null) return skipSkillReward(input, contentDb);
     return chooseSkillReward(
       input,
       reward.choice as SkillId,
@@ -299,7 +304,66 @@ export function replayHumanRun(trace: HumanRunTraceLike): {
       left.combatIndex - right.combatIndex || left.attempt - right.attempt,
   );
 
+  // P4.3: 비전투 노드(갈림길·상점)는 기록된 path 사실로만 통과한다 — 사실이 없거나
+  // 코어가 거부하면 mismatch (리플레이가 임의 정책으로 경로를 지어내지 않는다).
+  const traversePath = (current: RunState): RunState => {
+    let next = current;
+    let guard = 0;
+    while (
+      (next.phase === "choose-node" || next.phase === "shop") &&
+      guard < 128
+    ) {
+      guard += 1;
+      const layer = next.combatIndex;
+      const fact = trace.path.find((entry) => entry.layer === layer);
+      if (fact === undefined) {
+        mismatches.push(`path fact missing for layer ${layer} (${next.phase})`);
+        return next;
+      }
+      try {
+        if (next.phase === "choose-node") {
+          if (fact.type !== "choose-node") {
+            mismatches.push(`path fact for layer ${layer} is not choose-node`);
+            return next;
+          }
+          next = chooseRunNode(next, fact.choice, contentDb);
+        } else {
+          if (fact.type !== "shop") {
+            mismatches.push(`path fact for layer ${layer} is not shop`);
+            return next;
+          }
+          let left = false;
+          for (const action of fact.actions) {
+            if (action.kind === "buy-coin")
+              next = buyShopCoin(next, action.option, contentDb);
+            else if (action.kind === "buy-skill")
+              next = buyShopSkill(next, action.option, contentDb, action.slot);
+            else if (action.kind === "remove-coin")
+              next = buyShopRemoval(next, action.bagIndex, contentDb);
+            else {
+              next = leaveShop(next, contentDb);
+              left = true;
+              break;
+            }
+          }
+          if (!left) {
+            mismatches.push(`shop fact for layer ${layer} never leaves`);
+            return next;
+          }
+        }
+      } catch (error) {
+        mismatches.push(
+          `path replay failed at layer ${layer}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return next;
+      }
+    }
+    return next;
+  };
+
   for (const combatTrace of sortedCombats) {
+    run = traversePath(run);
+    if (mismatches.length > 0 && run.phase !== "ready") break;
     if (run.phase !== "ready") {
       mismatches.push(
         `combat ${combatTrace.combatIndex} mismatch: run phase is ${run.phase}`,

@@ -1,9 +1,14 @@
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
   RUN_ENCOUNTERS,
+  buyShopCoin,
+  buyShopRemoval,
+  buyShopSkill,
   chooseCoinReward,
   chooseSkillReward,
+  chooseRunNode,
   createRun,
+  leaveShop,
   legalCommands,
   resolveCoinRemoval,
   settleRunCombat,
@@ -243,6 +248,7 @@ export interface M6PolicyRunOptions {
   readonly characterId?: SimCharacterId;
   readonly variantId?: M6VariantId;
   readonly buildPolicyId?: M6BuildPolicyId;
+  readonly nodePolicyId?: NodePolicyId;
   readonly maxCommandsPerCombat?: number;
 }
 
@@ -255,6 +261,8 @@ interface RewardResolution {
   readonly run: RunState;
   readonly trace: M6RewardDecisionTrace;
 }
+
+export type NodePolicyId = "fight-first" | "economy-first";
 
 const incomingDamage = (state: CombatState): number =>
   state.enemies.reduce(
@@ -471,7 +479,7 @@ const resolveRewardsDetailed = (
   const completedCombatIndex = input.combatIndex - 1;
   const coinOptions = (input.pendingRewards?.coinOptions ?? []).map(String);
   const selectedCoin = preferredCoinReward(input, buildPolicy);
-  let run = chooseCoinReward(input, selectedCoin);
+  let run = chooseCoinReward(input, selectedCoin, contentDb);
   const removableBasic = run.bag.findIndex(
     (coin) => String(coin) === "basic",
   );
@@ -489,7 +497,7 @@ const resolveRewardsDetailed = (
   ) {
     fallbackCoinOptions = run.pendingRewards.coinOptions.map(String);
     selectedFallbackCoin = preferredCoinReward(run, buildPolicy);
-    run = chooseCoinReward(run, selectedFallbackCoin);
+    run = chooseCoinReward(run, selectedFallbackCoin, contentDb);
   }
 
   const skillOptions = (run.pendingRewards?.skillOptions ?? []).map(String);
@@ -503,12 +511,12 @@ const resolveRewardsDetailed = (
     selectedSkill =
       buildPolicy.skillRewardPriority.map((skillId) =>
         offered.find((skill) => String(skill) === skillId),
-      ).find((skill): skill is SkillId => skill !== undefined) ?? null;
+    ).find((skill): skill is SkillId => skill !== undefined) ?? null;
     if (selectedSkill === null) {
-      run = skipSkillReward(run);
+      run = skipSkillReward(run, contentDb);
     } else {
       replacedSlot = replacementSlot(run, buildPolicy);
-      run = chooseSkillReward(run, selectedSkill, replacedSlot);
+      run = chooseSkillReward(run, selectedSkill, replacedSlot, contentDb);
     }
   }
 
@@ -562,6 +570,90 @@ const resolveRewards = (input: RunState): RunState =>
     ),
   ).run;
 
+const chooseNode = (
+  run: RunState,
+  nodePolicyId: NodePolicyId,
+): RunState => {
+  const layer = run.graph.layers[run.combatIndex] ?? [];
+  const combatIndex = layer.findIndex(
+    (node) =>
+      node.kind === "combat" || node.kind === "elite" || node.kind === "boss",
+  );
+  const shopIndex = layer.findIndex((node) => node.kind === "shop");
+  const choice =
+    nodePolicyId === "economy-first" && shopIndex >= 0
+      ? shopIndex
+      : combatIndex >= 0
+        ? combatIndex
+        : 0;
+  return chooseRunNode(run, choice, contentDb);
+};
+
+const highestRarityShopSkillIndex = (run: RunState): number => {
+  const pending = run.pendingShop;
+  if (pending === undefined) return -1;
+  const rank = { common: 0, advanced: 1, rare: 2 } as const;
+  let bestIndex = -1;
+  let bestRank = -1;
+  for (let index = 0; index < pending.skillOptions.length; index += 1) {
+    const skill = pending.skillOptions[index]!;
+    if (run.equippedSkills.map(String).includes(String(skill))) continue;
+    const rarity = contentDb.skills[String(skill)]?.rarity;
+    if (rarity !== undefined && rank[rarity] > bestRank) {
+      bestIndex = index;
+      bestRank = rank[rarity];
+    }
+  }
+  return bestIndex;
+};
+
+const resolveShop = (
+  input: RunState,
+  buildPolicy: M6BuildPolicyConfig,
+): RunState => {
+  let run = input;
+  let removedOnce = false;
+  for (let stepIndex = 0; stepIndex < 500 && run.phase === "shop"; stepIndex += 1) {
+    const pending = run.pendingShop;
+    if (pending === undefined) throw new Error("shop phase requires pending shop");
+    const basicIndex = run.bag.findIndex((coin) => String(coin) === "basic");
+    const removalCost = 75 + 25 * run.shopRemovals;
+    if (
+      !removedOnce &&
+      basicIndex >= 0 &&
+      run.bag.length > 1 &&
+      run.gold >= removalCost
+    ) {
+      run = buyShopRemoval(run, basicIndex, contentDb);
+      removedOnce = true;
+      continue;
+    }
+    const coinIndex = buildPolicy.coinRewardPriority
+      .map((coinId) =>
+        pending.coinOptions.findIndex((coin) => String(coin) === coinId),
+      )
+      .find((index) => index !== -1 && run.gold >= pending.coinPrices[index]!);
+    if (coinIndex !== undefined) {
+      run = buyShopCoin(run, coinIndex, contentDb);
+      continue;
+    }
+    const skillIndex = highestRarityShopSkillIndex(run);
+    if (skillIndex >= 0 && run.gold >= pending.skillPrices[skillIndex]!) {
+      run = buyShopSkill(
+        run,
+        skillIndex,
+        contentDb,
+        replacementSlot(run, buildPolicy),
+      );
+      continue;
+    }
+    return leaveShop(run, contentDb);
+  }
+  if (run.phase === "shop")
+    throw new Error("shop policy did not finish within 500 commands");
+  return run;
+};
+
 const permanentCoinIds = (combat: CombatState): string[] =>
   Object.values(combat.coins)
     .filter((coin) => coin.permanent)
@@ -570,6 +662,7 @@ const permanentCoinIds = (combat: CombatState): string[] =>
 export const simulateRun = (
   seed: string,
   characterId: SimCharacterId = "warrior",
+  nodePolicyId: NodePolicyId = "fight-first",
 ): RunSimulation => {
   let run = createRun(
     {
@@ -582,6 +675,17 @@ export const simulateRun = (
   const combats: CombatRunRecord[] = [];
 
   while (run.phase !== "victory" && run.phase !== "defeat") {
+    if (run.phase === "choose-node") {
+      run = chooseNode(run, nodePolicyId);
+      continue;
+    }
+    if (run.phase === "shop") {
+      run = resolveShop(
+        run,
+        resolveBuildPolicy(characterId, "baseline"),
+      );
+      continue;
+    }
     if (run.phase !== "ready")
       throw new Error(`unexpected run phase before combat: ${run.phase}`);
     const startingBag = run.bag.map(String);
@@ -677,8 +781,17 @@ export const simulatePolicyRun = (
       runSeed: options.runSeed,
       episodeIndex: options.episodeIndex,
     });
+    const nodePolicyId = options.nodePolicyId ?? "fight-first";
 
     while (run.phase !== "victory" && run.phase !== "defeat") {
+      if (run.phase === "choose-node") {
+        run = chooseNode(run, nodePolicyId);
+        continue;
+      }
+      if (run.phase === "shop") {
+        run = resolveShop(run, buildPolicy);
+        continue;
+      }
       if (run.phase !== "ready") {
         throw new Error(`unexpected run phase before combat: ${run.phase}`);
       }
@@ -772,5 +885,7 @@ export const simulatePolicyRun = (
   };
 };
 
-export const expectedEncounterOrder = (): string[][] =>
+// P4.2b: 조우 순서는 시드의 생성 그래프 + 경로 정책이 결정한다 — 레거시 RUN_ENCOUNTERS
+// 정적 순서는 폐기. 레거시 헬퍼가 필요한 테스트는 실제 시뮬 결과를 골든으로 고정한다.
+export const legacyEncounterOrder = (): string[][] =>
   RUN_ENCOUNTERS.map((encounter) => encounter.map(String));
