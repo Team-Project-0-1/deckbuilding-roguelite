@@ -2274,3 +2274,98 @@ button:focus-visible {
     transform: none;
   }
 }
+
+/* ---------- P4.4 이벤트 화면 ---------- */
+.event-screen {
+  max-width: 640px;
+  margin: 30px auto;
+  padding: 20px;
+  border: 3px solid var(--gold, #c9a227);
+  border-radius: 10px;
+  background: rgba(16, 20, 30, 0.94);
+  color: #f3e9d2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.event-prompt {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.event-terms {
+  margin: 0;
+  display: flex;
+  gap: 24px;
+}
+
+.event-terms dt {
+  color: #ffb3b3;
+  font-size: 12px;
+}
+
+.event-terms div:last-child dt {
+  color: #b8e8b0;
+}
+
+.event-terms dd {
+  margin: 2px 0 0;
+}
+
+.event-rejection,
+.event-disabled-reason {
+  color: #ffb3b3;
+  margin: 0;
+}
+
+.event-coin-picks ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.event-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 2px solid #6b5a2c;
+  border-radius: 8px;
+  background: #1d2434;
+  color: inherit;
+}
+
+.event-pick.picked {
+  border-color: var(--gold-2, #f2cf5b);
+  outline: 2px solid var(--gold-2, #f2cf5b);
+}
+
+.event-pick:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.event-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.event-actions button {
+  padding: 10px 18px;
+  border: 2px solid var(--gold, #c9a227);
+  border-radius: 8px;
+  background: #2a3247;
+  color: #f3e9d2;
+  font-weight: 700;
+}
+
+.event-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

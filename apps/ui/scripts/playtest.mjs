@@ -3152,6 +3152,181 @@ const winCurrentCombat = async (page) => {
   }
 }
 
+// ---------- 시나리오 26: P4.4 이벤트 4종 — 저장 주입 결정론 검증 ----------
+// pendingEvent는 롤 결과가 저장되는 사실이므로 v5 저장 주입으로 4종을 각각 고정한다.
+{
+  const injectEvent = async (eventId, extra = {}) => {
+    const layers = [
+      [{ id: "v0", kind: "combat", encounter: ["raider"] }],
+      [{ id: "v1", kind: "event" }],
+      [{ id: "v2", kind: "boss", encounter: ["ember-archmage"] }],
+    ];
+    const save = {
+      version: 5,
+      contentVersion: "0.10.0-p4.4",
+      runSeed: "S26-EVENT",
+      character: "warrior",
+      currentHp: 63,
+      maxHp: 70,
+      bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
+      equippedSkills: [
+        "slash",
+        "guard",
+        "burning-strike",
+        "ignite",
+        "ignite-sword",
+        "flame-rampage",
+      ],
+      gold: 120,
+      graph: { layers },
+      nodeChoices: [0, 0, 0],
+      shopRemovals: 0,
+      shopPurchasedCoins: 0,
+      shopPurchasedSkills: 0,
+      eventCombats: 0,
+      eventCoinGains: 0,
+      eventCoinLosses: 0,
+      combatIndex: 1,
+      attempt: 0,
+      phase: "event",
+      pendingEvent: { eventId },
+      ...extra,
+    };
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error.message)));
+    page.on("console", (message) => {
+      if (
+        message.type() === "error" &&
+        !message.location().url.endsWith("/favicon.ico")
+      )
+        errors.push(message.text());
+    });
+    await page.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
+    );
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-testid="event-screen"]', {
+      timeout: 15000,
+    });
+    return { page, errors, context };
+  };
+  const phaseOf = (page) =>
+    page.locator('[data-testid="run-phase"]').getAttribute("data-run-phase");
+  const goldOf = async (page) =>
+    (await page.locator('[data-testid="run-gold"]').innerText()).replace(/\D/g, "");
+
+  // ① 피의 제물 — HP 5 지불, 대표 코인 +1
+  {
+    const { page, errors, context } = await injectEvent("blood-offering");
+    check(
+      "S26 제물 위험·보상 문구",
+      (await page.locator('[data-testid="event-risk"]').innerText()).includes(
+        "체력 5",
+      ) &&
+        (
+          await page.locator('[data-testid="event-reward"]').innerText()
+        ).includes("대표 속성"),
+    );
+    await page.locator('[data-testid="event-accept"]').click();
+    check(
+      "S26 제물 수락 — HP 58·가방 11",
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-current-hp")) === "58" &&
+        (
+          (await page
+            .locator('[data-testid="run-phase"]')
+            .getAttribute("data-bag")) ?? ""
+        )
+          .split(",")
+          .filter(Boolean).length === 11,
+    );
+    check("S26 제물 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // ② 변환 제단 — 코인 선택 필수, 100골드 지불, 가방 크기 불변
+  {
+    const { page, errors, context } = await injectEvent("transmute-altar");
+    check(
+      "S26 제단 선택 전 수락 비활성",
+      await page.locator('[data-testid="event-accept"]').isDisabled(),
+    );
+    check(
+      "S26 제단 비기본 코인 선택 불가",
+      await page.locator('[data-testid="event-pick-8"]').isDisabled(),
+    );
+    await page.locator('[data-testid="event-pick-0"]').click();
+    await page.locator('[data-testid="event-accept"]').click();
+    const bag = (
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-bag")) ?? ""
+    )
+      .split(",")
+      .filter(Boolean);
+    check(
+      "S26 제단 수락 — 골드 20·가방 10·fire 3",
+      (await goldOf(page)) === "20" &&
+        bag.length === 10 &&
+        bag.filter((coin) => coin === "fire").length === 3,
+    );
+    check("S26 제단 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // ③ 동전 희생 — 기본 −1·대표 +1 (순 크기 불변)
+  {
+    const { page, errors, context } = await injectEvent("coin-sacrifice");
+    await page.locator('[data-testid="event-pick-0"]').click();
+    await page.locator('[data-testid="event-accept"]').click();
+    const bag = (
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-bag")) ?? ""
+    )
+      .split(",")
+      .filter(Boolean);
+    check(
+      "S26 희생 수락 — basic 7·fire 3",
+      bag.filter((coin) => coin === "basic").length === 7 &&
+        bag.filter((coin) => coin === "fire").length === 3,
+    );
+    check("S26 희생 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // ④ 매복 현상금 — 수락 → 즉시 전투 준비, 거절 경로는 다음 노드 진입
+  {
+    const { page, errors, context } = await injectEvent("ambush-bounty");
+    await page.locator('[data-testid="event-accept"]').click();
+    check("S26 매복 수락 — 전투 준비 전이", (await phaseOf(page)) === "ready");
+    check("S26 매복 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  {
+    const { page, errors, context } = await injectEvent("blood-offering", {
+      currentHp: 5,
+    });
+    check(
+      "S26 체력 하한 — 수락 비활성·사유 표기",
+      (await page.locator('[data-testid="event-accept"]').isDisabled()) &&
+        (
+          await page
+            .locator('[data-testid="event-disabled-reason"]')
+            .innerText()
+        ).includes("체력"),
+    );
+    await page.locator('[data-testid="event-decline"]').click();
+    check("S26 거절 — 다음 노드 진입", (await phaseOf(page)) === "ready");
+    check("S26 하한/거절 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 await browser.close();
 if (server !== null)
   await new Promise((resolveClose) => server.httpServer.close(resolveClose));

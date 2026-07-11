@@ -11,9 +11,11 @@ import type {
   SlotId,
 } from "@game/core";
 import {
+  acceptEvent,
   buyShopCoin,
   buyShopRemoval,
   buyShopSkill,
+  declineEvent,
   chooseCoinReward,
   chooseRunNode,
   chooseSkillReward,
@@ -66,6 +68,7 @@ import {
   SwordIcon,
 } from "./icons";
 import { coinNameFor, coinRewardDetailFor } from "./coin-info";
+import { EventScreen } from "./event-screen";
 import { NodeChoice } from "./node-choice";
 import { ShopScreen } from "./shop-screen";
 import { Keyword } from "./keywords";
@@ -146,6 +149,7 @@ import {
   finishHumanCombat,
   finishHumanRun,
   recordHumanDecision,
+  recordHumanEventAction,
   recordHumanNodeChoice,
   recordHumanReward,
   recordHumanShopAction,
@@ -737,9 +741,11 @@ const RunMeta = ({ run }: { run: RunState }) => {
           ? "패배"
           : run.phase === "shop"
             ? "상점"
-            : run.phase === "choose-node"
-              ? "갈림길"
-              : enemyNameFor(run);
+            : run.phase === "event"
+              ? "이벤트"
+              : run.phase === "choose-node"
+                ? "갈림길"
+                : enemyNameFor(run);
   return (
     <header
       aria-label="런 진행 정보"
@@ -776,12 +782,27 @@ const shopRejectionKo = (message: string): string =>
         ? "이미 장착한 스킬입니다."
         : "구매할 수 없습니다.";
 
+const eventRejectionKo = (message: string): string =>
+  message.includes("not enough HP")
+    ? "체력이 부족합니다."
+    : message.includes("not enough gold")
+      ? "골드가 부족합니다."
+      : message.includes("requires a basic coin")
+        ? "기본 코인을 골라야 합니다."
+        : message.includes("bagIndex is required")
+          ? "대상 코인을 먼저 고릅니다."
+          : message.includes("cannot sacrifice")
+            ? "마지막 동전은 희생할 수 없습니다."
+            : "지금은 수락할 수 없습니다.";
+
 const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
   const [session, setSession] = useState<RunSession>(initialSession);
   const [removalIndex, setRemovalIndex] = useState<number | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillId | null>(null);
   const [shopRejection, setShopRejection] = useState<string | null>(null);
   const [shopSkillPick, setShopSkillPick] = useState<number | null>(null);
+  const [eventPick, setEventPick] = useState<number | null>(null);
+  const [eventRejection, setEventRejection] = useState<string | null>(null);
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   const { run, combat } = session;
   const telemetryRef = useRef<HumanRunTrace | null>(null);
@@ -808,6 +829,8 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
     setSelectedSkill(null);
     setShopSkillPick(null);
     setShopRejection(null);
+    setEventPick(null);
+    setEventRejection(null);
   }, [run.combatIndex, run.phase, rewardStage]);
 
   useEffect(() => {
@@ -840,6 +863,28 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
   const commitReward = (next: RunState, reward: RecordHumanRewardInput) => {
     telemetryRef.current = recordHumanReward(currentTelemetry(), reward);
     commitRun(next);
+  };
+
+  // 이벤트 액션 공통 경로 — 성공 시에만 경로 사실 기록 (schema v2 additive)
+  const runEventAction = (
+    action: () => RunState,
+    fact: { action: "accept" | "decline"; choice?: number },
+  ) => {
+    try {
+      const next = action();
+      telemetryRef.current = recordHumanEventAction(currentTelemetry(), {
+        layer: run.combatIndex,
+        ...fact,
+      });
+      setEventRejection(null);
+      commitRun(next);
+    } catch (error) {
+      setEventRejection(
+        error instanceof Error
+          ? eventRejectionKo(error.message)
+          : "지금은 수락할 수 없습니다.",
+      );
+    }
   };
 
   const startNextCombat = () => {
@@ -1282,6 +1327,86 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
                 노드 {run.combatIndex + 1}/{run.graph.layers.length} 전투 시작
               </button>
             </>
+          ) : run.phase === "event" && run.pendingEvent !== undefined ? (
+            (() => {
+              const def = (contentDb.events ?? {})[String(run.pendingEvent.eventId)];
+              if (def === undefined) return null;
+              const needsPick = def.risk === "gold" || def.risk === "coin";
+              const riskLine =
+                def.risk === "combat"
+                  ? "엘리트 전투 — 패배하면 런이 끝난다"
+                  : def.risk === "hp"
+                    ? `체력 ${def.hpCost} 감소`
+                    : def.risk === "gold"
+                      ? `골드 ${def.goldCost} 지불 + 기본 코인 1개 영구 변환`
+                      : "기본 코인 1개 제거";
+              const rewardLine =
+                def.risk === "combat"
+                  ? `승리 시 골드 70 + 희귀 스킬 ${def.rareSkillOptions}종 진열`
+                  : "대표 속성 코인 1개";
+              const acceptDisabled =
+                (def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove) ||
+                (def.risk === "gold" && run.gold < def.goldCost) ||
+                (needsPick && eventPick === null);
+              const disabledReason =
+                def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove
+                  ? "체력이 부족합니다."
+                  : def.risk === "gold" && run.gold < def.goldCost
+                    ? "골드가 부족합니다."
+                    : needsPick && eventPick === null
+                      ? "대상 기본 코인을 먼저 고릅니다."
+                      : null;
+              return (
+                <EventScreen
+                  acceptDisabled={acceptDisabled}
+                  acceptLabel={def.risk === "combat" ? "맞서 싸운다" : "수락한다"}
+                  coinPicks={
+                    needsPick
+                      ? run.bag.map((coin, bagIndex) => ({
+                          bagIndex,
+                          name: coinName(coin),
+                          visualClass: String(
+                            contentDb.coins[String(coin)]?.element ?? "",
+                          ),
+                          pickable: String(coin) === "basic",
+                        }))
+                      : null
+                  }
+                  disabledReason={disabledReason}
+                  name={def.name}
+                  prompt={def.prompt}
+                  rejection={eventRejection}
+                  rewardLine={rewardLine}
+                  riskLine={riskLine}
+                  selectedPick={eventPick}
+                  onAccept={() =>
+                    runEventAction(
+                      () =>
+                        acceptEvent(
+                          run,
+                          contentDb,
+                          needsPick ? (eventPick ?? undefined) : undefined,
+                        ),
+                      {
+                        action: "accept",
+                        ...(needsPick && eventPick !== null
+                          ? { choice: eventPick }
+                          : {}),
+                      },
+                    )
+                  }
+                  onDecline={() =>
+                    runEventAction(() => declineEvent(run, contentDb), {
+                      action: "decline",
+                    })
+                  }
+                  onPick={(bagIndex) => {
+                    setEventRejection(null);
+                    setEventPick(bagIndex);
+                  }}
+                />
+              );
+            })()
           ) : run.phase === "choose-node" ? (
             <NodeChoice
               layerLabel={`노드 ${run.combatIndex + 1}/${run.graph.layers.length}`}
@@ -1293,7 +1418,9 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
                   detail:
                     node.kind === "shop"
                       ? "골드로 동전·스킬 구매, 동전 제거"
-                      : (node.encounter ?? [])
+                      : node.kind === "event"
+                        ? "위험과 보상 — 무엇이 기다리는지 모른다"
+                        : (node.encounter ?? [])
                           .map(
                             (enemy) =>
                               contentDb.enemies[String(enemy)]?.name ?? "적",
