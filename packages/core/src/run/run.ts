@@ -80,7 +80,14 @@ const pendingRewardsFor = (
   );
   const coinOptions = rewardRng.shuffle(REWARD_COIN_IDS);
   const owned = new Set(run.equippedSkills.map(String));
+  // 캐릭터 전용 스킬은 명시적 exclusiveTo 데이터로 풀 경계를 가른다 — 해당 캐릭터
+  // 런에서만 후보가 되고, 다른 캐릭터의 풀·셔플 순서에는 존재 자체가 개입하지 않는다.
   const unowned = Object.values(db.skills)
+    .filter(
+      (skill) =>
+        skill.exclusiveTo === undefined ||
+        String(skill.exclusiveTo) === String(run.character),
+    )
     .map((skill) => skill.id)
     .filter((skill) => !owned.has(String(skill)))
     .sort((left, right) => String(left).localeCompare(String(right)));

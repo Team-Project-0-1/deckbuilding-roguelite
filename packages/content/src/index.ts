@@ -131,8 +131,60 @@ export const skills = {
     cost: 1,
     base: [{ kind: 'grantElement', element: 'fire', scope: 'chooseBasicInHand' }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] }
+  },
+  'warding-strike': {
+    id: skill('warding-strike'),
+    exclusiveTo: character('guardian'),
+    name: '수호 타격',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack', 'defense'],
+    targetType: 'single-enemy',
+    cost: 1,
+    base: [{ kind: 'damage', amount: 5 }],
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 4 }] }
+  },
+  'mana-bulwark': {
+    id: skill('mana-bulwark'),
+    exclusiveTo: character('guardian'),
+    name: '마나 방벽',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'self',
+    cost: 2,
+    base: [{ kind: 'block', amount: 8 }],
+    tails: { mode: 'per', effects: [{ kind: 'block', amount: 3 }] }
+  },
+  'shield-reprisal': {
+    id: skill('shield-reprisal'),
+    exclusiveTo: character('guardian'),
+    name: '방패 반격',
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack', 'defense'],
+    targetType: 'single-enemy',
+    cost: 2,
+    base: [
+      { kind: 'block', amount: 6 },
+      { kind: 'damage', amount: 4 }
+    ],
+    tails: { mode: 'per', effects: [{ kind: 'damage', amount: 4 }] }
+  },
+  'mana-well': {
+    id: skill('mana-well'),
+    exclusiveTo: character('guardian'),
+    name: '마나 샘',
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['defense', 'utility'],
+    targetType: 'self',
+    cost: 1,
+    base: [{ kind: 'addCoin', coin: coin('mana'), zone: 'discard', count: 1 }],
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 4 }] }
   }
 } satisfies Record<string, SkillDef>;
+
 
 export const enemies = {
   raider: {
@@ -241,6 +293,26 @@ export const characters = {
       name: '불씨 주머니',
       hook: 'combatStart',
       effects: [{ kind: 'addCoin', coin: coin('fire'), zone: 'draw', count: 1 }]
+    }
+  },
+  guardian: {
+    id: character('guardian'),
+    name: '수호자',
+    maxHp: 70,
+    startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('mana'), coin('mana')],
+    startingSkills: [
+      skill('slash'),
+      skill('guard'),
+      skill('warding-strike'),
+      skill('mana-bulwark'),
+      skill('shield-reprisal'),
+      skill('mana-well')
+    ],
+    trait: {
+      id: 'quiet-spring',
+      name: '고요한 샘',
+      hook: 'combatStart',
+      effects: [{ kind: 'addCoin', coin: coin('mana'), zone: 'draw', count: 1 }]
     }
   }
 } satisfies Record<string, CharacterDef>;

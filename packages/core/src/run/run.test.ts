@@ -286,6 +286,24 @@ describe("run progression", () => {
     ).toBe(false);
   });
 
+  // P3.2 명시적 풀 경계: exclusiveTo 스킬은 다른 캐릭터의 보상 풀·셔플에 존재 자체가 개입하지 않는다
+  it("excludes exclusiveTo skills from other characters' reward pools across seeds", () => {
+    const db = testDb();
+    db.skills["gx"] = {
+      ...simpleSkill("gx"),
+      exclusiveTo: id<CharacterId>("guardian"),
+    };
+    const baseline = testDb();
+    for (const seed of ["A", "B", "C", "D", "E"]) {
+      const withExclusive = reachSecondSkillReward(db, seed);
+      const options = withExclusive.pendingRewards?.skillOptions.map(String);
+      expect(options).not.toContain("gx");
+      // 전용 스킬이 풀에 없을 때와 셔플 결과까지 완전 동일 — 존재 자체 비개입
+      const control = reachSecondSkillReward(baseline, seed);
+      expect(options).toEqual(control.pendingRewards?.skillOptions.map(String));
+    }
+  });
+
   it("removes one permanent coin and requires an explicit skill replacement slot", () => {
     let run = reachSecondSkillReward();
     const originalBag = [...run.bag];

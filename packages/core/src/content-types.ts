@@ -33,6 +33,9 @@ export interface SkillDefBase {
   tags: readonly ('attack' | 'defense' | 'utility' | 'ultimate')[];
   targetType: 'single-enemy' | 'all-enemies' | 'self' | 'none';
   oncePerCombat?: boolean;
+  // 캐릭터 전용 스킬 — 공용 보상 풀에서 제외되고 해당 캐릭터 런에서만 노출된다.
+  // 숨김 프로퍼티 같은 암묵 경계 대신 명시적 데이터로 풀 경계를 표현한다 (P3.2 결정).
+  exclusiveTo?: CharacterId;
 }
 
 export interface FlipSkillDef extends SkillDefBase {
