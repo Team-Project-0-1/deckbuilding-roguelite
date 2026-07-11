@@ -3,6 +3,14 @@ import type { Command } from "@game/core";
 const numericKey = (value: number): string => String(value).padStart(10, "0");
 const targetKey = (target: number | undefined): string =>
   target === undefined ? "none" : numericKey(target);
+const coinsKey = (coins: readonly number[] | undefined): string =>
+  coins === undefined
+    ? "none"
+    : coins
+        .map(Number)
+        .sort((left, right) => left - right)
+        .map(numericKey)
+        .join(",");
 
 export const commandKey = (command: Command): string => {
   switch (command.type) {
@@ -13,13 +21,9 @@ export const commandKey = (command: Command): string => {
     case "unplaceCoin":
       return `2:unplaceCoin:coin=${numericKey(Number(command.coin))}`;
     case "useFlipSkill":
-      return `3:useFlipSkill:slot=${numericKey(Number(command.slot))}:target=${targetKey(command.target)}`;
+      return `3:useFlipSkill:slot=${numericKey(Number(command.slot))}:target=${targetKey(command.target)}:chosen=${coinsKey(command.chosen)}`;
     case "useConsumeSkill": {
-      const coins = command.coins
-        .map(Number)
-        .sort((left, right) => left - right)
-        .map(numericKey)
-        .join(",");
+      const coins = coinsKey(command.coins);
       return `4:useConsumeSkill:slot=${numericKey(Number(command.slot))}:target=${targetKey(command.target)}:coins=${coins}`;
     }
   }

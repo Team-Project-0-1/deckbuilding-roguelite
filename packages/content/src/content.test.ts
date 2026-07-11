@@ -63,14 +63,14 @@ const withHandDefs = (state: CombatState, defs: readonly string[]): CombatState 
   }
 });
 
-const useFlip = (state: CombatState, coinsToUse: readonly CoinUid[], target?: number) => {
+const useFlip = (state: CombatState, coinsToUse: readonly CoinUid[], target?: number, chosen?: CoinUid[]) => {
   let current = state;
   for (const coin of coinsToUse) {
     const placed = step(current, { type: 'placeCoin', coin, slot: slotId(0) }, contentDb);
     if (!placed.ok) throw new Error(placed.error);
     current = placed.state;
   }
-  const result = step(current, { type: 'useFlipSkill', slot: slotId(0), target }, contentDb);
+  const result = step(current, { type: 'useFlipSkill', slot: slotId(0), target, chosen }, contentDb);
   if (!result.ok) throw new Error(result.error);
   return result;
 };
@@ -190,7 +190,7 @@ describe('M5 shipped content', () => {
     expect(skills.furnace).toMatchObject({
       name: '용광로',
       cost: 1,
-      base: [{ kind: 'grantElement', element: 'fire', scope: 'allBasicInHand' }],
+      base: [{ kind: 'grantElement', element: 'fire', scope: 'chooseBasicInHand' }],
       heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] }
     });
     expect(enemies.gatekeeper.maxHp).toBe(70);
@@ -290,11 +290,11 @@ describe('M5 shipped content', () => {
       throw new Error('missing furnace hand');
     }
 
-    const result = useFlip(state, [cost], 0);
+    const result = useFlip(state, [cost], 0, [basicTwo]);
     expect(result.state.enemies[0]?.hp).toBe(71);
-    expect(result.events).toContainEqual({ type: 'elementGranted', coins: [basicOne, basicTwo], element: 'fire' });
+    expect(result.events).toContainEqual({ type: 'elementGranted', coins: [basicTwo], element: 'fire' });
     expect(result.state.coins[Number(cost)]?.grants).toEqual([]);
-    expect(result.state.coins[Number(basicOne)]?.grants).toEqual(['fire']);
+    expect(result.state.coins[Number(basicOne)]?.grants).toEqual([]);
     expect(result.state.coins[Number(basicTwo)]?.grants).toEqual(['fire']);
     expect(result.state.coins[Number(fire)]?.grants).toEqual([]);
     expect(result.state.coins[Number(mana)]?.grants).toEqual([]);

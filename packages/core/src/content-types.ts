@@ -57,7 +57,7 @@ export type EffectAtom =
   | { kind: 'selfDamage'; amount: number }
   | { kind: 'applyStatus'; status: StatusId; stacks: number; to: 'target' | 'self' }
   | { kind: 'addCoin'; coin: CoinDefId; zone: 'draw' | 'discard' | 'hand'; count: number }
-  | { kind: 'grantElement'; element: Element; scope: 'allBasicInHand' };
+  | { kind: 'grantElement'; element: Element; scope: 'allBasicInHand' | 'chooseBasicInHand' };
 
 export interface CharacterDef {
   id: CharacterId;

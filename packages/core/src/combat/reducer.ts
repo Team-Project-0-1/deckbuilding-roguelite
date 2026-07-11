@@ -1,4 +1,4 @@
-import type { ContentDb } from '../content-types';
+import type { ContentDb, FlipSkillDef } from '../content-types';
 import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, SkillId, SlotId } from '../ids';
 import { derive, rngFrom, seedFromString } from '../rng';
 import type { Command } from './commands';
@@ -182,6 +182,38 @@ const validateSingleEnemyTarget = (input: CombatState, target: number | undefine
   return undefined;
 };
 
+const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
+  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? [])].some(
+    (effect) => effect.kind === 'grantElement' && effect.scope === 'chooseBasicInHand'
+  );
+
+const isBasicCoinInHand = (input: CombatState, coin: CoinUid, db: ContentDb): boolean => {
+  const instance = input.coins[Number(coin)];
+  const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
+  return input.zones.hand.includes(coin) && instance !== undefined && def?.element === null && instance.grants.length === 0;
+};
+
+const validateChosenBasicInHand = (
+  input: CombatState,
+  skill: FlipSkillDef,
+  chosen: readonly CoinUid[] | undefined,
+  db: ContentDb
+): StepResult | undefined => {
+  if (!hasChooseBasicInHand(skill)) return undefined;
+  const basicInHand = input.zones.hand.filter((coin) => isBasicCoinInHand(input, coin, db));
+  if (basicInHand.length === 0) {
+    return chosen === undefined || chosen.length === 0 ? undefined : { ok: false, error: 'chosen coin is not a basic coin in hand' };
+  }
+  if (chosen === undefined || chosen.length !== 1) {
+    return { ok: false, error: 'chooseBasicInHand requires exactly one chosen coin' };
+  }
+  const selected = chosen[0];
+  if (selected === undefined || !isBasicCoinInHand(input, selected, db)) {
+    return { ok: false, error: 'chosen coin is not a basic coin in hand' };
+  }
+  return undefined;
+};
+
 const tickPlayerDurations = (input: CombatState, events: CombatEvent[]): CombatState => {
   let statuses = input.player.statuses;
   for (const status of ['frostbite', 'shock'] as const) {
@@ -298,7 +330,9 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
         const targetError = validateSingleEnemyTarget(input, cmd.target);
         if (targetError !== undefined) return targetError;
       }
-      return { ok: true, ...resolveFlip(input, cmd.slot, skill, cmd.target, db) };
+      const chosenError = validateChosenBasicInHand(input, skill, cmd.chosen, db);
+      if (chosenError !== undefined) return chosenError;
+      return { ok: true, ...resolveFlip(input, cmd.slot, skill, cmd.target, db, cmd.chosen) };
     }
     if (cmd.type === 'useConsumeSkill') {
       const slotState = input.slots[Number(cmd.slot)];

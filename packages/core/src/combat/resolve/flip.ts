@@ -162,14 +162,17 @@ const grantElement = (
   state: CombatState,
   atom: Extract<EffectAtom, { kind: 'grantElement' }>,
   db: ContentDb,
-  events: CombatEvent[]
+  events: CombatEvent[],
+  chosen?: readonly CoinUid[]
 ): CombatState => {
-  if (atom.scope !== 'allBasicInHand') throw new Error(`unsupported grant scope: ${atom.scope}`);
-  const targets = state.zones.hand.filter((coin) => {
-    const instance = state.coins[Number(coin)];
-    const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
-    return def?.element === null;
-  });
+  const targets =
+    atom.scope === 'allBasicInHand'
+      ? state.zones.hand.filter((coin) => {
+          const instance = state.coins[Number(coin)];
+          const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
+          return def?.element === null;
+        })
+      : [...(chosen ?? [])];
   if (targets.length === 0) return state;
   const targetSet = new Set<CoinUid>(targets);
   events.push({ type: 'elementGranted', coins: targets, element: atom.element });
@@ -191,7 +194,8 @@ export const applyEffectAtom = (
   atom: EffectAtom,
   target: TargetRef,
   db: ContentDb,
-  events: CombatEvent[]
+  events: CombatEvent[],
+  chosen?: readonly CoinUid[]
 ): CombatState => {
   if (state.phase === 'victory' || state.phase === 'defeat') return state;
   switch (atom.kind) {
@@ -229,7 +233,7 @@ export const applyEffectAtom = (
     case 'addCoin':
       return addTemporaryCoin(state, atom, events);
     case 'grantElement':
-      return grantElement(state, atom, db, events);
+      return grantElement(state, atom, db, events, chosen);
   }
 };
 
@@ -290,7 +294,8 @@ export const resolveFlip = (
   slot: SlotId,
   skill: FlipSkillDef,
   target: number | undefined,
-  db: ContentDb
+  db: ContentDb,
+  chosen?: readonly CoinUid[]
 ): ResolveResult => {
   if (input.skillUsesThisTurn >= 3) throw new Error('skill use cap reached');
   const slotState = input.slots[Number(slot)];
@@ -337,7 +342,7 @@ export const resolveFlip = (
   state = { ...state, rng: { ...state.rng, flip: rng.snapshot() } };
 
   for (const atom of collectEffects(skill, faces)) {
-    state = applyEffectAtom(state, atom, skillTarget, db, events);
+    state = applyEffectAtom(state, atom, skillTarget, db, events, chosen);
     if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
   }
 

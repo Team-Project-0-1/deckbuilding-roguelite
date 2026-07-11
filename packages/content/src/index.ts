@@ -129,7 +129,7 @@ export const skills = {
     tags: ['attack', 'utility'],
     targetType: 'single-enemy',
     cost: 1,
-    base: [{ kind: 'grantElement', element: 'fire', scope: 'allBasicInHand' }],
+    base: [{ kind: 'grantElement', element: 'fire', scope: 'chooseBasicInHand' }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] }
   }
 } satisfies Record<string, SkillDef>;

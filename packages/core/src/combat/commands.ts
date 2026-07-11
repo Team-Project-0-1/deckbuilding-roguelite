@@ -1,4 +1,4 @@
-import type { ContentDb } from '../content-types';
+import type { ContentDb, FlipSkillDef } from '../content-types';
 import { effectiveElements } from '../content-types';
 import type { CoinUid, SlotId } from '../ids';
 import type { CombatState } from './state';
@@ -6,7 +6,7 @@ import type { CombatState } from './state';
 export type Command =
   | { type: 'placeCoin'; coin: CoinUid; slot: SlotId }
   | { type: 'unplaceCoin'; coin: CoinUid }
-  | { type: 'useFlipSkill'; slot: SlotId; target?: number }
+  | { type: 'useFlipSkill'; slot: SlotId; target?: number; chosen?: CoinUid[] }
   | { type: 'useConsumeSkill'; slot: SlotId; coins: CoinUid[]; target?: number }
   | { type: 'endTurn' };
 
@@ -15,6 +15,22 @@ const livingEnemyTargets = (state: CombatState): number[] =>
 
 const targetsForSkill = (state: CombatState, targetType: 'single-enemy' | 'all-enemies' | 'self' | 'none'): (number | undefined)[] =>
   targetType === 'single-enemy' ? livingEnemyTargets(state) : [undefined];
+
+const isBasicCoinInHand = (state: CombatState, db: ContentDb, coin: CoinUid): boolean => {
+  const instance = state.coins[Number(coin)];
+  const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
+  return instance !== undefined && def?.element === null && instance.grants.length === 0;
+};
+
+const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
+  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? [])].some(
+    (effect) => effect.kind === 'grantElement' && effect.scope === 'chooseBasicInHand'
+  );
+
+const suggestedChosen = (state: CombatState, db: ContentDb): CoinUid[] | undefined => {
+  const coin = state.zones.hand.find((candidate) => isBasicCoinInHand(state, db, candidate));
+  return coin === undefined ? undefined : [coin];
+};
 
 export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
   if (state.phase !== 'player') return [];
@@ -29,8 +45,9 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
 
     if (skill.type === 'flip') {
       if ((state.zones.placed[slot]?.length ?? 0) === skill.cost) {
+        const chosen = hasChooseBasicInHand(skill) ? suggestedChosen(state, db) : undefined;
         for (const target of targetsForSkill(state, skill.targetType)) {
-          commands.push({ type: 'useFlipSkill', slot, target });
+          commands.push(chosen === undefined ? { type: 'useFlipSkill', slot, target } : { type: 'useFlipSkill', slot, target, chosen });
         }
       }
       if ((state.zones.placed[slot]?.length ?? 0) < skill.cost) {

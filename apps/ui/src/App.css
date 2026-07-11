@@ -146,6 +146,14 @@ button:focus-visible {
   padding: 50px clamp(40px, 6vw, 116px) 0;
 }
 
+.enemy-line {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: clamp(12px, 2vw, 28px);
+  min-width: 0;
+}
+
 .unit {
   position: relative;
   display: flex;
@@ -153,6 +161,10 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   min-width: clamp(240px, 22vw, 340px);
+}
+
+.enemy-line .unit {
+  min-width: clamp(190px, 16vw, 300px);
 }
 
 .unit-plate {
@@ -169,6 +181,24 @@ button:focus-visible {
     inset 0 3px 0 #b08a48,
     inset 0 -2px 0 #0b0d12,
     0 5px 0 rgba(28, 23, 36, 0.5);
+}
+
+.enemy-line .unit-plate {
+  width: clamp(190px, 16vw, 300px);
+}
+
+.unit.targetable .unit-plate,
+.unit.targetable .sprite {
+  box-shadow:
+    0 0 0 4px rgba(242, 207, 91, 0.58),
+    0 0 0 8px rgba(28, 23, 36, 0.35);
+}
+
+.unit.target-selected .unit-plate,
+.unit.target-selected .sprite {
+  box-shadow:
+    0 0 0 4px var(--gold-2),
+    0 0 0 10px rgba(240, 144, 44, 0.42);
 }
 
 .plate-row {
@@ -266,6 +296,14 @@ button:focus-visible {
   /* 지면선 고정: 유닛 컬럼 하단으로 밀착 → 양측 발이 같은 y에 닿는다 */
   margin-top: auto;
   margin-bottom: var(--ground-lift, 10px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  image-rendering: pixelated;
+}
+
+.sprite:disabled {
+  cursor: default;
 }
 
 .unit.player .sprite {
@@ -276,6 +314,11 @@ button:focus-visible {
 .unit.enemy .sprite {
   width: clamp(250px, 23vw, 360px);
   height: clamp(165px, 15vw, 220px);
+}
+
+.enemy-line .unit.enemy .sprite {
+  width: clamp(190px, 16vw, 300px);
+  height: clamp(142px, 12vw, 210px);
 }
 
 .sprite::after {
@@ -334,6 +377,20 @@ button:focus-visible {
 .float-text.kind-coin {
   color: #ffe9a8;
   font-size: 16px;
+}
+
+.test-encounter-badge {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  z-index: 10;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  color: #ffe9a8;
+  background: #171a23;
+  border: 2px solid var(--gold);
+  font-size: 11px;
+  letter-spacing: 0;
 }
 
 @keyframes float-up {

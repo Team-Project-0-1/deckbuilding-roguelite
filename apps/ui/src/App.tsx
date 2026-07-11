@@ -3,6 +3,7 @@ import type {
   CoinDefId,
   CoinUid,
   EffectAtom,
+  EnemyDefId,
   Face,
   RunState,
   SkillId,
@@ -13,6 +14,7 @@ import {
   RUN_ENCOUNTERS,
   chooseCoinReward,
   chooseSkillReward,
+  createCombat,
   createRun,
   legalCommands,
   previewFlip,
@@ -52,6 +54,13 @@ import { Keyword } from "./keywords";
 import { buildResolutionSummary } from "./resolution-summary";
 import { ResolutionTicket } from "./resolution-ticket";
 import type { ResolutionSummary } from "./resolution-summary";
+import {
+  cycleTarget,
+  defaultTarget,
+  legalTargetsForCommand,
+  livingEnemyTargets,
+} from "./targeting";
+import type { TargetingCommand } from "./targeting";
 import bgForest from "./assets/bg-forest.webp";
 import cardSlash from "./assets/card-slash.webp";
 import cardGuard from "./assets/card-guard.webp";
@@ -154,6 +163,7 @@ type FloatText = {
   id: number;
   text: string;
   target: "player" | "enemy";
+  enemy?: number;
   kind: "damage" | "block" | "status" | "coin";
 };
 type RejectionChip = { id: number; text: string };
@@ -162,6 +172,11 @@ type PendingResolution = {
   events: CombatEvent[];
 };
 type CombatAction = { type: "set"; state: CombatState };
+type TargetingSelection = {
+  command: TargetingCommand;
+  legalTargets: number[];
+  selected: number;
+};
 type DragState = {
   coin: CoinUid;
   source: DragSource;
@@ -425,6 +440,14 @@ const replaceUrlSeed = (seed: string): void => {
   window.history.replaceState(null, "", url);
 };
 
+const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
+  const encounter = new URL(window.location.href).searchParams.get("encounter");
+  // 테스트 전용 전투 표면: 정식 런 encounter 테이블을 건드리지 않고 UI에서만 적 배열을 바꾼다.
+  return encounter === "duo-raiders"
+    ? (["raider" as EnemyDefId, "raider" as EnemyDefId] as const)
+    : null;
+};
+
 const persistRun = (run: RunState): void => {
   try {
     saveRun(window.localStorage, run, contentDb);
@@ -442,12 +465,34 @@ const freshSession = (seed: string): RunSession => {
     },
     contentDb,
   );
+  const testEnemies = testEncounterFromUrl();
+  if (testEnemies !== null) {
+    const run = { ...ready, phase: "combat" as const };
+    return {
+      run,
+      combat: createCombat(
+        {
+          character: ready.character,
+          enemies: [...testEnemies],
+          bag: ready.bag,
+          equippedSkills: ready.equippedSkills,
+          currentHp: ready.currentHp,
+          maxHp: ready.maxHp,
+          combatIndex: ready.combatIndex,
+          attempt: ready.attempt,
+        },
+        contentDb,
+        seed,
+      ),
+    };
+  }
   const started = startRunCombat(ready, contentDb);
   return { run: started.run, combat: started.combat };
 };
 
 const bootSession = (): RunSession => {
   const urlSeed = seedFromUrl();
+  if (testEncounterFromUrl() !== null) return freshSession(urlSeed);
   const saved = loadRun(window.localStorage, CONTENT_VERSION, contentDb);
   if (saved === null) return freshSession(urlSeed);
   replaceUrlSeed(saved.runSeed);
@@ -1101,6 +1146,8 @@ const CombatBoard = ({
   const [floats, setFloats] = useState<FloatText[]>([]);
   const [rejection, setRejection] = useState<RejectionChip | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [targeting, setTargeting] = useState<TargetingSelection | null>(null);
+  const [lastAttackTarget, setLastAttackTarget] = useState<number | null>(null);
   const [shakeCoin, setShakeCoin] = useState<CoinUid | null>(null);
   const [hintStage, setHintStage] = useState<0 | 1 | 2>(0);
   const [openPile, setOpenPile] = useState<CoinPileZone | null>(null);
@@ -1197,6 +1244,28 @@ const CombatBoard = ({
   const findLegal = (cmd: Command): Command | undefined =>
     legal.find((candidate) => sameCommand(candidate, cmd));
 
+  const withTarget = (
+    command: TargetingCommand,
+    target: number,
+  ): TargetingCommand => ({ ...command, target });
+
+  const targetingCommandFor = (
+    command: TargetingCommand,
+  ): TargetingCommand | undefined =>
+    legal.find(
+      (candidate): candidate is TargetingCommand =>
+        (candidate.type === "useFlipSkill" ||
+          candidate.type === "useConsumeSkill") &&
+        candidate.type === command.type &&
+        candidate.slot === command.slot &&
+        (candidate.type !== "useConsumeSkill" ||
+          command.type !== "useConsumeSkill" ||
+          (candidate.coins.length === command.coins.length &&
+            candidate.coins.every(
+              (coin, index) => coin === command.coins[index],
+            ))),
+    );
+
   const showRejection = (text: string) => {
     if (showResult) return;
     if (rejectionTimer.current !== null)
@@ -1263,6 +1332,12 @@ const CombatBoard = ({
     }
     clearResolutionTicket();
     onTelemetryDecision(state, [legalCommand], result.state, result.events);
+    if (
+      (legalCommand.type === "useFlipSkill" ||
+        legalCommand.type === "useConsumeSkill") &&
+      legalCommand.target !== undefined
+    )
+      setLastAttackTarget(legalCommand.target);
     commit(result.state, result.events);
     return true;
   };
@@ -1279,6 +1354,11 @@ const CombatBoard = ({
     }
     clearResolutionTicket();
     onTelemetryDecision(state, [cmd], result.state, result.events);
+    if (
+      (cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") &&
+      cmd.target !== undefined
+    )
+      setLastAttackTarget(cmd.target);
     commit(result.state, result.events);
     return true;
   };
@@ -1313,6 +1393,7 @@ const CombatBoard = ({
   // 사용 선언 — 플립 스킬은 해결 직전의 장전 코인을 고스트로 붙잡아 연출 대상이 되게 한다
   const useSkill = (cmd: Command, showFeedback = true) => {
     setFuelSelection(null);
+    setTargeting(null);
     if (cmd.type === "useFlipSkill") {
       const ghosts = [...(state.zones.placed[cmd.slot] ?? [])];
       if (runCommand(cmd, showFeedback) && ghosts.length > 0)
@@ -1320,6 +1401,47 @@ const CombatBoard = ({
       return;
     }
     runCommand(cmd, showFeedback);
+  };
+
+  const beginTargeting = (
+    command: TargetingCommand,
+    showFeedback = true,
+  ): boolean => {
+    const legalTargets = legalTargetsForCommand(legal, command).filter(
+      (target, index, targets) => targets.indexOf(target) === index,
+    );
+    if (legalTargets.length === 0) {
+      if (showFeedback) showRejection(REJECTION_TEXT.generic);
+      return false;
+    }
+    if (
+      livingEnemyTargets(state.enemies).length < 2 ||
+      legalTargets.length === 1
+    ) {
+      const target = legalTargets[0];
+      if (target === undefined) return false;
+      useSkill(withTarget(command, target), showFeedback);
+      return true;
+    }
+    const selected = defaultTarget(legalTargets, lastAttackTarget);
+    if (selected === null) {
+      if (showFeedback) showRejection(REJECTION_TEXT.generic);
+      return false;
+    }
+    selectCoin(null);
+    setFuelSelection(null);
+    setTargeting({ command, legalTargets, selected });
+    return true;
+  };
+
+  const confirmTargeting = (target = targeting?.selected): boolean => {
+    if (targeting === null || target === undefined) return false;
+    if (!targeting.legalTargets.includes(target)) {
+      showRejection(REJECTION_TEXT.generic);
+      return true;
+    }
+    useSkill(withTarget(targeting.command, target), true);
+    return true;
   };
 
   const activateConsumeSkill = (
@@ -1332,8 +1454,11 @@ const CombatBoard = ({
     // count==1 deliberately keeps the existing App path: use the single
     // legalCommands auto suggestion immediately, without fuel-selection state.
     if (!requiresFuelSelection(state, slotId, contentDb)) {
-      if (autoCommand !== undefined) useSkill(autoCommand, showFeedback);
-      else
+      if (autoCommand !== undefined) {
+        if (skill.targetType === "single-enemy")
+          beginTargeting(autoCommand, showFeedback);
+        else useSkill(autoCommand, showFeedback);
+      } else
         runCommand(
           {
             type: "useConsumeSkill",
@@ -1369,7 +1494,12 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.coinCost);
       return;
     }
-    runSelectedFuel(command, showFeedback);
+    if (
+      command.type === "useConsumeSkill" &&
+      skill.targetType === "single-enemy"
+    )
+      beginTargeting(command, showFeedback);
+    else runSelectedFuel(command, showFeedback);
   };
 
   const onFuelCoinClick = (coin: CoinUid): boolean => {
@@ -1427,10 +1557,11 @@ const CombatBoard = ({
       text: string,
       target: "player" | "enemy",
       kind: FloatText["kind"],
+      enemy?: number,
     ) => {
       const id = nextFloatId.current;
       nextFloatId.current += 1;
-      setFloats((items) => [...items, { id, text, target, kind }]);
+      setFloats((items) => [...items, { id, text, target, enemy, kind }]);
       window.setTimeout(
         () => setFloats((items) => items.filter((item) => item.id !== id)),
         900,
@@ -1451,44 +1582,56 @@ const CombatBoard = ({
       delay = 220;
     } else if (event?.type === "damageDealt") {
       triggerVfx(
-        `unit-${event.target.type === "player" ? "player" : "enemy"}`,
+        event.target.type === "player"
+          ? "unit-player"
+          : `unit-enemy-${event.target.index}`,
       );
       showFloat(
         `-${event.amount}`,
         event.target.type === "player" ? "player" : "enemy",
         "damage",
+        event.target.type === "enemy" ? event.target.index : undefined,
       );
       delay = event.source === "enemy" ? 520 : 420;
     } else if (event?.type === "blockGained") {
       triggerVfx(
-        `block-${event.target.type === "player" ? "player" : "enemy"}`,
+        event.target.type === "player"
+          ? "block-player"
+          : `block-enemy-${event.target.index}`,
       );
       showFloat(
         `+${event.amount}`,
         event.target.type === "player" ? "player" : "enemy",
         "block",
+        event.target.type === "enemy" ? event.target.index : undefined,
       );
       delay = 360;
     } else if (event?.type === "statusApplied") {
       if (event.status === "burn")
         triggerVfx(
-          `burn-${event.target.type === "player" ? "player" : "enemy"}`,
+          event.target.type === "player"
+            ? "burn-player"
+            : `burn-enemy-${event.target.index}`,
         );
       showFloat(
         `화상 +${event.stacks}`,
         event.target.type === "player" ? "player" : "enemy",
         "status",
+        event.target.type === "enemy" ? event.target.index : undefined,
       );
       delay = 380;
     } else if (event?.type === "statusTicked") {
       if (event.status === "burn")
         triggerVfx(
-          `burn-${event.target.type === "player" ? "player" : "enemy"}`,
+          event.target.type === "player"
+            ? "burn-player"
+            : `burn-enemy-${event.target.index}`,
         );
       showFloat(
         `화상 -${event.amount}`,
         event.target.type === "player" ? "player" : "enemy",
         "status",
+        event.target.type === "enemy" ? event.target.index : undefined,
       );
       delay = 460;
     } else if (event?.type === "witherApplied") {
@@ -1601,6 +1744,31 @@ const CombatBoard = ({
     return () => document.removeEventListener("keydown", onKey);
   }, [fuelSelection]);
 
+  useEffect(() => {
+    if (targeting === null) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTargeting(null);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmTargeting();
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const selected = cycleTarget(
+        targeting.legalTargets,
+        targeting.selected,
+        event.key === "ArrowLeft" ? "left" : "right",
+      );
+      if (selected !== null) setTargeting({ ...targeting, selected });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [targeting]);
+
   const clickGuard = (): boolean => {
     if (suppressClick.current) {
       suppressClick.current = false;
@@ -1609,7 +1777,6 @@ const CombatBoard = ({
     return false;
   };
 
-  const enemy = state.enemies[0];
   const ended = state.phase === "victory" || state.phase === "defeat";
   const showResult =
     ended &&
@@ -1636,8 +1803,8 @@ const CombatBoard = ({
             : null;
   const spritePlayKey = activeEvent?.type === "damageDealt" ? queue.length : 0;
   const playerMotion = spriteMotionForEvent("player", activeEvent);
-  const enemyMotion = spriteMotionForEvent("enemy", activeEvent);
   const dragging = drag !== null && drag.started;
+  const isTestEncounter = testEncounterFromUrl() !== null;
 
   useEffect(() => {
     if (!showResult || completionSent.current) return;
@@ -1648,6 +1815,7 @@ const CombatBoard = ({
   useEffect(() => {
     if (ended) setOpenPile(null);
     if (ended) setFuelSelection(null);
+    if (ended) setTargeting(null);
   }, [ended]);
 
   return (
@@ -1659,15 +1827,22 @@ const CombatBoard = ({
       data-combat-index={run.combatIndex}
       data-current-hp={run.currentHp}
       data-equipped-skills={run.equippedSkills.map(String).join(",")}
+      data-test-encounter={isTestEncounter ? "duo-raiders" : undefined}
       data-run-phase={run.phase}
     >
       <div className="backdrop" aria-hidden="true">
         <img alt="" className="backdrop-img" src={bgForest} />
       </div>
       <RunMeta run={run} />
+      {isTestEncounter ? (
+        <span className="test-encounter-badge" aria-label="테스트 전용 전투 진입로">
+          TEST duo-raiders
+        </span>
+      ) : null}
       <section className="battlefield">
         <UnitPanel
           side="player"
+          unitKey="player"
           sprite={SPRITES.player}
           name="전사"
           hp={state.player.hp}
@@ -1679,22 +1854,41 @@ const CombatBoard = ({
           playKey={playerMotion === "idle" ? 0 : spritePlayKey}
           vfx={vfx}
         />
-        {enemy !== undefined ? (
-          <UnitPanel
-            side="enemy"
-            sprite={enemySprite(String(enemy.defId))}
-            name={contentDb.enemies[String(enemy.defId)]?.name ?? "적"}
-            hp={enemy.hp}
-            maxHp={enemy.maxHp}
-            block={enemy.block}
-            statuses={enemy.statuses}
-            intent={<IntentBadge enemy={enemy} />}
-            floats={floats}
-            motion={enemyMotion}
-            playKey={enemyMotion === "idle" ? 0 : spritePlayKey}
-            vfx={vfx}
-          />
-        ) : null}
+        <div className="enemy-line" aria-label="적 목록">
+          {state.enemies.map((enemy, index) => {
+            const targetLegal = targeting?.legalTargets.includes(index) === true;
+            const targetSelected = targeting?.selected === index;
+            const enemyMotion =
+              activeEvent?.type === "damageDealt" &&
+              activeEvent.target.type === "enemy" &&
+              activeEvent.target.index === index
+                ? spriteMotionForEvent("enemy", activeEvent)
+                : "idle";
+            return (
+              <UnitPanel
+                side="enemy"
+                unitKey={`enemy-${index}`}
+                sprite={enemySprite(String(enemy.defId))}
+                name={contentDb.enemies[String(enemy.defId)]?.name ?? "적"}
+                hp={enemy.hp}
+                maxHp={enemy.maxHp}
+                block={enemy.block}
+                statuses={enemy.statuses}
+                intent={<IntentBadge enemy={enemy} />}
+                floats={floats}
+                motion={enemyMotion}
+                playKey={enemyMotion === "idle" ? 0 : spritePlayKey}
+                vfx={vfx}
+                enemyIndex={index}
+                targeting={targeting !== null && targetLegal}
+                targetSelected={targetSelected}
+                onTarget={
+                  targetLegal ? () => confirmTargeting(index) : undefined
+                }
+              />
+            );
+          })}
+        </div>
       </section>
 
       <section
@@ -1716,14 +1910,23 @@ const CombatBoard = ({
               command.type === "useConsumeSkill" &&
               command.slot === slot(index),
           );
+          const flipAttempt =
+            skill?.type === "flip"
+              ? ({
+                  type: "useFlipSkill",
+                  slot: slot(index),
+                  target: skill.targetType === "single-enemy" ? 0 : undefined,
+                } as const)
+              : null;
           const use =
             skill?.type === "consume"
               ? consumeUse
-              : findLegal({
-                  type: "useFlipSkill",
-                  slot: slot(index),
-                  target: skill?.targetType === "single-enemy" ? 0 : undefined,
-                });
+              : flipAttempt !== null &&
+                  skill?.targetType === "single-enemy"
+                ? targetingCommandFor(flipAttempt)
+                : flipAttempt !== null
+                  ? findLegal(flipAttempt)
+                  : undefined;
           const canPlaceSelected =
             selectedCoin !== null &&
             findLegal({
@@ -1757,13 +1960,7 @@ const CombatBoard = ({
                   coins: consumeUse?.coins ?? [],
                   target: skill.targetType === "single-enemy" ? 0 : undefined,
                 } as const)
-              : skill?.type === "flip"
-                ? ({
-                    type: "useFlipSkill",
-                    slot: slot(index),
-                    target: skill.targetType === "single-enemy" ? 0 : undefined,
-                  } as const)
-                : null;
+              : flipAttempt;
           const lockedOnce =
             skill?.oncePerCombat === true && slotState.usedThisCombat;
           const isResolving = resolving !== null && resolving.slot === index;
@@ -1815,6 +2012,12 @@ const CombatBoard = ({
                 }
                 if (skill?.type === "consume")
                   activateConsumeSkill(slot(index), skill, consumeUse, true);
+                else if (
+                  use !== undefined &&
+                  use.type === "useFlipSkill" &&
+                  skill?.targetType === "single-enemy"
+                )
+                  beginTargeting(use, true);
                 else if (use !== undefined) useSkill(use);
                 else if (useAttempt !== null) runCommand(useAttempt, true);
               }}
@@ -1832,6 +2035,12 @@ const CombatBoard = ({
                   if (clickGuard()) return;
                   if (skill?.type === "consume")
                     activateConsumeSkill(slot(index), skill, consumeUse, true);
+                  else if (
+                    use !== undefined &&
+                    use.type === "useFlipSkill" &&
+                    skill?.targetType === "single-enemy"
+                  )
+                    beginTargeting(use, true);
                   else if (use !== undefined) useSkill(use);
                   else if (useAttempt !== null) runCommand(useAttempt, true);
                 }}
@@ -2127,6 +2336,7 @@ const CombatBoard = ({
 
 interface UnitPanelProps {
   side: "player" | "enemy";
+  unitKey: string;
   sprite: SpriteAsset;
   name: string;
   hp: number;
@@ -2138,10 +2348,15 @@ interface UnitPanelProps {
   motion: "idle" | "attack" | "hurt";
   playKey: number;
   vfx: Set<string>;
+  enemyIndex?: number;
+  targeting?: boolean;
+  targetSelected?: boolean;
+  onTarget?: () => void;
 }
 
 const UnitPanel = ({
   side,
+  unitKey,
   sprite,
   name,
   hp,
@@ -2153,8 +2368,15 @@ const UnitPanel = ({
   motion,
   playKey,
   vfx,
+  enemyIndex,
+  targeting = false,
+  targetSelected = false,
+  onTarget,
 }: UnitPanelProps) => (
-  <div className={`unit ${side} ${vfx.has(`unit-${side}`) ? "vfx-hit" : ""}`}>
+  <div
+    className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
+    onClick={targeting ? onTarget : undefined}
+  >
     <div
       className={`unit-plate ${vfx.has(`wither-${side}`) ? "vfx-wither" : ""}`}
     >
@@ -2164,7 +2386,7 @@ const UnitPanel = ({
           <Keyword term="block" className="chip-keyword">
             <em
               aria-label={`방어 ${block}`}
-              className={`block-chip ${vfx.has(`block-${side}`) ? "vfx-pop" : ""}`}
+              className={`block-chip ${vfx.has(`block-${unitKey}`) ? "vfx-pop" : ""}`}
             >
               <ShieldIcon scale={1.4} />
               {block}
@@ -2175,7 +2397,7 @@ const UnitPanel = ({
           <Keyword term="burn" className="chip-keyword">
             <em
               aria-label={`화상 ${statusStacks(statuses, "burn")}`}
-              className={`burn-chip ${vfx.has(`burn-${side}`) ? "vfx-pulse" : ""}`}
+              className={`burn-chip ${vfx.has(`burn-${unitKey}`) ? "vfx-pulse" : ""}`}
             >
               <EmberIcon scale={1.4} />
               {statusStacks(statuses, "burn")}
@@ -2197,18 +2419,36 @@ const UnitPanel = ({
       </div>
     </div>
     {intent !== undefined ? intent : null}
-    <div className="sprite" aria-label={`${name} 스프라이트`}>
+    <button
+      aria-label={
+        targeting
+          ? `${name} 대상 ${targetSelected ? "선택됨" : "선택"}`
+          : `${name} 스프라이트`
+      }
+      aria-pressed={targeting ? targetSelected : undefined}
+      className="sprite"
+      disabled={!targeting}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onTarget?.();
+      }}
+    >
       <AtlasSprite
         atlasUrl={sprite.atlasUrl}
-        key={`${side}-${motion}-${playKey}`}
+        key={`${unitKey}-${motion}-${playKey}`}
         manifest={sprite.manifest}
         motion={motion}
         playKey={playKey}
         side={side}
       />
-    </div>
+    </button>
     {floats
-      .filter((item) => item.target === side)
+      .filter(
+        (item) =>
+          item.target === side &&
+          (side === "player" || item.enemy === enemyIndex),
+      )
       .map((item) => (
         <b className={`float-text kind-${item.kind}`} key={item.id}>
           {item.text}

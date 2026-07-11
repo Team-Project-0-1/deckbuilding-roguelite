@@ -1,5 +1,5 @@
-import type { ContentDb } from "../content-types";
-import type { Face, SlotId } from "../ids";
+import type { ContentDb, FlipSkillDef } from "../content-types";
+import type { CoinUid, Face, SlotId } from "../ids";
 import type { Rng, RngSnapshot } from "../rng";
 import type { CombatEvent } from "./events";
 import { resolveFlip } from "./resolve/flip";
@@ -90,6 +90,31 @@ const minMax = (values: readonly number[]): { min: number; max: number } => ({
   max: Math.max(...values),
 });
 
+const isBasicCoinInHand = (
+  state: CombatState,
+  coin: CoinUid,
+  db: ContentDb,
+): boolean => {
+  const instance = state.coins[Number(coin)];
+  const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
+  return instance !== undefined && def?.element === null && instance.grants.length === 0;
+};
+
+const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
+  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? [])].some(
+    (effect) => effect.kind === "grantElement" && effect.scope === "chooseBasicInHand",
+  );
+
+const suggestedChosen = (
+  state: CombatState,
+  db: ContentDb,
+): CoinUid[] | undefined => {
+  const coin = state.zones.hand.find((candidate) =>
+    isBasicCoinInHand(state, candidate, db),
+  );
+  return coin === undefined ? undefined : [coin];
+};
+
 export const previewFlip = (
   state: CombatState,
   slot: SlotId,
@@ -104,6 +129,7 @@ export const previewFlip = (
   const placed = state.zones.placed[slot] ?? [];
   const faceBranches = enumerateFaces(placed.length);
   const probability = 1 / faceBranches.length;
+  const chosen = hasChooseBasicInHand(skill) ? suggestedChosen(state, db) : undefined;
 
   const branches = faceBranches.map((faces): PreviewBranch => {
     const branchState = cloneState(state);
@@ -116,6 +142,7 @@ export const previewFlip = (
       skill,
       skill.targetType === "single-enemy" ? 0 : undefined,
       db,
+      chosen,
     );
     return { faces, probability, ...sumBranch(result.events) };
   });
