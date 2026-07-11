@@ -1,5 +1,6 @@
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
+  acceptEvent,
   buyShopCoin,
   buyShopRemoval,
   buyShopSkill,
@@ -7,6 +8,7 @@ import {
   chooseRunNode,
   chooseSkillReward,
   createRun,
+  declineEvent,
   leaveShop,
   resolveCoinRemoval,
   settleRunCombat,
@@ -306,20 +308,26 @@ export function replayHumanRun(trace: HumanRunTraceLike): {
 
   // P4.3: 비전투 노드(갈림길·상점)는 기록된 path 사실로만 통과한다 — 사실이 없거나
   // 코어가 거부하면 mismatch (리플레이가 임의 정책으로 경로를 지어내지 않는다).
+  let pathCursor = 0;
   const traversePath = (current: RunState): RunState => {
     let next = current;
     let guard = 0;
     while (
-      (next.phase === "choose-node" || next.phase === "shop") &&
+      (next.phase === "choose-node" || next.phase === "shop" || next.phase === "event") &&
       guard < 128
     ) {
       guard += 1;
       const layer = next.combatIndex;
-      const fact = trace.path.find((entry) => entry.layer === layer);
+      const fact = trace.path[pathCursor];
       if (fact === undefined) {
         mismatches.push(`path fact missing for layer ${layer} (${next.phase})`);
         return next;
       }
+      if (fact.layer !== layer) {
+        mismatches.push(`path fact layer mismatch: recorded ${fact.layer} replayed ${layer}`);
+        return next;
+      }
+      pathCursor += 1;
       try {
         if (next.phase === "choose-node") {
           if (fact.type !== "choose-node") {
@@ -327,7 +335,7 @@ export function replayHumanRun(trace: HumanRunTraceLike): {
             return next;
           }
           next = chooseRunNode(next, fact.choice, contentDb);
-        } else {
+        } else if (next.phase === "shop") {
           if (fact.type !== "shop") {
             mismatches.push(`path fact for layer ${layer} is not shop`);
             return next;
@@ -350,6 +358,15 @@ export function replayHumanRun(trace: HumanRunTraceLike): {
             mismatches.push(`shop fact for layer ${layer} never leaves`);
             return next;
           }
+        } else {
+          if (fact.type !== "event") {
+            mismatches.push(`path fact for layer ${layer} is not event`);
+            return next;
+          }
+          next =
+            fact.action === "accept"
+              ? acceptEvent(next, contentDb, fact.choice)
+              : declineEvent(next, contentDb);
         }
       } catch (error) {
         mismatches.push(

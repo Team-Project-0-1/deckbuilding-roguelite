@@ -9,6 +9,7 @@ import {
   type CoinDefId,
   type ContentDb,
   type EquippedSkills,
+  type EventDefId,
   type PendingRewards,
   type PendingShop,
   type RunPhase,
@@ -27,7 +28,7 @@ export interface StorageLike {
 
 export type RunValidationContext = Pick<
   ContentDb,
-  "characters" | "coins" | "skills" | "enemies"
+  "characters" | "coins" | "skills" | "enemies" | "events"
 >;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -51,6 +52,7 @@ const isRunPhase = (value: unknown): value is RunPhase =>
   value === "combat" ||
   value === "rewards" ||
   value === "shop" ||
+  value === "event" ||
   value === "victory" ||
   value === "defeat";
 
@@ -92,6 +94,16 @@ const migratedLegacySave = (
   value: Record<string, unknown>,
 ): Record<string, unknown> | null => {
   if (value.version === RUN_SAVE_VERSION) return value;
+  if (value.version === 4)
+    return {
+      ...value,
+      version: RUN_SAVE_VERSION,
+      pendingEvent: undefined,
+      pendingEventCombat: undefined,
+      eventCombats: 0,
+      eventCoinGains: 0,
+      eventCoinLosses: 0,
+    };
   if (value.version === 3)
     return {
       ...value,
@@ -99,6 +111,11 @@ const migratedLegacySave = (
       pendingShop: undefined,
       shopPurchasedCoins: 0,
       shopPurchasedSkills: 0,
+      pendingEvent: undefined,
+      pendingEventCombat: undefined,
+      eventCombats: 0,
+      eventCoinGains: 0,
+      eventCoinLosses: 0,
     };
   if (value.version !== 1 && value.version !== 2) return null;
   const graph = legacyGraphForSave();
@@ -111,6 +128,11 @@ const migratedLegacySave = (
     pendingShop: undefined,
     shopPurchasedCoins: 0,
     shopPurchasedSkills: 0,
+    pendingEvent: undefined,
+    pendingEventCombat: undefined,
+    eventCombats: 0,
+    eventCoinGains: 0,
+    eventCoinLosses: 0,
   };
 };
 
@@ -163,11 +185,8 @@ const parseRunGraph = (
             ? node.encounter
             : null;
       if (encounter === null) return null;
-      if (node.eventId !== undefined && !isNonEmptyString(node.eventId))
-        return null;
       // 노드 종류별 payload 계약 (통합 감사): combat/elite/boss = 비어있지 않은
-      // encounter 필수(전부 콘텐츠 사전에 존재)·eventId 금지, event = eventId 필수·
-      // encounter 금지, shop = 둘 다 금지.
+      // encounter 필수(전부 콘텐츠 사전에 존재)·eventId 금지, event/shop = 정적 payload 금지.
       if (
         node.kind === "combat" ||
         node.kind === "elite" ||
@@ -178,13 +197,11 @@ const parseRunGraph = (
           return null;
         if (node.eventId !== undefined) return null;
       } else if (node.kind === "event") {
-        if (node.eventId === undefined || encounter !== undefined) return null;
+        if (node.eventId !== undefined || encounter !== undefined) return null;
       } else if (encounter !== undefined || node.eventId !== undefined) {
         return null;
       }
-      return node.eventId === undefined
-        ? { id: node.id, kind: node.kind, encounter }
-        : { id: node.id, kind: node.kind, encounter, eventId: node.eventId };
+      return { id: node.id, kind: node.kind, encounter };
     });
     return nodes.every((node) => node !== null) ? nodes : null;
   });
@@ -340,6 +357,15 @@ const parsePendingShop = (
   };
 };
 
+const parsePendingEvent = (
+  value: unknown,
+  context: RunValidationContext,
+): { eventId: EventDefId } | null => {
+  if (!isRecord(value) || !isNonEmptyString(value.eventId)) return null;
+  if ((context.events ?? {})[value.eventId] === undefined) return null;
+  return { eventId: value.eventId as EventDefId };
+};
+
 const normalizeRunSave = (
   rawValue: unknown,
   expectedContentVersion: string,
@@ -399,6 +425,12 @@ const normalizeRunSave = (
     !isNonNegativeSafeInteger(value.shopPurchasedSkills)
   )
     return null;
+  if (
+    !isNonNegativeSafeInteger(value.eventCombats) ||
+    !isNonNegativeSafeInteger(value.eventCoinGains) ||
+    !isNonNegativeSafeInteger(value.eventCoinLosses)
+  )
+    return null;
   if (value.phase === "rewards" && value.combatIndex === 0) return null;
   if (value.phase === "victory" && value.combatIndex !== graph.layers.length - 1)
     return null;
@@ -414,7 +446,7 @@ const normalizeRunSave = (
     value.phase !== "victory"
   ) {
     const node = graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex]];
-    if (node?.kind !== "combat" && node?.kind !== "elite" && node?.kind !== "boss" && node?.kind !== "shop")
+    if (node?.kind !== "combat" && node?.kind !== "elite" && node?.kind !== "boss" && node?.kind !== "shop" && node?.kind !== "event")
       return null;
   }
   if (!isNonNegativeSafeInteger(value.attempt)) return null;
@@ -443,9 +475,13 @@ const normalizeRunSave = (
   // completedCombatCount가 세는 마지막 전투를 코인/스킬 보상 원천에서 제외한다.
   const rewardGrantingCombats =
     value.phase === "victory" ? completedCombats - 1 : completedCombats;
-  const minimumBagSize = Math.max(1, startingBag.length - value.shopRemovals);
+  const rewardBagCombats = rewardGrantingCombats + value.eventCombats;
+  const minimumBagSize = Math.max(
+    1,
+    startingBag.length - value.shopRemovals - value.eventCoinLosses,
+  );
   const maximumBagSize =
-    startingBag.length + rewardGrantingCombats + value.shopPurchasedCoins;
+    startingBag.length + rewardBagCombats + value.shopPurchasedCoins + value.eventCoinGains;
   if (value.bag.length < minimumBagSize || value.bag.length > maximumBagSize)
     return null;
   if (value.combatIndex === 0 && !sameStrings(value.bag, startingBag))
@@ -464,7 +500,7 @@ const normalizeRunSave = (
     (skill, index) => skill !== startingSkills[index],
   ).length;
   const completedSkillRewardCount =
-    Math.max(0, rewardGrantingCombats - (value.phase === "rewards" ? 2 : 1)) +
+    Math.max(0, rewardBagCombats - (value.phase === "rewards" ? 2 : 1)) +
     value.shopPurchasedSkills;
   if (changedSlots > completedSkillRewardCount) return null;
 
@@ -491,6 +527,31 @@ const normalizeRunSave = (
   if (value.phase !== "shop" && value.pendingShop !== undefined) return null;
   if (pendingShop === null) return null;
 
+  const pendingEvent =
+    value.pendingEvent === undefined
+      ? undefined
+      : parsePendingEvent(value.pendingEvent, context);
+  const pendingEventCombat =
+    value.pendingEventCombat === undefined
+      ? undefined
+      : parsePendingEvent(value.pendingEventCombat, context);
+  const currentNode =
+    graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex]];
+  if (value.phase === "event") {
+    if (pendingEvent === undefined || currentNode?.kind !== "event") return null;
+  } else if (value.pendingEvent !== undefined) {
+    return null;
+  }
+  if (pendingEvent === null || pendingEventCombat === null) return null;
+  if (
+    pendingEventCombat !== undefined &&
+    (currentNode?.kind !== "event" ||
+      (value.phase !== "ready" && value.phase !== "combat") ||
+      (context.events ?? {})[String(pendingEventCombat.eventId)]?.risk !== "combat")
+  ) {
+    return null;
+  }
+
   const save: RunSave = {
     version: RUN_SAVE_VERSION,
     contentVersion: expectedContentVersion,
@@ -506,13 +567,22 @@ const normalizeRunSave = (
     shopRemovals: value.shopRemovals,
     shopPurchasedCoins: value.shopPurchasedCoins,
     shopPurchasedSkills: value.shopPurchasedSkills,
+    eventCombats: value.eventCombats,
+    eventCoinGains: value.eventCoinGains,
+    eventCoinLosses: value.eventCoinLosses,
     combatIndex: value.combatIndex,
     attempt: value.attempt,
     phase: value.phase,
   };
   const withRewards =
     pendingRewards === undefined ? save : { ...save, pendingRewards };
-  return pendingShop === undefined ? withRewards : { ...withRewards, pendingShop };
+  const withShop =
+    pendingShop === undefined ? withRewards : { ...withRewards, pendingShop };
+  const withEvent =
+    pendingEvent === undefined ? withShop : { ...withShop, pendingEvent };
+  return pendingEventCombat === undefined
+    ? withEvent
+    : { ...withEvent, pendingEventCombat };
 };
 
 export const serializeRunSave = (

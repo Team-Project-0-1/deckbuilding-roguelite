@@ -1,10 +1,10 @@
-import type { CharacterId, CoinDefId, SkillId } from '../ids';
+import type { CharacterId, CoinDefId, EventDefId, SkillId } from '../ids';
 import type { RunGraph } from './graph';
 
-// v4 (2026-07-12, P4.3): combatIndex 이름은 저장 churn 최소화를 위해 유지하지만,
+// v5 (2026-07-12, P4.4): 이벤트 pending 상태·진행 카운터를 추가한다.
 // 의미는 선형 전투 번호에서 "현재 런 그래프 레이어 인덱스"로 일반화한다.
-export const RUN_SAVE_VERSION = 4 as const;
-export const LEGACY_RUN_SAVE_VERSIONS = [1, 2, 3] as const;
+export const RUN_SAVE_VERSION = 5 as const;
+export const LEGACY_RUN_SAVE_VERSIONS = [1, 2, 3, 4] as const;
 
 export type RunPhase =
   | 'ready'
@@ -12,6 +12,7 @@ export type RunPhase =
   | 'combat'
   | 'rewards'
   | 'shop'
+  | 'event'
   | 'victory'
   | 'defeat';
 
@@ -32,6 +33,14 @@ export interface PendingShop {
   skillPrices: number[];
 }
 
+export interface PendingEvent {
+  eventId: EventDefId;
+}
+
+export interface PendingEventCombat {
+  eventId: EventDefId;
+}
+
 export interface RunSave {
   version: typeof RUN_SAVE_VERSION;
   contentVersion: string;
@@ -47,11 +56,16 @@ export interface RunSave {
   shopRemovals: number;
   shopPurchasedCoins: number;
   shopPurchasedSkills: number;
+  eventCombats: number;
+  eventCoinGains: number;
+  eventCoinLosses: number;
   combatIndex: number;
   attempt: number;
   phase: RunPhase;
   pendingRewards?: PendingRewards;
   pendingShop?: PendingShop;
+  pendingEvent?: PendingEvent;
+  pendingEventCombat?: PendingEventCombat;
 }
 
 export interface RunState extends RunSave {}

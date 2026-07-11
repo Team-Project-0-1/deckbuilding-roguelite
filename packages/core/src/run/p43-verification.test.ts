@@ -104,6 +104,17 @@ const testDb = (): ContentDb => ({
       trait: { id: "none", name: "none", hook: "combatStart", effects: [] },
     },
   },
+  events: {
+    "blood-offering": {
+      id: id("blood-offering"),
+      name: "blood",
+      prompt: "blood",
+      risk: "hp",
+      hpCost: 5,
+      requireCurrentHpAbove: 5,
+      reward: { kind: "signatureCoin", count: 1 },
+    },
+  },
   validate: () => [],
 });
 
@@ -202,10 +213,10 @@ describe("P4.3 independent verification", () => {
       chooseRunNode({ ...newRun(db), phase: "choose-node" }, 0, db),
     ).toThrow("current layer is not a branch");
 
-    const combatBranch = chooseRunNode(choice, 1, db);
-    expect(combatBranch.phase).toBe("ready");
-    expect(combatBranch.combatIndex).toBe(2);
-    expect(combatBranch.nodeChoices[2]).toBe(1);
+    const eventBranch = chooseRunNode(choice, 1, db);
+    expect(eventBranch.phase).toBe("event");
+    expect(eventBranch.combatIndex).toBe(2);
+    expect(eventBranch.nodeChoices[2]).toBe(1);
   });
 
   it("enforces shop prices, removals, gold checks, option consumption, and bag floor", () => {

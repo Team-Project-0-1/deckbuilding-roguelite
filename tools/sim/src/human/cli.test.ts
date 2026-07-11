@@ -5,7 +5,9 @@ import { join } from "node:path";
 
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
+  acceptEvent,
   chooseRunNode,
+  declineEvent,
   leaveShop,
   chooseCoinReward,
   createRun,
@@ -213,7 +215,7 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
     });
     run = settleRunCombat(started.run, state, contentDb);
     run = resolveRewards(trace, run);
-    while (run.phase === "choose-node" || run.phase === "shop") {
+    while (run.phase === "choose-node" || run.phase === "shop" || run.phase === "event") {
       const layer = run.combatIndex;
       if (run.phase === "choose-node") {
         const options = run.graph.layers[layer] ?? [];
@@ -221,9 +223,17 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
         const choice = found < 0 ? 0 : found;
         trace.path.push({ layer, type: "choose-node", choice });
         run = chooseRunNode(run, choice, contentDb);
-      } else {
+      } else if (run.phase === "shop") {
         trace.path.push({ layer, type: "shop", actions: [{ kind: "leave" }] });
         run = leaveShop(run, contentDb);
+      } else {
+        const event = contentDb.events?.[String(run.pendingEvent?.eventId)];
+        const action = event?.risk === "combat" ? "accept" : "decline";
+        trace.path.push({ layer, type: "event", action });
+        run =
+          action === "accept"
+            ? acceptEvent(run, contentDb)
+            : declineEvent(run, contentDb);
       }
     }
   }

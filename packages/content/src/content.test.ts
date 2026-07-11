@@ -15,7 +15,7 @@ import type {
 import { createCombat, rewardEligibleSkillIds, statusStacks, statusTurns, step, validateContentDb } from '@game/core';
 import { describe, expect, it } from 'vitest';
 
-import { characters, coins, CONTENT_VERSION, LEGACY_CONTENT_VERSIONS, contentDb, enemies, skills } from './index';
+import { characters, coins, CONTENT_VERSION, LEGACY_CONTENT_VERSIONS, contentDb, enemies, events, skills } from './index';
 
 const skillId = (value: string) => value as SkillId;
 const coinId = (value: string) => value as CoinDefId;
@@ -311,7 +311,8 @@ describe('P3.3 heart-of-flame interaction regressions', () => {
 describe('P3.4 shipped content goldens', () => {
   it('ships the p4 version with legacy allowlist', () => {
     // P4.2 선행: 몬스터 6종 가산 출하에 결속된 버전 승격 (감사 정책 — 콘텐츠 변경 없는 버전 유지 금지)
-    expect(CONTENT_VERSION).toBe('0.9.0-p4');
+    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
+    expect(LEGACY_CONTENT_VERSIONS).toContain('0.9.0-p4');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.8.0-p3.4');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.7.0-p3.3');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.6.0-p3.2');
@@ -365,8 +366,8 @@ describe('P3.4 shipped content goldens', () => {
 describe('P4.2 provisional enemy content goldens', () => {
   // D2 조우 대역 산술: goblin+ghoul=70(2마리 65~85), thief+goblin=58(감전 압박 예외),
   // ghoul+goblin+slime=86(3마리 75~95). 수치 전부 balance-provisional.
-  it('pins the six enemy definitions shipped under 0.9.0-p4', () => {
-    expect(CONTENT_VERSION).toBe('0.9.0-p4');
+  it('pins the six enemy definitions shipped under 0.10.0-p4.4', () => {
+    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
     expect(enemies.goblin).toEqual({
       id: 'goblin',
       name: '고블린',
@@ -464,6 +465,33 @@ describe('P4.2 provisional enemy content goldens', () => {
     expect(enemies.goblin.maxHp + enemies.ghoul.maxHp).toBe(70);
     expect(enemies.thief.maxHp + enemies.goblin.maxHp).toBe(58);
     expect(enemies.ghoul.maxHp + enemies.goblin.maxHp + enemies.slime.maxHp).toBe(86);
+  });
+});
+
+describe('P4.4 provisional event content goldens', () => {
+  it('ships the four D10 event definitions', () => {
+    expect(Object.keys(events).sort()).toEqual([
+      'ambush-bounty',
+      'blood-offering',
+      'coin-sacrifice',
+      'transmute-altar'
+    ]);
+    expect(events['ambush-bounty']).toMatchObject({
+      risk: 'combat',
+      elitePool: [['raider-plus'], ['gatekeeper-plus']],
+      goldReward: 70,
+      rareSkillOptions: 2
+    });
+    expect(events['blood-offering']).toMatchObject({
+      risk: 'hp',
+      hpCost: 5,
+      requireCurrentHpAbove: 5
+    });
+    expect(events['transmute-altar']).toMatchObject({ risk: 'gold', goldCost: 100 });
+    expect(events['coin-sacrifice']).toMatchObject({
+      risk: 'coin',
+      sacrifice: { coin: 'basic', reward: 'signatureCoin', minimumBagSize: 1 }
+    });
   });
 });
 
@@ -571,7 +599,7 @@ describe('P3.4 hostile coin proc rerouting regressions', () => {
 
 describe('M5 shipped content', () => {
   it('ships the M5 version, mana coin, skills, and fixed enemy definitions', () => {
-    expect(CONTENT_VERSION).toBe('0.9.0-p4');
+    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
     expect(coins.mana).toEqual({
       id: coinId('mana'),
       element: 'mana',

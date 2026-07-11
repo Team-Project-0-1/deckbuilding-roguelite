@@ -1,5 +1,5 @@
-import type { ContentDb } from "../content-types";
-import type { CharacterId, CoinDefId, Element, SkillId } from "../ids";
+import type { ContentDb, EventDef } from "../content-types";
+import type { CharacterId, CoinDefId, Element, EventDefId, SkillId } from "../ids";
 import { derive, rngFrom, seedFromString } from "../rng";
 import type { Rng } from "../rng";
 import { createCombat } from "../combat/reducer";
@@ -15,6 +15,7 @@ import type {
 } from "./types";
 
 const rewardCoin = (value: string): CoinDefId => value as CoinDefId;
+const eventId = (value: string): EventDefId => value as EventDefId;
 const REWARD_COIN_IDS = [
   rewardCoin("basic"),
   rewardCoin("fire"),
@@ -138,6 +139,13 @@ const requirePendingShop = (run: RunState): PendingShop => {
   return run.pendingShop;
 };
 
+const requirePendingEvent = (run: RunState) => {
+  if (run.phase !== "event" || run.pendingEvent === undefined) {
+    throw new Error("run is not resolving an event");
+  }
+  return run.pendingEvent;
+};
+
 // P4.1 코어 불변식 (통합 감사 2차): 정상 내부 흐름 가정으로 검증을 우회하지 않도록
 // 모든 public 진입점(start·settle, 향후 shop/event 포함)이 공유하는 단일 헬퍼.
 const assertRunGraphInvariants = (run: RunState): void => {
@@ -149,10 +157,27 @@ const assertRunGraphInvariants = (run: RunState): void => {
     throw new Error("shop purchased coins must be a non-negative integer");
   if (!Number.isInteger(run.shopPurchasedSkills) || run.shopPurchasedSkills < 0)
     throw new Error("shop purchased skills must be a non-negative integer");
+  if (!Number.isInteger(run.eventCombats) || run.eventCombats < 0)
+    throw new Error("event combats must be a non-negative integer");
+  if (!Number.isInteger(run.eventCoinGains) || run.eventCoinGains < 0)
+    throw new Error("event coin gains must be a non-negative integer");
+  if (!Number.isInteger(run.eventCoinLosses) || run.eventCoinLosses < 0)
+    throw new Error("event coin losses must be a non-negative integer");
   if (run.phase === "shop" && run.pendingShop === undefined)
     throw new Error("shop phase requires pending shop");
   if (run.phase !== "shop" && run.pendingShop !== undefined)
     throw new Error("pending shop is only valid in shop phase");
+  if (run.phase === "event" && run.pendingEvent === undefined)
+    throw new Error("event phase requires pending event");
+  if (run.phase !== "event" && run.pendingEvent !== undefined)
+    throw new Error("pending event is only valid in event phase");
+  const node = run.graph.layers[run.combatIndex]?.[run.nodeChoices[run.combatIndex] ?? 0];
+  if (
+    run.pendingEventCombat !== undefined &&
+    (node?.kind !== "event" || (run.phase !== "ready" && run.phase !== "combat"))
+  ) {
+    throw new Error("pending event combat is only valid for ready/combat event nodes");
+  }
   if (run.graph.layers.length === 0)
     throw new Error("run graph must have at least one layer");
   if (run.nodeChoices.length !== run.graph.layers.length)
@@ -212,6 +237,13 @@ const requireCoinRemovalResolved = (pending: PendingRewards): void => {
 
 const isCombatNodeKind = (kind: ReturnType<typeof currentRunNode>["kind"]): boolean =>
   kind === "combat" || kind === "elite" || kind === "boss";
+
+const signatureCoin = (db: ContentDb, character: CharacterId): CoinDefId => {
+  const signature = signatureElement(db, character);
+  const coin = Object.values(db.coins).find((candidate) => candidate.element === signature);
+  if (coin === undefined) throw new Error("signature coin does not exist");
+  return coin.id;
+};
 
 export const completedCombatCount = (run: RunState): number => {
   let count = 0;
@@ -290,16 +322,39 @@ const pendingShopFor = (
   };
 };
 
+const pendingEventFor = (
+  run: RunState,
+  layerIndex: number,
+  db: ContentDb,
+) => {
+  const events = db.events ?? {};
+  const eventIds = Object.keys(events).sort();
+  if (eventIds.length === 0) throw new Error("content db has no events");
+  const rng = rngFrom(derive(seedFromString(run.runSeed), `event-${layerIndex}`));
+  return { eventId: eventId(eventIds[rng.int(eventIds.length)]!) };
+};
+
+const eventCombatEncounterFor = (
+  run: RunState,
+  db: ContentDb,
+  event: Extract<EventDef, { risk: "combat" }>,
+) => {
+  const eventIds = Object.keys(db.events ?? {}).sort();
+  const rng = rngFrom(derive(seedFromString(run.runSeed), `event-${run.combatIndex}`));
+  rng.int(eventIds.length);
+  return event.elitePool[rng.int(event.elitePool.length)];
+};
+
 const enterCurrentLayer = (run: RunState, db?: ContentDb): RunState => {
   assertRunGraphInvariants(run);
   const layer = run.graph.layers[run.combatIndex];
   if (layer === undefined) throw new Error("combat index is out of range");
   if (layer.length === 2 && run.phase !== "choose-node") {
-    return { ...run, phase: "choose-node", pendingRewards: undefined, pendingShop: undefined };
+    return { ...run, phase: "choose-node", pendingRewards: undefined, pendingShop: undefined, pendingEvent: undefined, pendingEventCombat: undefined };
   }
   const node = currentRunNode(run);
   if (isCombatNodeKind(node.kind)) {
-    return { ...run, phase: "ready", pendingRewards: undefined, pendingShop: undefined };
+    return { ...run, phase: "ready", pendingRewards: undefined, pendingShop: undefined, pendingEvent: undefined, pendingEventCombat: undefined };
   }
   if (node.kind === "shop") {
     // 상점 오퍼 롤에만 콘텐츠 컨텍스트가 필요하다. db 없이 phase만 'ready'로 두는
@@ -311,9 +366,23 @@ const enterCurrentLayer = (run: RunState, db?: ContentDb): RunState => {
       phase: "shop",
       pendingRewards: undefined,
       pendingShop: pendingShopFor(run, run.combatIndex, db),
+      pendingEvent: undefined,
+      pendingEventCombat: undefined,
     };
   }
-  throw new Error("event nodes are not active in this run graph");
+  if (node.kind === "event") {
+    if (db === undefined)
+      throw new Error("content db is required to enter an event node");
+    return {
+      ...run,
+      phase: "event",
+      pendingRewards: undefined,
+      pendingShop: undefined,
+      pendingEvent: pendingEventFor(run, run.combatIndex, db),
+      pendingEventCombat: undefined,
+    };
+  }
+  throw new Error("unknown run node kind");
 };
 
 const finishRewardsIfComplete = (
@@ -419,6 +488,9 @@ export const createRun = (config: CreateRunConfig, db: ContentDb): RunState => {
     shopRemovals: 0,
     shopPurchasedCoins: 0,
     shopPurchasedSkills: 0,
+    eventCombats: 0,
+    eventCoinGains: 0,
+    eventCoinLosses: 0,
     combatIndex: 0,
     attempt: 0,
     phase: "ready",
@@ -449,9 +521,20 @@ export const startRunCombat = (
   }
   assertRunGraphInvariants(run);
   const node = currentRunNode(run);
-  if (node.kind !== "combat" && node.kind !== "elite" && node.kind !== "boss")
+  if (
+    node.kind !== "combat" &&
+    node.kind !== "elite" &&
+    node.kind !== "boss" &&
+    !(node.kind === "event" && run.pendingEventCombat !== undefined)
+  )
     throw new Error("current node is not a combat node");
-  const enemies = node.encounter;
+  const event = run.pendingEventCombat === undefined
+    ? undefined
+    : (db.events ?? {})[String(run.pendingEventCombat.eventId)];
+  const enemies =
+    event?.risk === "combat"
+      ? eventCombatEncounterFor(run, db, event)
+      : node.encounter;
   if (enemies === undefined || enemies.length === 0)
     throw new Error("encounter does not exist");
   const combat = createCombat(
@@ -469,7 +552,7 @@ export const startRunCombat = (
     run.runSeed,
   );
   return {
-    run: { ...run, phase: "combat", pendingRewards: undefined, pendingShop: undefined },
+    run: { ...run, phase: "combat", pendingRewards: undefined, pendingShop: undefined, pendingEvent: undefined },
     combat,
   };
 };
@@ -488,20 +571,28 @@ export const settleRunCombat = (
 
   const currentHp = combat.player.hp;
   if (combat.phase === "defeat") {
-    return { ...run, currentHp, phase: "defeat", pendingRewards: undefined, pendingShop: undefined };
+    return { ...run, currentHp, phase: "defeat", pendingRewards: undefined, pendingShop: undefined, pendingEvent: undefined, pendingEventCombat: undefined };
   }
 
   const node = currentRunNode(run);
-  const gold = run.gold + nodeGoldReward(node.kind);
+  const resolvedEventCombat = node.kind === "event" && run.pendingEventCombat !== undefined;
+  const event = resolvedEventCombat ? (db.events ?? {})[String(run.pendingEventCombat!.eventId)] : undefined;
+  if (resolvedEventCombat && event?.risk !== "combat") throw new Error("pending event combat is invalid");
+  const combatEvent = event?.risk === "combat" ? event : undefined;
+  const gold = run.gold + (combatEvent === undefined ? nodeGoldReward(node.kind) : combatEvent.goldReward);
+  const eventCombats = run.eventCombats + (resolvedEventCombat ? 1 : 0);
 
   if (run.combatIndex === run.graph.layers.length - 1) {
     return {
       ...run,
       currentHp,
       gold,
+      eventCombats,
       phase: "victory",
       pendingRewards: undefined,
       pendingShop: undefined,
+      pendingEvent: undefined,
+      pendingEventCombat: undefined,
     };
   }
 
@@ -509,20 +600,134 @@ export const settleRunCombat = (
     ...run,
     currentHp,
     gold,
+    eventCombats,
     combatIndex: run.combatIndex + 1,
     attempt: 0,
+    pendingEventCombat: undefined,
   };
   const pendingRewards = pendingRewardsFor(
     nextRun,
     completedCombatCount(nextRun),
     db,
   );
+  const rareSkillOptions =
+    combatEvent !== undefined
+      ? rngFrom(
+          derive(seedFromString(run.runSeed), "reward", completedCombatCount(nextRun) - 1),
+        )
+          .shuffle(
+            rewardEligibleSkillIds(db.skills, run.character, run.equippedSkills).filter(
+              (skill) => db.skills[String(skill)]?.rarity === "rare",
+            ),
+          )
+          .slice(0, combatEvent.rareSkillOptions)
+      : undefined;
   return {
     ...nextRun,
     phase: "rewards",
-    pendingRewards,
+    pendingRewards:
+      rareSkillOptions === undefined
+        ? pendingRewards
+        : {
+            ...pendingRewards,
+            skillOptions:
+              rareSkillOptions.length === combatEvent!.rareSkillOptions ? rareSkillOptions : [],
+            skillChoiceResolved: rareSkillOptions.length !== combatEvent!.rareSkillOptions,
+          },
     pendingShop: undefined,
   };
+};
+
+const advanceAfterEvent = (run: RunState, db: ContentDb): RunState => {
+  if (run.combatIndex >= run.graph.layers.length - 1) {
+    throw new Error("cannot resolve event after the final layer");
+  }
+  return enterCurrentLayer(
+    {
+      ...run,
+      combatIndex: run.combatIndex + 1,
+      attempt: 0,
+      phase: "ready",
+      pendingEvent: undefined,
+    },
+    db,
+  );
+};
+
+export const acceptEvent = (
+  run: RunState,
+  db: ContentDb,
+  bagIndex?: number,
+): RunState => {
+  const pending = requirePendingEvent(run);
+  assertRunGraphInvariants(run);
+  const node = currentRunNode(run);
+  if (node.kind !== "event") throw new Error("current node is not an event node");
+  const event = (db.events ?? {})[String(pending.eventId)];
+  if (event === undefined) throw new Error("unknown event");
+  if (event.risk === "combat") {
+    return {
+      ...run,
+      phase: "ready",
+      pendingEvent: undefined,
+      pendingEventCombat: { eventId: pending.eventId },
+    };
+  }
+  const signature = signatureCoin(db, run.character);
+  if (event.risk === "hp") {
+    if (run.currentHp <= event.requireCurrentHpAbove)
+      throw new Error("not enough HP to accept event");
+    return advanceAfterEvent(
+      {
+        ...run,
+        currentHp: run.currentHp - event.hpCost,
+        bag: [...run.bag, signature],
+        eventCoinGains: run.eventCoinGains + event.reward.count,
+      },
+      db,
+    );
+  }
+  if (bagIndex === undefined) throw new Error("bagIndex is required for this event");
+  if (!Number.isInteger(bagIndex) || bagIndex < 0 || bagIndex >= run.bag.length)
+    throw new Error("bag index is out of range");
+  if (String(run.bag[bagIndex]) !== "basic")
+    throw new Error("event requires a basic coin");
+  if (event.risk === "gold") {
+    if (run.gold < event.goldCost) throw new Error("not enough gold");
+    const bag = [...run.bag];
+    bag[bagIndex] = signature;
+    return advanceAfterEvent(
+      {
+        ...run,
+        gold: run.gold - event.goldCost,
+        bag,
+        eventCoinGains: run.eventCoinGains + 1,
+        eventCoinLosses: run.eventCoinLosses + 1,
+      },
+      db,
+    );
+  }
+  if (run.bag.length <= event.sacrifice.minimumBagSize)
+    throw new Error("cannot sacrifice the last coin");
+  const bag = [...run.bag];
+  bag.splice(bagIndex, 1);
+  return advanceAfterEvent(
+    {
+      ...run,
+      bag: [...bag, signature],
+      eventCoinGains: run.eventCoinGains + 1,
+      eventCoinLosses: run.eventCoinLosses + 1,
+    },
+    db,
+  );
+};
+
+export const declineEvent = (run: RunState, db: ContentDb): RunState => {
+  requirePendingEvent(run);
+  assertRunGraphInvariants(run);
+  if (currentRunNode(run).kind !== "event")
+    throw new Error("current node is not an event node");
+  return advanceAfterEvent(run, db);
 };
 
 export const chooseCoinReward = (

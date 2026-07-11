@@ -10,19 +10,18 @@ const EXPECTED_RUNS = GAMES_PER_POLICY * POLICY_IDS.length;
 // seed42 보상 셔플과 fire-build 선택 결과가 의도적으로 바뀌어 재고정했다.
 // P3.4 재고정 (0.8.0-p3.4 결속): 코인 풀 5종 진입으로 §825 가중 경로가 활성화되어
 // 보상 코인 옵션과 후속 스킬 셔플(공유 reward 스트림 소비량 변화)이 의도 변경됨.
-// P4.2b/P4.3 재고정 (0.9.0-p4, 본 라운드 결속): D9 10레이어 그래프 활성화로
-// fight-first 경로가 5전투 레거시에서 6전투 도중 패배로 의도 변경됨. graph/shop 전용
-// 스트림 추가 후에도 첫 reward 스트림 index 0과 A=A·격리 계약은 ci:sim CRN 게이트가 유지한다.
+// P4.4 재고정 (0.10.0-p4.4 결속): D10 그래프 v2에서 이벤트 노드를 복원하고
+// 이벤트 전용 스트림을 추가했다. graph 스트림 소비 순서는 유지되며 이벤트 배정/매복
+// 엘리트만 event-<layer> 스트림에서 격리 소비한다.
 const SEED_42_GOLDEN = {
   seed: "42",
   result: "defeat",
   combatsCompleted: 6,
-  turnsPerCombat: [4, 4, 4, 4, 6, 3],
+  turnsPerCombat: [4, 4, 4, 9, 7, 5],
   carriedHp: 0,
   finalBag: [
     "basic",
     "basic",
-    "basic",
     "fire",
     "fire",
     "fire",
@@ -30,6 +29,8 @@ const SEED_42_GOLDEN = {
     "basic",
     "fire",
     "fire",
+    "fire",
+    "mana",
   ],
   finalEquippedSkills: [
     "fire-infusion",
@@ -43,9 +44,9 @@ const SEED_42_GOLDEN = {
     ["raider"],
     ["goblin", "ghoul"],
     ["goblin", "ghoul"],
-    ["thief", "goblin"],
-    ["raider-plus"],
+    ["gatekeeper-plus"],
     ["ghoul", "goblin", "slime"],
+    ["ember-archmage"],
   ],
 } as const;
 

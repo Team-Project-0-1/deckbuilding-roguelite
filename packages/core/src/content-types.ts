@@ -3,6 +3,7 @@ import type {
   CoinDefId,
   CoinUid,
   Element,
+  EventDefId,
   EnemyDefId,
   Face,
   SkillId
@@ -103,11 +104,49 @@ export interface EnemyDef {
   intents: EnemyIntent[];
 }
 
+export type EventRisk = 'combat' | 'hp' | 'gold' | 'coin';
+
+export type EventDef =
+  | {
+      id: EventDefId;
+      name: string;
+      prompt: string;
+      risk: 'combat';
+      elitePool: EnemyDefId[][];
+      goldReward: number;
+      rareSkillOptions: number;
+    }
+  | {
+      id: EventDefId;
+      name: string;
+      prompt: string;
+      risk: 'hp';
+      hpCost: number;
+      requireCurrentHpAbove: number;
+      reward: { kind: 'signatureCoin'; count: number };
+    }
+  | {
+      id: EventDefId;
+      name: string;
+      prompt: string;
+      risk: 'gold';
+      goldCost: number;
+      transform: { from: CoinDefId; to: 'signatureCoin' };
+    }
+  | {
+      id: EventDefId;
+      name: string;
+      prompt: string;
+      risk: 'coin';
+      sacrifice: { coin: CoinDefId; reward: 'signatureCoin'; minimumBagSize: number };
+    };
+
 export interface ContentDb {
   coins: Record<string, CoinDef>;
   skills: Record<string, SkillDef>;
   enemies: Record<string, EnemyDef>;
   characters: Record<string, CharacterDef>;
+  events?: Record<string, EventDef>;
   validate: () => string[];
 }
 
@@ -221,14 +260,37 @@ const validateTurnTriggers = (db: Omit<ContentDb, 'validate'>): string[] => {
   return errors;
 };
 
+const validateEvents = (events: readonly EventDef[], enemies: Record<string, EnemyDef>): string[] => {
+  const errors: string[] = [];
+  for (const event of events) {
+    if (event.risk !== 'combat') continue;
+    if (event.elitePool.length === 0) {
+      errors.push(`event ${String(event.id)}: elitePool must not be empty`);
+    }
+    for (const encounter of event.elitePool) {
+      if (encounter.length === 0) {
+        errors.push(`event ${String(event.id)}: elitePool encounter must not be empty`);
+      }
+      for (const enemyId of encounter) {
+        if (enemies[String(enemyId)] === undefined) {
+          errors.push(`event ${String(event.id)}: unknown enemy ${String(enemyId)}`);
+        }
+      }
+    }
+  }
+  return errors;
+};
+
 export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => [
   ...duplicateIds(Object.values(db.coins), 'coin'),
   ...duplicateIds(Object.values(db.skills), 'skill'),
   ...duplicateIds(Object.values(db.enemies), 'enemy'),
   ...duplicateIds(Object.values(db.characters), 'character'),
+  ...duplicateIds(Object.values(db.events ?? {}), 'event'),
   ...validateSkillCosts(Object.values(db.skills)),
   ...validateTurnTriggers(db),
-  ...validateAttackTargets(Object.values(db.skills))
+  ...validateAttackTargets(Object.values(db.skills)),
+  ...validateEvents(Object.values(db.events ?? {}), db.enemies)
 ];
 
 export const effectiveElements = (coin: CoinInstance, db: ContentDb): Element[] => {

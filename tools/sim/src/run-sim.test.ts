@@ -27,8 +27,8 @@ describe('M5 full-run simulator', () => {
   });
 
   it('completes the deterministic generated-graph run with boundary state intact', () => {
-    // P4.2b/P4.3 재고정 (0.9.0-p4 결속): D9 10레이어 그래프 활성화 — seed 42 fight-first는
-    // 6전투(3마리 조우)에서 패배한다. 난이도 관측치는 P4.5 경제 Monte Carlo가 판정한다
+    // P4.4 재고정 (0.10.0-p4.4 결속): D10 이벤트 그래프 v2와 event-<layer> 스트림 활성화.
+    // seed 42 fight-first는 매복 이벤트를 수락한 뒤 보스에서 패배한다. 난이도 관측치는 P4.5 경제 Monte Carlo가 판정한다
     // (balance-provisional — 상점 미사용 기본 정책 기준).
     const simulation = simulateRun('42');
 
@@ -51,17 +51,17 @@ describe('M5 full-run simulator', () => {
       seed: '42',
       result: 'defeat',
       combatsCompleted: 6,
-      turnsPerCombat: [4, 4, 4, 4, 6, 3],
+      turnsPerCombat: [4, 4, 4, 9, 7, 5],
       carriedHp: 0,
-      finalBag: ['basic', 'basic', 'basic', 'fire', 'fire', 'fire', 'fire', 'basic', 'fire', 'fire'],
+      finalBag: ['basic', 'basic', 'fire', 'fire', 'fire', 'fire', 'basic', 'fire', 'fire', 'fire', 'mana'],
       finalEquippedSkills: ['fire-infusion', 'guard', 'burning-strike', 'flame-sword', 'ignite-sword', 'conflagration'],
       encounterOrder: [
         ['raider'],
         ['goblin', 'ghoul'],
         ['goblin', 'ghoul'],
-        ['thief', 'goblin'],
-        ['raider-plus'],
-        ['ghoul', 'goblin', 'slime']
+        ['gatekeeper-plus'],
+        ['ghoul', 'goblin', 'slime'],
+        ['ember-archmage']
       ]
     });
   });

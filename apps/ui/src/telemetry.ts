@@ -80,7 +80,8 @@ export type HumanShopAction =
 
 export type HumanPathFact =
   | { layer: number; type: "choose-node"; choice: number }
-  | { layer: number; type: "shop"; actions: HumanShopAction[] };
+  | { layer: number; type: "shop"; actions: HumanShopAction[] }
+  | { layer: number; type: "event"; action: "accept" | "decline"; choice?: number };
 
 export interface HumanRunTrace {
   schemaVersion: typeof HUMAN_RUN_SCHEMA_VERSION;
@@ -390,6 +391,24 @@ export const recordHumanShopAction = (
     ],
   };
 };
+
+export const recordHumanEventAction = (
+  trace: HumanRunTrace,
+  input: { layer: number; action: "accept" | "decline"; choice?: number },
+): HumanRunTrace => ({
+  ...trace,
+  path: [
+    ...trace.path,
+    input.choice === undefined
+      ? { layer: input.layer, type: "event", action: input.action }
+      : {
+          layer: input.layer,
+          type: "event",
+          action: input.action,
+          choice: input.choice,
+        },
+  ],
+});
 
 type JsonObject = Record<string, unknown>;
 
@@ -702,6 +721,17 @@ const sanitizePathFact = (input: unknown, label: string): HumanPathFact => {
       type: "choose-node",
       choice: nonNegativeInteger(object, "choice", label),
     };
+  }
+  if (object.type === "event") {
+    const action = literalValue(
+      object.action,
+      ["accept", "decline"] as const,
+      `${label}.action`,
+    );
+    const choice = optionalIndex(object, "choice", label);
+    return choice === undefined
+      ? { layer, type: "event", action }
+      : { layer, type: "event", action, choice };
   }
   if (object.type !== "shop") throw new Error(`${label}.type is unsupported`);
   if (!Array.isArray(object.actions) || object.actions.length > 64) {

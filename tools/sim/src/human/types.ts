@@ -66,7 +66,8 @@ export type HumanShopActionFact =
 
 export type HumanPathFact =
   | { layer: number; type: "choose-node"; choice: number }
-  | { layer: number; type: "shop"; actions: HumanShopActionFact[] };
+  | { layer: number; type: "shop"; actions: HumanShopActionFact[] }
+  | { layer: number; type: "event"; action: "accept" | "decline"; choice?: number };
 
 export interface HumanRunTraceLike {
   schemaVersion: 2;

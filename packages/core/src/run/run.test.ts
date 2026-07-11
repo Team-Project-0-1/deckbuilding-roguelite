@@ -22,6 +22,7 @@ import {
   skipSkillReward,
   startRunCombat,
   leaveShop,
+  declineEvent,
 } from "./run";
 import { RUN_SAVE_VERSION } from "./types";
 import type { RunSave, RunState } from "./types";
@@ -106,6 +107,17 @@ const testDb = (): ContentDb => {
         },
       },
     },
+    events: {
+      "blood-offering": {
+        id: id("blood-offering"),
+        name: "blood",
+        prompt: "blood",
+        risk: "hp",
+        hpCost: 5,
+        requireCurrentHpAbove: 5,
+        reward: { kind: "signatureCoin", count: 1 },
+      },
+    },
     validate: () => [],
   };
 };
@@ -149,10 +161,14 @@ const endedCombat = (
 const chooseFightFirst = (run: RunState, db = testDb()): RunState => {
   if (run.phase === "choose-node") {
     const layer = run.graph.layers[run.combatIndex] ?? [];
-    const combatChoice = layer.findIndex((node) => node.kind !== "shop");
+    const combatChoice = layer.findIndex(
+      (node) =>
+        node.kind === "combat" || node.kind === "elite" || node.kind === "boss",
+    );
     return chooseRunNode(run, combatChoice < 0 ? 0 : combatChoice, db);
   }
   if (run.phase === "shop") return leaveShop(run, db);
+  if (run.phase === "event") return declineEvent(run, db);
   return run;
 };
 
@@ -213,6 +229,7 @@ const replayRun = (seed: string) => {
   const encounters: string[][] = [];
   const rewards: { coins: string[]; skills: string[] }[] = [];
   while (run.phase !== "victory") {
+    run = chooseFightFirst(run, db);
     const started = startRunCombat(run, db);
     encounters.push(started.combat.enemies.map((enemy) => String(enemy.defId)));
     run = settleRunCombat(
@@ -241,15 +258,13 @@ describe("run progression", () => {
       ["shaman"],
       ["goblin", "ghoul"],
       ["goblin", "ghoul"],
-      ["thief", "goblin"],
       ["gatekeeper-plus"],
-      ["ghoul", "goblin", "slime"],
       ["ghoul", "goblin", "slime"],
       ["thief", "goblin"],
       ["ember-archmage"],
     ]);
     expect(first.rewards).toEqual(second.rewards);
-    expect(first.rewards).toHaveLength(8);
+    expect(first.rewards).toHaveLength(6);
     for (const reward of first.rewards) {
       expect(new Set(reward.coins)).toEqual(new Set(["basic", "fire", "mana"]));
       expect(reward.coins).toHaveLength(3);
@@ -260,7 +275,7 @@ describe("run progression", () => {
     ).toBe(true);
     expect(first.run.phase).toBe("victory");
     expect(first.run.combatIndex).toBe(9);
-    expect(first.run.gold).toBe(415);
+    expect(first.run.gold).toBe(345);
   });
 
   it("creates the active D9 graph and starts combat from the selected node", () => {
@@ -275,12 +290,12 @@ describe("run progression", () => {
     expect(run.graph.layers.map((layer) => layer.map((node) => node.kind))).toEqual([
       ["combat"],
       ["combat"],
-      ["shop", "combat"],
+      ["shop", "event"],
       ["combat"],
       ["elite"],
-      ["shop", "combat"],
+      ["shop", "event"],
       ["combat"],
-      ["combat"],
+      ["event", "combat"],
       ["shop"],
       ["boss"],
     ]);
@@ -375,7 +390,7 @@ describe("run progression", () => {
     );
   });
 
-  it("uses fixed node gold rewards and reaches 415 gold on the fight-first graph", () => {
+  it("uses fixed node gold rewards and reaches 345 gold on the fight-first graph", () => {
     const replay = replayRun("P4-GOLD");
 
     expect(nodeGoldReward("combat")).toBe(35);
@@ -383,7 +398,7 @@ describe("run progression", () => {
     expect(nodeGoldReward("boss")).toBe(100);
     expect(nodeGoldReward("shop")).toBe(0);
     expect(nodeGoldReward("event")).toBe(0);
-    expect(replay.run.gold).toBe(415);
+    expect(replay.run.gold).toBe(345);
   });
 
   it("carries lost HP into the next combat without healing", () => {

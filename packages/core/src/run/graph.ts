@@ -10,7 +10,6 @@ export interface RunNode {
   id: string;
   kind: RunNodeKind;
   encounter?: EnemyDefId[];
-  eventId?: string;
 }
 
 export interface RunGraph {
@@ -75,16 +74,19 @@ export const generateRunGraph = (runSeed: string, db: ContentDb): RunGraph => {
       [rollEncounter(db, "combat-2", twoEnemyPool, rng)],
       [
         { id: "shop-3", kind: "shop" },
-        rollEncounter(db, "combat-3b", twoEnemyPool, rng),
+        { id: "event-3", kind: "event" },
       ],
       [rollEncounter(db, "combat-4", twoEnemyPool, rng)],
       [rollElite(db, "elite-5", rng)],
       [
         { id: "shop-6", kind: "shop" },
-        rollEncounter(db, "combat-6b", threeEnemyPool, rng),
+        { id: "event-6", kind: "event" },
       ],
       [rollEncounter(db, "combat-7", threeEnemyPool, rng)],
-      [rollEncounter(db, "combat-8", twoEnemyPool, rng)],
+      [
+        { id: "event-8", kind: "event" },
+        rollEncounter(db, "combat-8b", twoEnemyPool, rng),
+      ],
       [{ id: "shop-9", kind: "shop" }],
       [{ id: "boss-10", kind: "boss", encounter: [...boss] }],
     ],

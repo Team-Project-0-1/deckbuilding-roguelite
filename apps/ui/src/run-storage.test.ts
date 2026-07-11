@@ -60,6 +60,9 @@ const readySave = (): RunSave => ({
   shopRemovals: 0,
   shopPurchasedCoins: 0,
   shopPurchasedSkills: 0,
+  eventCombats: 0,
+  eventCoinGains: 0,
+  eventCoinLosses: 0,
   combatIndex: 2,
   attempt: 1,
   phase: "ready",
@@ -248,6 +251,9 @@ describe("run save serialization boundary", () => {
       shopRemovals: 0,
       shopPurchasedCoins: 0,
       shopPurchasedSkills: 0,
+      eventCombats: 0,
+      eventCoinGains: 0,
+      eventCoinLosses: 0,
       combatIndex: 0,
       attempt: 0,
       phase: "combat",
@@ -671,7 +677,7 @@ describe("run save serialization boundary", () => {
     const graph = {
       layers: legacyGraph().layers.map((layer, index) =>
         index === 1
-          ? [{ id: "evt-1", kind: "event" as const, eventId: "ambush" }]
+          ? [{ id: "evt-1", kind: "event" as const }]
           : index === 3
             ? [{ id: "shop-3", kind: "shop" as const }]
             : layer,

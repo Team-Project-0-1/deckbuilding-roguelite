@@ -1,6 +1,7 @@
 import { CONTENT_VERSION, contentDb } from "@game/content";
 import {
   RUN_ENCOUNTERS,
+  acceptEvent,
   buyShopCoin,
   buyShopRemoval,
   buyShopSkill,
@@ -8,6 +9,7 @@ import {
   chooseSkillReward,
   chooseRunNode,
   createRun,
+  declineEvent,
   leaveShop,
   legalCommands,
   resolveCoinRemoval,
@@ -580,13 +582,52 @@ const chooseNode = (
       node.kind === "combat" || node.kind === "elite" || node.kind === "boss",
   );
   const shopIndex = layer.findIndex((node) => node.kind === "shop");
+  const eventIndex = layer.findIndex((node) => node.kind === "event");
   const choice =
-    nodePolicyId === "economy-first" && shopIndex >= 0
-      ? shopIndex
-      : combatIndex >= 0
-        ? combatIndex
-        : 0;
+    nodePolicyId === "economy-first" && (shopIndex >= 0 || eventIndex >= 0)
+      ? shopIndex >= 0
+        ? shopIndex
+        : eventIndex
+      : nodePolicyId === "fight-first" && eventIndex >= 0
+        ? eventIndex
+        : combatIndex >= 0
+          ? combatIndex
+          : 0;
   return chooseRunNode(run, choice, contentDb);
+};
+
+const firstBasicCoinIndex = (run: RunState): number =>
+  run.bag.findIndex((coin) => String(coin) === "basic");
+
+const resolveEvent = (
+  input: RunState,
+  nodePolicyId: NodePolicyId,
+): RunState => {
+  const pending = input.pendingEvent;
+  if (pending === undefined) throw new Error("event phase requires pending event");
+  const event = (contentDb.events ?? {})[String(pending.eventId)];
+  if (event === undefined) throw new Error("unknown event");
+  if (nodePolicyId === "fight-first") {
+    return event.risk === "combat"
+      ? acceptEvent(input, contentDb)
+      : declineEvent(input, contentDb);
+  }
+  if (event.risk === "combat") return declineEvent(input, contentDb);
+  if (event.risk === "hp") {
+    return input.currentHp > event.requireCurrentHpAbove
+      ? acceptEvent(input, contentDb)
+      : declineEvent(input, contentDb);
+  }
+  const basicIndex = firstBasicCoinIndex(input);
+  if (basicIndex < 0) return declineEvent(input, contentDb);
+  if (event.risk === "gold") {
+    return input.gold >= event.goldCost
+      ? acceptEvent(input, contentDb, basicIndex)
+      : declineEvent(input, contentDb);
+  }
+  return input.bag.length > event.sacrifice.minimumBagSize
+    ? acceptEvent(input, contentDb, basicIndex)
+    : declineEvent(input, contentDb);
 };
 
 const highestRarityShopSkillIndex = (run: RunState): number => {
@@ -684,6 +725,10 @@ export const simulateRun = (
         run,
         resolveBuildPolicy(characterId, "baseline"),
       );
+      continue;
+    }
+    if (run.phase === "event") {
+      run = resolveEvent(run, nodePolicyId);
       continue;
     }
     if (run.phase !== "ready")
@@ -790,6 +835,10 @@ export const simulatePolicyRun = (
       }
       if (run.phase === "shop") {
         run = resolveShop(run, buildPolicy);
+        continue;
+      }
+      if (run.phase === "event") {
+        run = resolveEvent(run, nodePolicyId);
         continue;
       }
       if (run.phase !== "ready") {

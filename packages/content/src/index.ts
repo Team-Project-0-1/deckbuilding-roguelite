@@ -1,11 +1,12 @@
-import type { CharacterId, CoinDefId, EnemyDefId, SkillId } from '@game/core';
+import type { CharacterId, CoinDefId, EnemyDefId, EventDefId, SkillId } from '@game/core';
 import { validateContentDb } from '@game/core';
-import type { CharacterDef, CoinDef, ContentDb, EnemyDef, SkillDef } from '@game/core';
+import type { CharacterDef, CoinDef, ContentDb, EnemyDef, EventDef, SkillDef } from '@game/core';
 
 // P3.2 승격: 수호자·마나 스킬·exclusiveTo 시대. m5 콘텐츠는 현 버전의 부분집합이고
 // 기존 수치가 불변이므로 m5 저장은 안전하게 로드(마이그레이션)할 수 있다.
-export const CONTENT_VERSION = '0.9.0-p4';
-export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
+export const CONTENT_VERSION = '0.10.0-p4.4';
+export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
+// p4→p4.4 호환 근거: 이벤트 4종 가산·기존 플레이어/전투 콘텐츠 수치 불변.
 // p3.4→p4 호환 근거: 몬스터 6종 가산뿐(플레이어 콘텐츠·기존 수치 불변)이라 기존 저장의
 // 모든 참조가 유효하다. 신규 적은 신규 조우(P4.2+ 그래프)에서만 등장한다.
 // p3.2→p3.3 호환 근거: 스킬 3종 가산뿐(수치 불변)이라 기존 저장의 모든 참조가 유효하다.
@@ -16,6 +17,7 @@ const coin = (value: string) => value as CoinDefId;
 const skill = (value: string) => value as SkillId;
 const character = (value: string) => value as CharacterId;
 const enemy = (value: string) => value as EnemyDefId;
+const event = (value: string) => value as EventDefId;
 
 export const coins = {
   basic: { id: coin('basic'), element: null },
@@ -672,10 +674,48 @@ export const characters = {
   }
 } satisfies Record<string, CharacterDef>;
 
+// P4.4 D10 이벤트 4종 — 수치 전부 balance-provisional.
+export const events = {
+  'ambush-bounty': {
+    id: event('ambush-bounty'),
+    name: '매복 현상금',
+    prompt: '위험한 현상금 표식이 길을 막는다.',
+    risk: 'combat',
+    elitePool: [[enemy('raider-plus')], [enemy('gatekeeper-plus')]],
+    goldReward: 70,
+    rareSkillOptions: 2
+  },
+  'blood-offering': {
+    id: event('blood-offering'),
+    name: '피의 제물',
+    prompt: '피를 바치면 주머니가 대표 속성으로 응답한다.',
+    risk: 'hp',
+    hpCost: 5,
+    requireCurrentHpAbove: 5,
+    reward: { kind: 'signatureCoin', count: 1 }
+  },
+  'transmute-altar': {
+    id: event('transmute-altar'),
+    name: '변환 제단',
+    prompt: '금화가 기본 코인을 대표 속성 코인으로 영구 변환한다.',
+    risk: 'gold',
+    goldCost: 100,
+    transform: { from: coin('basic'), to: 'signatureCoin' }
+  },
+  'coin-sacrifice': {
+    id: event('coin-sacrifice'),
+    name: '동전 희생',
+    prompt: '기본 코인 하나를 잃고 대표 속성 코인을 얻는다.',
+    risk: 'coin',
+    sacrifice: { coin: coin('basic'), reward: 'signatureCoin', minimumBagSize: 1 }
+  }
+} satisfies Record<string, EventDef>;
+
 export const contentDb: ContentDb = {
   coins,
   skills,
   enemies,
   characters,
-  validate: () => validateContentDb({ coins, skills, enemies, characters })
+  events,
+  validate: () => validateContentDb({ coins, skills, enemies, characters, events })
 };

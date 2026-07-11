@@ -301,6 +301,17 @@ const sanitizePathFact = (value: unknown, label: string): HumanRunTraceLike["pat
   if (object.type === "choose-node") {
     return { layer, type: "choose-node", choice: nonNegativeInteger(object, "choice", label) };
   }
+  if (object.type === "event") {
+    const action = literalValue(
+      object.action,
+      ["accept", "decline"] as const,
+      `${label}.action`,
+    );
+    const choice = optionalIndex(object, "choice", label);
+    return choice === undefined
+      ? { layer, type: "event", action }
+      : { layer, type: "event", action, choice };
+  }
   if (object.type !== "shop") throw new Error(`${label}.type is unsupported`);
   const actions = boundedArray(object.actions, `${label}.actions`, 64).map((action, index) => {
     const entry = objectValue(action, `${label}.actions[${index}]`);
