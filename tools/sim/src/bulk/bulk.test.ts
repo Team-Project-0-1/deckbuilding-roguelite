@@ -134,9 +134,10 @@ describe("M6 deterministic bulk and CRN", () => {
       expect(b.combatStreams.slice(0, a.combatStreams.length)).toEqual(
         a.combatStreams.slice(0, b.combatStreams.length),
       );
-      expect(b.rewardOffers.slice(0, a.rewardOffers.length)).toEqual(
-        a.rewardOffers.slice(0, b.rewardOffers.length),
-      );
+      // 첫 offer는 분기 전 동일 스트림 — exact 동일 필수. 이후는 가방 의존 가중으로 발산 허용
+      if (a.rewardOffers.length > 0 && b.rewardOffers.length > 0) {
+        expect(b.rewardOffers[0]).toEqual(a.rewardOffers[0]);
+      }
     }
     expect(report.anomalySeeds).toEqual(
       [...report.anomalySeeds].sort(
@@ -181,6 +182,23 @@ describe("M6 deterministic bulk and CRN", () => {
     );
     expect(new Set(result.traces.map((trace) => trace.traceId)).size).toBe(
       result.traces.length,
+    );
+  });
+
+  it("can run every accepted policy for the P3.4 characters with default build policies", () => {
+    const result = runBulk({
+      baseSeed: "P3-P34-CHARACTER-POLICY-MATRIX",
+      games: 1,
+      policyIds: POLICY_IDS,
+      characterIds: ["sorcerer", "frost-knight"],
+    });
+
+    expect(result.report.metrics.outcomes.runs).toBe(8);
+    expect(result.report.metrics.outcomes.terminalRuns).toBe(8);
+    expect(result.report.metrics.outcomes.crashRuns).toBe(0);
+    expect(result.report.metrics.outcomes.invariantViolationCount).toBe(0);
+    expect(new Set(result.traces.map((trace) => trace.characterId))).toEqual(
+      new Set(["sorcerer", "frost-knight"]),
     );
   });
 });

@@ -189,7 +189,20 @@ describe("M6 balance report aggregation", () => {
     expect(first.mechanicalFacts.crn.aa.identical).toBe(true);
     expect(first.mechanicalFacts.crn.isBalanceGate).toBe(false);
     expect(first.mechanicalFacts.guardianSafety500.isCiGate).toBe(false);
+    expect(first.mechanicalFacts.characterSafety500).toEqual([
+      expect.objectContaining({
+        characterId: "sorcerer",
+        buildPolicyId: "lightning-build",
+        isCiGate: false,
+      }),
+      expect.objectContaining({
+        characterId: "frost-knight",
+        buildPolicyId: "frost-build",
+        isCiGate: false,
+      }),
+    ]);
     expect(first.mechanicalFacts.characterCrn.isBalanceGate).toBe(false);
+    expect(first.mechanicalFacts.frostCharacterCrn.isBalanceGate).toBe(false);
     expect(first.mechanicalFacts.policyEnemyCharacter.length).toBeGreaterThan(0);
     expect(first.mechanicalFacts.buildPolicies).toEqual([
       expect.objectContaining({
@@ -199,6 +212,14 @@ describe("M6 balance report aggregation", () => {
       expect.objectContaining({
         buildPolicyId: "mana-build",
         coinRewardPriority: ["mana", "basic", "fire"],
+      }),
+      expect.objectContaining({
+        buildPolicyId: "frost-build",
+        coinRewardPriority: ["frost", "basic", "mana", "fire", "lightning"],
+      }),
+      expect.objectContaining({
+        buildPolicyId: "lightning-build",
+        coinRewardPriority: ["lightning", "basic", "mana", "fire", "frost"],
       }),
     ]);
     expect(
@@ -220,6 +241,16 @@ describe("M6 balance report aggregation", () => {
       expect.objectContaining({
         characterId: "guardian",
         buildPolicyId: "mana-build",
+      }),
+    ]);
+    expect(first.mechanicalFacts.frostCharacterCrn.characters).toEqual([
+      expect.objectContaining({
+        characterId: "warrior",
+        buildPolicyId: "fire-build",
+      }),
+      expect.objectContaining({
+        characterId: "frost-knight",
+        buildPolicyId: "frost-build",
       }),
     ]);
     expect(first.informationalTargetBands.every((band) => !band.isGate)).toBe(

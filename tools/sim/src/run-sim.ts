@@ -49,6 +49,9 @@ const character = (value: string): CharacterId => value as CharacterId;
 // 봇은 셋업을 먼저 발동해 이후 공격으로 트리거 가치를 실현한다 (P3.3 의도 문서화).
 // 셋업은 usedThisTurn/소비 코인으로 자연 한정되어 무진행 루프를 만들지 않는다 — 가드가 이를 보증.
 const ATTACK_SKILL_PRIORITY = [
+  "overload",
+  "winters-grasp",
+  "aegis-surge",
   "flame-sword",
   "heart-of-flame",
   "ignite-sword",
@@ -56,6 +59,14 @@ const ATTACK_SKILL_PRIORITY = [
   "smash",
   "shield-reprisal",
   "warding-strike",
+  "spark-strike",
+  "chain-surge",
+  "static-field",
+  "volt-lash",
+  "frost-slash",
+  "glacial-wall",
+  "chilling-field",
+  "glacier-strike",
   "slash",
   "ignite",
   "conflagration",
@@ -91,6 +102,7 @@ export const M6_BUILD_POLICIES: Readonly<
     id: "mana-build",
     coinRewardPriority: Object.freeze(["mana", "basic", "fire"]),
     skillRewardPriority: Object.freeze([
+      "aegis-surge",
       "mana-bulwark",
       "mana-well",
       "shield-reprisal",
@@ -102,6 +114,76 @@ export const M6_BUILD_POLICIES: Readonly<
       "furnace",
     ]),
     replacementPriority: Object.freeze([
+      "flame-rampage",
+      "furnace",
+      "ignite",
+      "fire-infusion",
+      "smash",
+      "slash",
+    ]),
+  }),
+  "frost-build": Object.freeze({
+    id: "frost-build",
+    // balance-provisional: representative frost-first ordering for P3.4 report-only sweeps.
+    coinRewardPriority: Object.freeze([
+      "frost",
+      "basic",
+      "mana",
+      "fire",
+      "lightning",
+    ]),
+    skillRewardPriority: Object.freeze([
+      "winters-grasp",
+      "frost-slash",
+      "glacial-wall",
+      "chilling-field",
+      "glacier-strike",
+      "slash",
+      "guard",
+      "smash",
+      "fire-infusion",
+      "furnace",
+    ]),
+    replacementPriority: Object.freeze([
+      "frost-slash",
+      "glacial-wall",
+      "chilling-field",
+      "glacier-strike",
+      "flame-rampage",
+      "furnace",
+      "ignite",
+      "fire-infusion",
+      "smash",
+      "slash",
+    ]),
+  }),
+  "lightning-build": Object.freeze({
+    id: "lightning-build",
+    // balance-provisional: representative lightning-first ordering for P3.4 report-only sweeps.
+    coinRewardPriority: Object.freeze([
+      "lightning",
+      "basic",
+      "mana",
+      "fire",
+      "frost",
+    ]),
+    skillRewardPriority: Object.freeze([
+      "overload",
+      "spark-strike",
+      "chain-surge",
+      "static-field",
+      "volt-lash",
+      "slash",
+      "guard",
+      "smash",
+      "fire-infusion",
+      "furnace",
+    ]),
+    replacementPriority: Object.freeze([
+      "spark-strike",
+      "chain-surge",
+      "static-field",
+      "volt-lash",
       "flame-rampage",
       "furnace",
       "ignite",
@@ -213,10 +295,20 @@ const coinPriority = (
   skillId: string,
 ): number => {
   const defId = String(state.coins[Number(command.coin)]?.defId ?? "");
-  const ordered =
-    skillId === "guard"
-      ? ["mana", "fire", "basic"]
-      : ["fire", "mana", "basic"];
+  const ordered = [
+    "glacial-wall",
+    "chilling-field",
+    "glacier-strike",
+    "frost-slash",
+  ].includes(skillId)
+    ? ["frost", "basic", "mana", "fire", "lightning"]
+    : ["spark-strike", "chain-surge", "static-field", "volt-lash"].includes(
+          skillId,
+        )
+      ? ["lightning", "basic", "mana", "fire", "frost"]
+      : skillId === "guard"
+        ? ["mana", "fire", "basic", "frost", "lightning"]
+        : ["fire", "mana", "basic", "frost", "lightning"];
   const rank = ordered.indexOf(defId);
   return rank < 0 ? ordered.length : rank;
 };
@@ -439,7 +531,8 @@ const resolveRewardsDetailed = (
   };
 };
 
-// 보상 빌드 해석의 단일 정본 — 명시 지정 > 캐릭터 기본(guardian=mana-build) >
+// 보상 빌드 해석의 단일 정본 — 명시 지정 > 캐릭터 기본(guardian=mana-build,
+// sorcerer=lightning-build, frost-knight=frost-build) >
 // 레거시 variant 코인 우선순위(M6 baseline/basic-first 의미·바이트 보존; 감시자 회귀 지적).
 export const resolveBuildPolicy = (
   characterId: SimCharacterId,
@@ -448,6 +541,8 @@ export const resolveBuildPolicy = (
 ): M6BuildPolicyConfig => {
   if (buildPolicyId !== undefined) return M6_BUILD_POLICIES[buildPolicyId];
   if (characterId === "guardian") return M6_BUILD_POLICIES["mana-build"];
+  if (characterId === "sorcerer") return M6_BUILD_POLICIES["lightning-build"];
+  if (characterId === "frost-knight") return M6_BUILD_POLICIES["frost-build"];
   const variant = M6_VARIANTS[variantId];
   return {
     ...M6_BUILD_POLICIES["fire-build"],
@@ -459,7 +554,11 @@ const resolveRewards = (input: RunState): RunState =>
   resolveRewardsDetailed(
     input,
     resolveBuildPolicy(
-      String(input.character) === "guardian" ? "guardian" : "warrior",
+      String(input.character) === "guardian" ||
+        String(input.character) === "sorcerer" ||
+        String(input.character) === "frost-knight"
+        ? (String(input.character) as SimCharacterId)
+        : "warrior",
     ),
   ).run;
 

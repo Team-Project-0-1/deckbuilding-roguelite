@@ -19,7 +19,7 @@ import {
   type M6RunTrace,
 } from "./metrics";
 import { POLICY_IDS, type PolicyId } from "./policies";
-import { M6_BUILD_POLICIES } from "./run-sim";
+import { M6_BUILD_POLICIES, resolveBuildPolicy } from "./run-sim";
 
 declare const process: {
   argv: string[];
@@ -172,6 +172,18 @@ interface P3GuardianSafetyMetrics {
   readonly isCiGate: false;
 }
 
+interface P3CharacterSafetyMetrics {
+  readonly characterId: SimCharacterId;
+  readonly buildPolicyId: M6BuildPolicyId;
+  readonly sample: string;
+  readonly runs: number;
+  readonly terminalRuns: number;
+  readonly crashRuns: number;
+  readonly invariantViolationRuns: number;
+  readonly invariantViolationCount: number;
+  readonly isCiGate: false;
+}
+
 interface P3RewardSelectionFlag {
   readonly characterId?: SimCharacterId;
   readonly buildPolicyId?: M6BuildPolicyId;
@@ -261,11 +273,13 @@ export interface M6BalanceReport {
     readonly crn: M6CompactCrnEvidence;
     readonly policyEnemyCharacter: readonly P3PolicyEnemyCharacterRow[];
     readonly guardianSafety500: P3GuardianSafetyMetrics;
+    readonly characterSafety500: readonly P3CharacterSafetyMetrics[];
     readonly rewardSelectionDominance: P3RewardSelectionReport;
     readonly buildPolicies: readonly P3BuildPolicyRow[];
     readonly rewardSelectionByCharacterBuild: readonly P3RewardSelectionDistributionRow[];
     readonly rewardSelectionAudit: readonly P3RewardSelectionAuditRow[];
     readonly characterCrn: P3CharacterCrnEvidence;
+    readonly frostCharacterCrn: P3CharacterCrnEvidence;
   };
   readonly informationalTargetBands: readonly M6InformationalTargetBand[];
   readonly warnings: readonly M6Warning[];
@@ -291,6 +305,10 @@ const assertPositiveInteger = (value: number, label: string): void => {
     throw new RangeError(`${label} must be a positive safe integer`);
   }
 };
+
+const defaultBuildPolicyIdForCharacter = (
+  characterId: SimCharacterId,
+): M6BuildPolicyId => resolveBuildPolicy(characterId, "baseline").id;
 
 const normalizedOptions = (
   options: M6BalanceReportOptions,
@@ -378,7 +396,7 @@ export const aggregatePolicyEnemyCharacterRows = (
   for (const trace of traces) {
     const characterId = (trace.characterId ?? "warrior") as SimCharacterId;
     const buildPolicyId = (trace.buildPolicyId ??
-      (characterId === "guardian" ? "mana-build" : "fire-build")) as M6BuildPolicyId;
+      defaultBuildPolicyIdForCharacter(characterId)) as M6BuildPolicyId;
     for (const combat of trace.combats) {
       for (const enemyId of [...new Set(combat.enemyIds)].sort(compareText)) {
         const key = JSON.stringify([
@@ -675,8 +693,16 @@ const compactCharacterCrnEvidence = (
   baseSeed: string,
   games: number,
   aa: M6CrnReport["aa"],
-  warrior: readonly M6RunTrace[],
-  guardian: readonly M6RunTrace[],
+  left: {
+    readonly characterId: SimCharacterId;
+    readonly buildPolicyId: M6BuildPolicyId;
+    readonly traces: readonly M6RunTrace[];
+  },
+  right: {
+    readonly characterId: SimCharacterId;
+    readonly buildPolicyId: M6BuildPolicyId;
+    readonly traces: readonly M6RunTrace[];
+  },
   anomalySeedCount: number,
 ): P3CharacterCrnEvidence => ({
   policyId: "greedy",
@@ -684,10 +710,10 @@ const compactCharacterCrnEvidence = (
   baseSeed,
   games,
   aa,
-  paired: pairedOutcomes(warrior, guardian),
+  paired: pairedOutcomes(left.traces, right.traces),
   characters: [
-    characterOutcome("warrior", "fire-build", warrior),
-    characterOutcome("guardian", "mana-build", guardian),
+    characterOutcome(left.characterId, left.buildPolicyId, left.traces),
+    characterOutcome(right.characterId, right.buildPolicyId, right.traces),
   ],
   anomalySeedCount,
   isBalanceGate: false,
@@ -699,6 +725,25 @@ const guardianSafetyMetrics = (
   const outcomes = foldM6Metrics(traces).outcomes;
   return {
     sample: "guardian policy runs",
+    runs: outcomes.runs,
+    terminalRuns: outcomes.terminalRuns,
+    crashRuns: outcomes.crashRuns,
+    invariantViolationRuns: outcomes.invariantViolationRuns,
+    invariantViolationCount: outcomes.invariantViolationCount,
+    isCiGate: false,
+  };
+};
+
+const characterSafetyMetrics = (
+  characterId: SimCharacterId,
+  buildPolicyId: M6BuildPolicyId,
+  traces: readonly M6RunTrace[],
+): P3CharacterSafetyMetrics => {
+  const outcomes = foldM6Metrics(traces).outcomes;
+  return {
+    characterId,
+    buildPolicyId,
+    sample: `${characterId} ${buildPolicyId} policy runs`,
     runs: outcomes.runs,
     terminalRuns: outcomes.terminalRuns,
     crashRuns: outcomes.crashRuns,
@@ -752,7 +797,7 @@ const rewardSelectionRows = (
   for (const transcript of transcripts) {
     const characterId = (transcript.characterId ?? "warrior") as SimCharacterId;
     const buildPolicyId = (transcript.buildPolicyId ??
-      (characterId === "guardian" ? "mana-build" : "fire-build")) as M6BuildPolicyId;
+      defaultBuildPolicyIdForCharacter(characterId)) as M6BuildPolicyId;
     for (const reward of transcript.rewards) {
       for (const option of reward.coinOptions) {
         addRewardOffer(
@@ -797,7 +842,8 @@ const rewardSelectionRows = (
     )
     .map((row) => ({
       characterId: row.characterId ?? "warrior",
-      buildPolicyId: row.buildPolicyId ?? "fire-build",
+      buildPolicyId:
+        row.buildPolicyId ?? defaultBuildPolicyIdForCharacter("warrior"),
       optionType: row.optionType,
       optionId: row.optionId,
       offered: row.offered,
@@ -921,10 +967,16 @@ const rewardSelectionReport = (
 };
 
 const buildPolicyRows = (): readonly P3BuildPolicyRow[] =>
-  (["fire-build", "mana-build"] as const).map((buildPolicyId) => ({
+  (
+    [
+      ["fire-build", ["warrior"]],
+      ["mana-build", ["guardian"]],
+      ["frost-build", ["frost-knight"]],
+      ["lightning-build", ["sorcerer"]],
+    ] as const
+  ).map(([buildPolicyId, defaultCharacters]) => ({
     buildPolicyId,
-    defaultCharacters:
-      buildPolicyId === "fire-build" ? ["warrior"] : ["guardian"],
+    defaultCharacters,
     coinRewardPriority: M6_BUILD_POLICIES[buildPolicyId].coinRewardPriority,
     skillRewardPriority: M6_BUILD_POLICIES[buildPolicyId].skillRewardPriority,
   }));
@@ -938,6 +990,18 @@ const rewardSelectionAuditRows = (
       buildPolicyId: "mana-build" as const,
       optionType: "skill" as const,
       optionId: "mana-well",
+    },
+    {
+      characterId: "sorcerer" as const,
+      buildPolicyId: "lightning-build" as const,
+      optionType: "skill" as const,
+      optionId: "spark-strike",
+    },
+    {
+      characterId: "frost-knight" as const,
+      buildPolicyId: "frost-build" as const,
+      optionType: "skill" as const,
+      optionId: "frost-slash",
     },
   ];
   return required
@@ -966,8 +1030,8 @@ const rewardSelectionAuditRows = (
                 : null,
         observation:
           row.offered === 0
-            ? "mana-well was already in the guardian starter kit and was never offered as a reward in this sweep"
-            : `mana-well selected ${row.selected}/${row.offered} when offered under guardian/mana-build`,
+            ? `${item.optionId} was not offered under ${item.characterId}/${item.buildPolicyId} in this sweep`
+            : `${item.optionId} selected ${row.selected}/${row.offered} when offered under ${item.characterId}/${item.buildPolicyId}`,
       };
     })
     .sort(
@@ -1144,13 +1208,12 @@ export const buildM6BalanceReport = (
     variantIds: ["baseline"],
     captureTranscripts: true,
   });
-  const guardianBulk = runBulk({
+  const characterBulk = runBulk({
     baseSeed: config.baseSeed,
     games: config.gamesPerPolicy,
     policyIds: POLICY_IDS,
     variantIds: ["baseline"],
-    characterIds: ["guardian"],
-    buildPolicyIds: ["mana-build"],
+    characterIds: ["guardian", "sorcerer", "frost-knight"],
     captureTranscripts: true,
   });
   const crnReport = runCrnComparison({
@@ -1169,6 +1232,15 @@ export const buildM6BalanceReport = (
     characterIds: ["guardian"],
     buildPolicyIds: ["mana-build"],
   });
+  // 신규 캐릭터 결정론은 자기 자신의 A=A로 증명한다 — warrior aa 재사용은 거짓 증명 (감시자 반려)
+  const frostKnightCrn = runBulkWithAaIdentity({
+    baseSeed: config.baseSeed,
+    games: config.crnGames,
+    policyIds: ["greedy"],
+    variantIds: ["baseline"],
+    characterIds: ["frost-knight"],
+    buildPolicyIds: ["frost-build"],
+  });
   const metrics = bulk.report.metrics;
   const gatekeeper = aggregateGatekeeperConvergence(
     bulk.traces,
@@ -1181,8 +1253,10 @@ export const buildM6BalanceReport = (
     variantIds: ["baseline"],
     buildPolicyIds: ["fire-build"],
   });
-  const rewardTranscripts = [...bulk.transcripts, ...guardianBulk.transcripts];
+  const rewardTranscripts = [...bulk.transcripts, ...characterBulk.transcripts];
   const rewardRows = rewardSelectionRows(rewardTranscripts, true);
+  const characterTraces = (characterId: SimCharacterId): readonly M6RunTrace[] =>
+    characterBulk.traces.filter((trace) => trace.characterId === characterId);
 
   return {
     schemaVersion: P3_BALANCE_REPORT_SCHEMA_VERSION,
@@ -1212,9 +1286,21 @@ export const buildM6BalanceReport = (
       crn,
       policyEnemyCharacter: aggregatePolicyEnemyCharacterRows([
         ...bulk.traces,
-        ...guardianBulk.traces,
+        ...characterBulk.traces,
       ]),
-      guardianSafety500: guardianSafetyMetrics(guardianBulk.traces),
+      guardianSafety500: guardianSafetyMetrics(characterTraces("guardian")),
+      characterSafety500: [
+        characterSafetyMetrics(
+          "sorcerer",
+          "lightning-build",
+          characterTraces("sorcerer"),
+        ),
+        characterSafetyMetrics(
+          "frost-knight",
+          "frost-build",
+          characterTraces("frost-knight"),
+        ),
+      ],
       rewardSelectionDominance: rewardSelectionReport(rewardTranscripts),
       buildPolicies: buildPolicyRows(),
       rewardSelectionByCharacterBuild: rewardRows,
@@ -1223,9 +1309,33 @@ export const buildM6BalanceReport = (
         config.baseSeed,
         config.crnGames,
         characterAa.aa,
-        characterAa.result.traces,
-        guardianCrn.traces,
+        {
+          characterId: "warrior",
+          buildPolicyId: "fire-build",
+          traces: characterAa.result.traces,
+        },
+        {
+          characterId: "guardian",
+          buildPolicyId: "mana-build",
+          traces: guardianCrn.traces,
+        },
         guardianCrn.report.anomalySeeds.length,
+      ),
+      frostCharacterCrn: compactCharacterCrnEvidence(
+        config.baseSeed,
+        config.crnGames,
+        frostKnightCrn.aa,
+        {
+          characterId: "warrior",
+          buildPolicyId: "fire-build",
+          traces: characterAa.result.traces,
+        },
+        {
+          characterId: "frost-knight",
+          buildPolicyId: "frost-build",
+          traces: frostKnightCrn.result.traces,
+        },
+        frostKnightCrn.result.report.anomalySeeds.length,
       ),
     },
     informationalTargetBands: informationalTargetBands(metrics),

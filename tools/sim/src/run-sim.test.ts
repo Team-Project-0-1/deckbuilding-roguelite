@@ -76,6 +76,8 @@ describe('build policy resolution regressions', () => {
       'fire-build',
     );
     expect(resolveBuildPolicy('guardian', 'baseline').id).toBe('mana-build');
+    expect(resolveBuildPolicy('sorcerer', 'baseline').id).toBe('lightning-build');
+    expect(resolveBuildPolicy('frost-knight', 'baseline').id).toBe('frost-build');
   });
 
   it('drives simulateRun guardian rewards with the mana build (path consistency)', () => {

@@ -6,13 +6,23 @@ import type { PolicyId } from "../policies";
 export const M6_BULK_REPORT_SCHEMA_VERSION = "m6-bulk-v1" as const;
 export const M6_CRN_REPORT_SCHEMA_VERSION = "m6-crn-v1" as const;
 export const M6_TRANSCRIPT_SCHEMA_VERSION = "m6-transcript-v1" as const;
-export const SIM_CHARACTER_IDS = ["warrior", "guardian"] as const;
+export const SIM_CHARACTER_IDS = [
+  "warrior",
+  "guardian",
+  "sorcerer",
+  "frost-knight",
+] as const;
 export type SimCharacterId = (typeof SIM_CHARACTER_IDS)[number];
 
 export const M6_VARIANT_IDS = ["baseline", "basic-first"] as const;
 export type M6VariantId = (typeof M6_VARIANT_IDS)[number];
 
-export const M6_BUILD_POLICY_IDS = ["fire-build", "mana-build"] as const;
+export const M6_BUILD_POLICY_IDS = [
+  "fire-build",
+  "mana-build",
+  "frost-build",
+  "lightning-build",
+] as const;
 export type M6BuildPolicyId = (typeof M6_BUILD_POLICY_IDS)[number];
 
 export interface M6VariantConfig {
