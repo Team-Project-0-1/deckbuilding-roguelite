@@ -43,6 +43,15 @@ const effectLine = (atom: EffectAtom): string => {
   if (atom.kind === 'addCoin') return `임시 ${elementKo(String(atom.coin))} +${atom.count}`;
   if (atom.kind === 'selfDamage') return `자신 피해 ${atom.amount}`;
   if (atom.kind === 'grantElement') return `기본 코인 ${elementKo(atom.element)} 취급`;
+  if (atom.kind === 'addTurnTrigger') {
+    const hookKo = atom.trigger.hook === 'onDamageDealt' ? '피해마다' : '공격 스킬마다';
+    const inner = atom.trigger.effects
+      .map((effect) =>
+        effect.kind === 'applyStatus' ? `${statusKo(effect.status)} +${effect.stacks}` : effectLine(effect)
+      )
+      .join(' / ');
+    return `이번 턴 ${hookKo} ${inner}`;
+  }
   return '특수';
 };
 
