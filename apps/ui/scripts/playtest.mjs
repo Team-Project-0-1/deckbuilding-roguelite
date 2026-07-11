@@ -14,6 +14,12 @@ const baseUrl =
   process.env.PLAYTEST_BASE_URL ??
   "http://127.0.0.1:4174/deckbuilding-roguelite/";
 const URL = `${baseUrl}?seed=${SEED}`;
+const urlWith = (params) => {
+  const url = new globalThis.URL(baseUrl);
+  for (const [key, value] of Object.entries(params))
+    url.searchParams.set(key, value);
+  return String(url);
+};
 
 const failures = [];
 const check = (name, condition, detail = "") => {
@@ -42,7 +48,7 @@ await mkdir(outDir, { recursive: true });
 /** 페이지 준비 — 콘솔/페이지 에러 수집기 부착 후 이벤트 큐가 빠질 때까지 대기 */
 const boot = async (
   viewport = { width: 1280, height: 720 },
-  { fast = false } = {},
+  { fast = false, url = URL } = {},
 ) => {
   // 시나리오 간 저장소를 분리하되, 한 시나리오 안의 reload에는 같은 저장소를 유지한다.
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
@@ -62,7 +68,7 @@ const boot = async (
     if (message.type() === "error" && !source.endsWith("/favicon.ico"))
       errors.push(`console: ${message.text()}`);
   });
-  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(
     () =>
       document.querySelector(".end-turn:not(:disabled)") !== null &&
@@ -121,6 +127,20 @@ const resolveSkillAnimation = async (page) => {
   await page.waitForTimeout(20);
   await waitForCombatOrBoundary(page);
 };
+
+const waitForOpaqueSkillCards = async (page) =>
+  page.waitForFunction(() => {
+    const row = document.querySelector(".skill-row");
+    const cards = [...document.querySelectorAll(".skill-card")];
+    return (
+      row !== null &&
+      !row.classList.contains("dimmed") &&
+      cards.length >= 6 &&
+      cards.every(
+        (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
+      )
+    );
+  });
 
 const useConsumeIfReady = async (page, slotIndex) => {
   const card = page.locator(".skill-card").nth(slotIndex);
@@ -2029,6 +2049,399 @@ const winCurrentCombat = async (page) => {
     reduced.errors.join(" | "),
   );
   await reduced.page.close();
+}
+
+// ---------- 시나리오 19: P3.1 다중 적 대상 지정 모드 ----------
+{
+  const duoUrl = urlWith({ seed: SEED, encounter: "duo-raiders" });
+  const enemySnapshot = (page) =>
+    page.locator(".unit.enemy").evaluateAll((enemies) =>
+      enemies.map((enemy, index) => {
+        const hpText = enemy.querySelector(".hp-num")?.textContent ?? "0/0";
+        return {
+          index,
+          hp: Number(hpText.split("/")[0]),
+          targetable: enemy.classList.contains("targetable"),
+          selected: enemy.classList.contains("target-selected"),
+        };
+      }),
+    );
+  const enemyHpList = async (page) =>
+    (await enemySnapshot(page)).map((enemy) => enemy.hp);
+  const selectedTarget = async (page) =>
+    (await enemySnapshot(page)).find((enemy) => enemy.selected)?.index ?? null;
+  const highlightedTargets = async (page) =>
+    (await enemySnapshot(page))
+      .filter((enemy) => enemy.targetable)
+      .map((enemy) => enemy.index);
+  const livingTargets = async (page) =>
+    (await enemySnapshot(page))
+      .filter((enemy) => enemy.hp > 0)
+      .map((enemy) => enemy.index);
+  const stateFingerprint = (page) =>
+    page.evaluate(() => ({
+      hp: [...document.querySelectorAll(".unit.enemy .hp-num")].map(
+        (node) => node.textContent,
+      ),
+      hand: [...document.querySelectorAll(".hand-tray .coin")].map(
+        (node) => node.textContent,
+      ),
+      loaded: [...document.querySelectorAll(".skill-card")].map(
+        (card) => card.querySelectorAll(".socket.loaded").length,
+      ),
+      spent: [...document.querySelectorAll(".skill-card.spent")].map(
+        (card) => card.querySelector(".card-title")?.textContent,
+      ),
+    }));
+  const assertUnitLayout = async (viewport) => {
+    const { page, errors } = await boot(viewport, { url: duoUrl });
+    await waitForOpaqueSkillCards(page);
+    const metrics = await page.evaluate(() => {
+      const units = [...document.querySelectorAll(".unit")].map((unit) => {
+        const rect = unit.getBoundingClientRect();
+        return {
+          cls: unit.className,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        };
+      });
+      const overlaps = [];
+      for (let left = 0; left < units.length; left += 1) {
+        for (let right = left + 1; right < units.length; right += 1) {
+          const a = units[left];
+          const b = units[right];
+          const x = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (x > 1 && y > 1) overlaps.push(`${a.cls}/${b.cls}`);
+        }
+      }
+      return {
+        enemyCount: document.querySelectorAll(".unit.enemy").length,
+        hScroll:
+          document.documentElement.scrollWidth >
+          document.documentElement.clientWidth,
+        overlaps,
+      };
+    });
+    const tag = `${viewport.width}x${viewport.height}`;
+    check(`S19 ${tag} 적 2 렌더`, metrics.enemyCount === 2);
+    check(
+      `S19 ${tag} 유닛 패널 겹침·가로 스크롤 없음`,
+      metrics.overlaps.length === 0 && !metrics.hScroll,
+      JSON.stringify(metrics),
+    );
+    check(`S19 ${tag} 에러 0`, errors.length === 0, errors.join(" | "));
+    await page.close();
+  };
+  const placeCoinInto = async (page, cardIndex, socketIndex) => {
+    const preferred = page
+      .locator(".hand-tray .coin:not(.fire):not(.mana):not(.granted-fire)")
+      .first();
+    if ((await preferred.count()) > 0) await preferred.click();
+    else await page.locator(".hand-tray .coin").first().click();
+    await page
+      .locator(".skill-card")
+      .nth(cardIndex)
+      .locator(".socket")
+      .nth(socketIndex)
+      .click();
+  };
+  const enterSlashTargeting = async (page) => {
+    await waitForOpaqueSkillCards(page);
+    await placeCoinInto(page, 0, 0);
+    await waitForOpaqueSkillCards(page);
+    await page.locator(".skill-card").nth(0).locator(".card-title").click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".unit.enemy.targetable").length > 0,
+    );
+  };
+  const confirmTarget = async (page, target) => {
+    await page.locator(".unit.enemy").nth(target).locator(".sprite").click();
+    await waitForCombatOrBoundary(page);
+  };
+  const useArmedAttackAt = async (page, cardIndex, cost, target) => {
+    const card = page.locator(".skill-card").nth(cardIndex);
+    for (let index = 0; index < cost; index += 1) {
+      if ((await card.locator(".socket.loaded").nth(index).count()) > 0)
+        continue;
+      if ((await handCount(page)) === 0) return false;
+      await placeCoinInto(page, cardIndex, index);
+    }
+    if ((await card.locator(".card-title").getAttribute("aria-disabled")) !== "false")
+      return false;
+    await card.locator(".card-title").click();
+    if ((await page.locator(".unit.enemy.targetable").count()) > 0)
+      await confirmTarget(page, target);
+    else await waitForCombatOrBoundary(page);
+    return true;
+  };
+  const useConsumeAttackAt = async (page, cardIndex, target) => {
+    const card = page.locator(".skill-card").nth(cardIndex);
+    if ((await card.locator(".card-title").getAttribute("aria-disabled")) !== "false")
+      return false;
+    await card.locator(".card-title").click();
+    if ((await page.locator(".unit.enemy.targetable").count()) > 0)
+      await confirmTarget(page, target);
+    else await waitForCombatOrBoundary(page);
+    return true;
+  };
+  const defeatEnemy = async (page, target) => {
+    for (let turn = 0; turn < 5; turn += 1) {
+      if ((await enemyHpList(page))[target] <= 0) return true;
+      await useArmedAttackAt(page, 2, 2, target);
+      if ((await enemyHpList(page))[target] <= 0) return true;
+      await useConsumeAttackAt(page, 4, target);
+      if ((await enemyHpList(page))[target] <= 0) return true;
+      await useArmedAttackAt(page, 0, 1, target);
+      if ((await enemyHpList(page))[target] <= 0) return true;
+      if ((await page.locator(".end-turn:not(:disabled)").count()) === 0)
+        return false;
+      await page.locator(".end-turn").click();
+      await waitForCombatOrBoundary(page, 30000);
+    }
+    return (await enemyHpList(page))[target] <= 0;
+  };
+
+  await assertUnitLayout({ width: 1280, height: 720 });
+  await assertUnitLayout({ width: 1024, height: 720 });
+
+  {
+    const { page, errors } = await boot({ width: 1280, height: 720 }, { url: duoUrl });
+    await enterSlashTargeting(page);
+    const initialTargets = await highlightedTargets(page);
+    check(
+      "S19 베기 대상 지정 진입: targetable 2 + 기본 선택 1",
+      initialTargets.length === 2 && (await selectedTarget(page)) === 0,
+      `targets=${initialTargets.join(",")} selected=${await selectedTarget(page)}`,
+    );
+    check(
+      "S19 하이라이트 집합 = legalCommands target 집합(생존 2)",
+      JSON.stringify(initialTargets) === JSON.stringify(await livingTargets(page)),
+      initialTargets.join(","),
+    );
+    await page.keyboard.press("ArrowRight");
+    check("S19 ArrowRight 생존 대상 순환", (await selectedTarget(page)) === 1);
+    const beforeRight = await enemyHpList(page);
+    await page.keyboard.press("Enter");
+    await waitForCombatOrBoundary(page);
+    const afterRight = await enemyHpList(page);
+    check(
+      "S19 Enter 확정은 선택 대상 HP만 감소",
+      afterRight[0] === beforeRight[0] && afterRight[1] < beforeRight[1],
+      `${beforeRight.join(",")} → ${afterRight.join(",")}`,
+    );
+
+    await page.locator(".end-turn").click();
+    await waitForCombatOrBoundary(page, 30000);
+    await enterSlashTargeting(page);
+    check("S19 마지막 공격 생존 적이 다음 기본 대상", (await selectedTarget(page)) === 1);
+    await page.keyboard.press("ArrowLeft");
+    check("S19 ArrowLeft 생존 대상 순환", (await selectedTarget(page)) === 0);
+    const beforeEscape = await stateFingerprint(page);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(
+      () => document.querySelector(".unit.enemy.targetable") === null,
+    );
+    const afterEscape = await stateFingerprint(page);
+    check(
+      "S19 Escape 취소: 모드 해제·상태 불변·소켓 유지",
+      JSON.stringify(afterEscape) === JSON.stringify(beforeEscape) &&
+        (await page.locator(".skill-card").first().locator(".socket.loaded").count()) === 1,
+      JSON.stringify({ beforeEscape, afterEscape }),
+    );
+    check("S19 대상 지정 에러 0", errors.length === 0, errors.join(" | "));
+    await page.close();
+  }
+
+  {
+    const { page, errors } = await boot({ width: 1280, height: 720 }, { url: duoUrl });
+    await enterSlashTargeting(page);
+    const beforeClick = await enemyHpList(page);
+    await confirmTarget(page, 1);
+    const afterClick = await enemyHpList(page);
+    check(
+      "S19 클릭 확정은 클릭한 적에게 피해 귀속",
+      afterClick[0] === beforeClick[0] && afterClick[1] < beforeClick[1],
+      `${beforeClick.join(",")} → ${afterClick.join(",")}`,
+    );
+    const killed = await defeatEnemy(page, 1);
+    check("S19 한 적 처치 준비 완료", killed, (await enemyHpList(page)).join(","));
+    if (killed) {
+      if (
+        (await page
+          .locator(".skill-card")
+          .first()
+          .locator(".card-title")
+          .getAttribute("aria-disabled")) !== "false"
+      ) {
+        await page.locator(".end-turn").click();
+        await waitForCombatOrBoundary(page, 30000);
+      }
+      const beforeFallback = await enemyHpList(page);
+      await placeCoinInto(page, 0, 0);
+      await waitForOpaqueSkillCards(page);
+      await page.locator(".skill-card").first().locator(".card-title").click();
+      await waitForCombatOrBoundary(page);
+      const afterFallback = await enemyHpList(page);
+      check(
+        "S19 죽은 적 하이라이트 금지·왼쪽 첫 생존 폴백",
+        (await highlightedTargets(page)).length === 0 &&
+          afterFallback[1] === 0 &&
+          afterFallback[0] < beforeFallback[0],
+        `${beforeFallback.join(",")} → ${afterFallback.join(",")}`,
+      );
+    }
+    check("S19 처치 후 에러 0", errors.length === 0, errors.join(" | "));
+    await page.close();
+  }
+
+  {
+    const { page, errors } = await boot();
+    const before = await hpValue(page.locator(".unit.enemy .hp-num"));
+    await placeCoinInto(page, 0, 0);
+    await waitForOpaqueSkillCards(page);
+    await page.locator(".skill-card").first().locator(".card-title").click();
+    await waitForCombatOrBoundary(page);
+    const after = await hpValue(page.locator(".unit.enemy .hp-num"));
+    check(
+      "S19 단일 적은 대상 모드 없이 즉시 발동",
+      (await page.locator(".unit.enemy.targetable").count()) === 0 && after < before,
+      `${before} → ${after}`,
+    );
+    check("S19 단일 적 에러 0", errors.length === 0, errors.join(" | "));
+    await page.close();
+  }
+}
+
+// ---------- 시나리오 20: P3.1 용광로 기본 코인 선택 ----------
+{
+  const furnaceUrl = urlWith({
+    seed: SEED,
+    skills: "furnace,slash,guard,ignite,ignite-sword,flame-rampage",
+  });
+  const handCoinReport = (page) =>
+    page.locator(".hand-tray .coin").evaluateAll((coins) =>
+      coins.map((coin, index) => ({
+        index,
+        label: coin.textContent?.trim() ?? "",
+        classes: [...coin.classList].sort(),
+        selected: coin.classList.contains("fuel-selected"),
+        valid: coin.classList.contains("fuel-valid"),
+        invalid: coin.classList.contains("fuel-invalid"),
+      })),
+    );
+  const selectedChoiceIndex = async (page) =>
+    (await handCoinReport(page)).find((coin) => coin.selected)?.index ?? null;
+  const basicChoiceIndexes = async (page) =>
+    (await handCoinReport(page))
+      .filter(
+        (coin) =>
+          coin.valid &&
+          !coin.classes.includes("fire") &&
+          !coin.classes.includes("mana") &&
+          !coin.classes.includes("granted-fire"),
+      )
+      .map((coin) => coin.index);
+  const armFurnaceChoice = async (page) => {
+    await waitForOpaqueSkillCards(page);
+    await page
+      .locator(".hand-tray .coin:not(.fire):not(.mana):not(.granted-fire)")
+      .first()
+      .click();
+    await page.locator(".skill-card").first().locator(".socket").first().click();
+    await waitForOpaqueSkillCards(page);
+    await page.locator(".skill-card").first().locator(".card-title").click();
+    await page.waitForFunction(
+      () => document.querySelector(".hand-tray .coin.fuel-valid") !== null,
+    );
+  };
+
+  {
+    const { page, errors } = await boot({ width: 1280, height: 720 }, { url: furnaceUrl });
+    await armFurnaceChoice(page);
+    const basics = await basicChoiceIndexes(page);
+    const firstSuggested = await selectedChoiceIndex(page);
+    check(
+      "S20 용광로 선택 모드: 기본 코인만 하이라이트·자동 제안 1개",
+      basics.length >= 2 &&
+        firstSuggested !== null &&
+        (await page.locator(".hand-tray .coin.fuel-selected").count()) === 1 &&
+        (await page.locator(".hand-tray .coin.fire.fuel-valid, .hand-tray .coin.mana.fuel-valid").count()) === 0,
+      JSON.stringify(await handCoinReport(page)),
+    );
+    const replacement = basics.find((index) => index !== firstSuggested);
+    await page.locator(".hand-tray .coin").nth(replacement).click();
+    check(
+      "S20 다른 기본 코인 클릭 → 선택 교체",
+      (await selectedChoiceIndex(page)) === replacement,
+      JSON.stringify(await handCoinReport(page)),
+    );
+    const elementIndex = (await handCoinReport(page)).find((coin) =>
+      coin.classes.includes("fire") || coin.classes.includes("mana"),
+    )?.index;
+    if (elementIndex !== undefined) await page.locator(".hand-tray .coin").nth(elementIndex).click();
+    check(
+      "S20 속성 코인 클릭 거부: 선택 불변·사유 칩",
+      (await selectedChoiceIndex(page)) === replacement &&
+        (await page.locator(".rejection-chip").count()) === 1,
+      JSON.stringify(await handCoinReport(page)),
+    );
+    await page.keyboard.press("Enter");
+    await waitForCombatOrBoundary(page);
+    const afterGrant = await handCoinReport(page);
+    check(
+      "S20 확정 → 선택한 그 코인만 granted-fire",
+      afterGrant.filter((coin) => coin.classes.includes("granted-fire")).length === 1 &&
+        afterGrant[replacement]?.classes.includes("granted-fire") === true,
+      JSON.stringify(afterGrant),
+    );
+    const ticketText = await page
+      .locator(".resolution-ticket-anchor .resolution-ticket")
+      .innerText();
+    check(
+      "S20 elementGranted 결산 티켓 반영",
+      ticketText.includes("기본 코인 화염 취급") || ticketText.includes("화염 취급"),
+      ticketText.replace(/\n/g, " / "),
+    );
+    check(
+      "S20 granted 코인이 점화 검술 연료로 인정",
+      (await page.locator(".skill-card").nth(4).locator(".consume-condition.met").count()) === 1,
+    );
+    check("S20 확정 경로 에러 0", errors.length === 0, errors.join(" | "));
+    await page.close();
+  }
+
+  {
+    const first = await boot({ width: 1280, height: 720 }, { url: furnaceUrl });
+    await armFurnaceChoice(first.page);
+    const suggestedFirst = await selectedChoiceIndex(first.page);
+    const beforeEscape = await handCoinReport(first.page);
+    await first.page.keyboard.press("Escape");
+    await first.page.waitForFunction(
+      () => document.querySelector(".hand-tray .coin.fuel-valid") === null,
+    );
+    check(
+      "S20 Escape 취소 → 모드 해제·미발동",
+      (await first.page.locator(".skill-card.spent").count()) === 0 &&
+        (await first.page.locator(".hand-tray .coin.granted-fire").count()) === 0 &&
+        (await first.page.locator(".skill-card").first().locator(".socket.loaded").count()) === 1,
+      JSON.stringify({ beforeEscape, after: await handCoinReport(first.page) }),
+    );
+    check("S20 Escape 경로 에러 0", first.errors.length === 0, first.errors.join(" | "));
+    await first.page.close();
+
+    const second = await boot({ width: 1280, height: 720 }, { url: furnaceUrl });
+    await armFurnaceChoice(second.page);
+    check(
+      "S20 같은 URL 재부팅 시 자동 제안 동일",
+      (await selectedChoiceIndex(second.page)) === suggestedFirst,
+      `${suggestedFirst} → ${await selectedChoiceIndex(second.page)}`,
+    );
+    check("S20 결정론 경로 에러 0", second.errors.length === 0, second.errors.join(" | "));
+    await second.page.close();
+  }
 }
 
 await browser.close();
