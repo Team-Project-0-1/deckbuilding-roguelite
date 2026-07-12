@@ -1,6 +1,9 @@
-// P5.4 성능 계측 (report-only, CI 비차단) — P5.0 예산 대비 관측만 기록한다.
-// 지표: 부팅 TTI(내비게이션→첫 상호작용 가능), 전투 커맨드 라운드트립(클릭→DOM 반영),
-// 번들 크기. 사용: node scripts/perf-check.mjs [출력 JSON]
+// P5.6 성능 게이트 (차단) — P5.0 예산 계약을 그대로 집행한다.
+// 차단: LCP median ≤ 2500ms · CLS worst ≤ 0.1 · >100ms 롱태스크 0건.
+// 변동성 완화: warm-up 1회(폐기) + 측정 3회 median/worst — 계약 약화 없음.
+// report-only: TTI(부팅 소요)·커맨드 라운드트립(연출 포함 측정이라 지표 재정의 유보).
+// 크기 예산은 scripts/check-budget.mjs 소관.
+// 사용: node scripts/perf-check.mjs [출력 JSON]
 import { writeFileSync, statSync, readdirSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +21,21 @@ const browser = await chromium.launch();
 
 const measureBoot = async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.addInitScript(() => {
+    window.__perf = { cls: 0, lcp: 0, longTasks: [] };
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        if (!entry.hadRecentInput) window.__perf.cls += entry.value;
+    }).observe({ type: "layout-shift", buffered: true });
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        window.__perf.lcp = Math.max(window.__perf.lcp, entry.startTime);
+    }).observe({ type: "largest-contentful-paint", buffered: true });
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        window.__perf.longTasks.push(Math.round(entry.duration));
+    }).observe({ type: "longtask", buffered: true });
+  });
   const t0 = Date.now();
   await page.goto(`${base}?seed=BRAVE-EMBER-42&encounter=raider`, {
     waitUntil: "commit",
@@ -43,10 +61,14 @@ const measureBoot = async () => {
     { timeout: 5000 },
   );
   const commandRoundtrip = Date.now() - t1;
+  // 관찰자 플러시 여유 후 웹바이털 수집
+  await page.waitForTimeout(300);
+  const vitals = await page.evaluate(() => window.__perf);
   await page.close();
-  return { tti, commandRoundtrip };
+  return { tti, commandRoundtrip, ...vitals };
 };
 
+await measureBoot(); // warm-up — JIT/캐시 워밍, 결과 폐기
 const runs = [];
 for (let index = 0; index < 3; index += 1) runs.push(await measureBoot());
 
@@ -59,20 +81,38 @@ const walk = (dir) =>
 const distBytes = walk(distDir);
 
 const median = (values) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+const clsWorst = Math.max(...runs.map((r) => r.cls));
+const lcpMedian = median(runs.map((r) => r.lcp));
+const longOver = runs.flatMap((r) => r.longTasks.filter((d) => d > 100));
 const report = {
-  schemaVersion: "perf-report-v1",
-  reportOnly: true,
-  budgets: { distBytes: 2726297, ttiMs: 3000, commandRoundtripMs: 100 },
+  schemaVersion: "perf-report-v3",
+  blocking: { lcp: true, cls: true, longTask: true },
+  reportOnly: ["tti", "commandRoundtrip"],
+  mitigation: "warm-up 1회 폐기 + 측정 3회 median(LCP)/worst(CLS·롱태스크)",
+  budgets: {
+    distBytes: 2726297,
+    ttiMs: 3000,
+    lcpMs: 2500,
+    clsMax: 0.1,
+    commandRoundtripMs: 100,
+    longTaskMs: 100,
+  },
   measured: {
     distBytes,
     ttiMsMedian: median(runs.map((r) => r.tti)),
+    lcpMsMedian: lcpMedian,
+    clsWorst,
     commandRoundtripMsMedian: median(runs.map((r) => r.commandRoundtrip)),
+    longTasksOver100Ms: longOver,
     runs,
   },
   withinBudget: {
     dist: distBytes <= 2726297,
     tti: median(runs.map((r) => r.tti)) <= 3000,
+    lcp: lcpMedian <= 2500,
+    cls: clsWorst <= 0.1,
     commandRoundtrip: median(runs.map((r) => r.commandRoundtrip)) <= 100,
+    longTask: runs.every((r) => r.longTasks.every((d) => d <= 100)),
   },
 };
 writeFileSync(out, JSON.stringify(report, null, 1));
@@ -80,3 +120,14 @@ console.log(JSON.stringify(report.measured));
 console.log("withinBudget:", JSON.stringify(report.withinBudget));
 await browser.close();
 await server.close();
+const perfFailures = [];
+if (lcpMedian > 2500) perfFailures.push(`LCP median ${lcpMedian}ms > 2500ms`);
+if (clsWorst > 0.1) perfFailures.push(`CLS worst ${clsWorst} > 0.1`);
+if (longOver.length > 0)
+  perfFailures.push(`>100ms 롱태스크 ${longOver.length}건: [${longOver.join(", ")}]ms`);
+if (perfFailures.length > 0) {
+  console.error(`perf gate FAIL (${perfFailures.length}건):`);
+  for (const failure of perfFailures) console.error(` - ${failure}`);
+  process.exit(1);
+}
+console.log("perf gate PASS — LCP/CLS/롱태스크 차단 계약 충족");

@@ -1,5 +1,7 @@
 name: Release
 
+# v* 태그 push → 태그 exact SHA에 전체 release gate 실행 → Pages 배포 →
+# 배포 성공 후에만 GitHub Release 생성.
 on:
   push:
     tags:
@@ -7,24 +9,76 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
-      - run: pnpm typecheck && pnpm lint && pnpm test && pnpm ci:sim
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @game/ui exec playwright install --with-deps chromium
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm ci:sim
       - run: pnpm build
-      - run: node scripts/check-provenance.mjs
+      - run: pnpm check:content
+      - run: pnpm check:assets
       - run: node scripts/check-budget.mjs
+      - run: pnpm -F @game/ui playtest -- ../../playtest-artifacts
+      - run: node apps/ui/scripts/feedback-check.mjs
+      - run: node apps/ui/scripts/a11y-contrast.mjs contrast-report.json
+      - run: node apps/ui/scripts/perf-check.mjs perf-report.json
+
+  deploy:
+    needs: [verify]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @game/ui run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/ui/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

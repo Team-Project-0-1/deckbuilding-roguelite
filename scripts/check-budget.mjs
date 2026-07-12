@@ -1,23 +1,53 @@
-// P5.5 번들 예산 게이트 (차단) — dist ≤ 2.6MiB (P5.0). 빌드 후 실행한다.
+// P5.5/P5.6 번들 예산 게이트 (차단) — 빌드 후 실행한다.
+// 예산: 총량 ≤ 2.6MiB, JS 총량 ≤ 320KiB, CSS 총량 ≤ 70KiB, 단일 파일 ≤ 700KiB.
 // 사용: node scripts/check-budget.mjs
 import { readdirSync, statSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "apps/ui/dist");
-const BUDGET = 2726297; // 2.6 MiB (P5.0)
+const BUDGETS = {
+  total: 2726297, // 2.6 MiB
+  js: 327680, // 320 KiB
+  css: 71680, // 70 KiB
+  maxFile: 716800, // 700 KiB
+};
 
-const walk = (dir) =>
-  readdirSync(dir, { withFileTypes: true }).reduce((sum, entry) => {
+let total = 0;
+let js = 0;
+let css = 0;
+let maxFile = { path: "", bytes: 0 };
+const walk = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
-    return sum + (entry.isDirectory() ? walk(path) : statSync(path).size);
-  }, 0);
+    if (entry.isDirectory()) {
+      walk(path);
+      continue;
+    }
+    const bytes = statSync(path).size;
+    total += bytes;
+    const ext = extname(entry.name).toLowerCase();
+    if (ext === ".js" || ext === ".mjs") js += bytes;
+    if (ext === ".css") css += bytes;
+    if (bytes > maxFile.bytes) maxFile = { path, bytes };
+  }
+};
+walk(dist);
 
-const bytes = walk(dist);
-const mib = (bytes / 1048576).toFixed(3);
-if (bytes > BUDGET) {
-  console.error(`budget gate FAIL — dist ${bytes}B (${mib}MiB) > ${BUDGET}B (2.6MiB)`);
+const failures = [];
+if (total > BUDGETS.total) failures.push(`총량 ${total}B > ${BUDGETS.total}B`);
+if (js > BUDGETS.js) failures.push(`JS ${js}B > ${BUDGETS.js}B`);
+if (css > BUDGETS.css) failures.push(`CSS ${css}B > ${BUDGETS.css}B`);
+if (maxFile.bytes > BUDGETS.maxFile)
+  failures.push(`단일 파일 ${maxFile.path} ${maxFile.bytes}B > ${BUDGETS.maxFile}B`);
+
+const mib = (total / 1048576).toFixed(3);
+if (failures.length > 0) {
+  console.error(`budget gate FAIL (${failures.length}건):`);
+  for (const failure of failures) console.error(` - ${failure}`);
   process.exit(1);
 }
-console.log(`budget gate PASS — dist ${bytes}B (${mib}MiB) ≤ 2.6MiB`);
+console.log(
+  `budget gate PASS — 총 ${total}B (${mib}MiB) · JS ${js}B · CSS ${css}B · 최대 ${maxFile.bytes}B`,
+);

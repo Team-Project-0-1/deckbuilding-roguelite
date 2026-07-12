@@ -1,9 +1,17 @@
 name: Deploy
 
+# P5.6 감사: push 독립 트리거 금지 — 자동 경로는 CI 성공 후 그 head_sha만 배포.
+# 수동 경로(workflow_dispatch)는 입력 ref에 동일 release gate를 전부 통과시킨
+# 뒤에만 배포한다 (CI 우회 금지).
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "배포할 ref (커밋 SHA/태그) — 동일 release gate 통과 후 배포"
+        required: true
 
 permissions:
   contents: read
@@ -15,21 +23,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  verify:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @game/ui exec playwright install --with-deps chromium
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm ci:sim
+      - run: pnpm build
+      - run: pnpm check:content
+      - run: pnpm check:assets
+      - run: node scripts/check-budget.mjs
+      - run: pnpm -F @game/ui playtest -- ../../playtest-artifacts
+      - run: node apps/ui/scripts/feedback-check.mjs
+      - run: node apps/ui/scripts/a11y-contrast.mjs contrast-report.json
+      - run: node apps/ui/scripts/perf-check.mjs perf-report.json
+
+  deploy:
+    needs: [verify]
+    if: >-
+      always() && (
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_branch == 'main') ||
+        (github.event_name == 'workflow_dispatch' && needs.verify.result == 'success')
+      )
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @game/ui run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
