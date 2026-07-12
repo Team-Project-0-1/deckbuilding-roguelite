@@ -1,7 +1,7 @@
 {
   "ok": true,
   "engine": "component-row",
-  "run_dir": "D:\\Documents\\GitHub\\deckbuilding-roguelite\\apps\\ui\\src\\assets\\generated\\sprites\\warrior",
+  "run_dir": "/mnt/d/Documents/GitHub/deckbuilding-roguelite/apps/ui/src/assets/generated/sprites/warrior",
   "cell": {
     "shape": "square",
     "width": 256,
@@ -19,7 +19,8 @@
       255,
       0
     ],
-    "selection": "manual"
+    "selection": "explicit",
+    "selection_reason": "base background is flat green; red hair/warm skin subject — green pinned by P6 D7 chroma gate (auto가 cyan을 골라 명시 핀으로 교정, P4.6 마젠타 핀과 동일 처치)"
   },
   "rows": [
     {
@@ -35,11 +36,11 @@
       "frame_records": [
         {
           "index": 0,
-          "nontransparent_pixels": 15708,
+          "nontransparent_pixels": 7152,
           "bbox": [
-            20,
+            82,
             60,
-            238,
+            180,
             232
           ],
           "edge_pixels": 0,
@@ -47,11 +48,11 @@
         },
         {
           "index": 1,
-          "nontransparent_pixels": 15892,
+          "nontransparent_pixels": 7172,
           "bbox": [
-            20,
-            60,
-            238,
+            80,
+            62,
+            178,
             232
           ],
           "edge_pixels": 0,
@@ -59,11 +60,11 @@
         },
         {
           "index": 2,
-          "nontransparent_pixels": 15604,
+          "nontransparent_pixels": 6868,
           "bbox": [
-            20,
-            60,
-            230,
+            80,
+            72,
+            174,
             232
           ],
           "edge_pixels": 0,
@@ -71,11 +72,11 @@
         },
         {
           "index": 3,
-          "nontransparent_pixels": 15920,
+          "nontransparent_pixels": 7144,
           "bbox": [
-            18,
+            82,
             60,
-            238,
+            180,
             232
           ],
           "edge_pixels": 0,
@@ -103,11 +104,11 @@
       "frame_records": [
         {
           "index": 0,
-          "nontransparent_pixels": 13368,
+          "nontransparent_pixels": 7216,
           "bbox": [
-            44,
+            86,
             60,
-            178,
+            186,
             232
           ],
           "edge_pixels": 0,
@@ -115,11 +116,11 @@
         },
         {
           "index": 1,
-          "nontransparent_pixels": 13312,
+          "nontransparent_pixels": 7272,
           "bbox": [
-            4,
-            92,
-            250,
+            84,
+            66,
+            190,
             232
           ],
           "edge_pixels": 0,
@@ -127,11 +128,11 @@
         },
         {
           "index": 2,
-          "nontransparent_pixels": 11300,
+          "nontransparent_pixels": 7396,
           "bbox": [
-            46,
-            84,
-            196,
+            66,
+            74,
+            216,
             232
           ],
           "edge_pixels": 0,
@@ -139,11 +140,11 @@
         },
         {
           "index": 3,
-          "nontransparent_pixels": 12544,
+          "nontransparent_pixels": 7244,
           "bbox": [
-            32,
-            80,
-            222,
+            86,
+            60,
+            186,
             232
           ],
           "edge_pixels": 0,
@@ -171,11 +172,11 @@
       "frame_records": [
         {
           "index": 0,
-          "nontransparent_pixels": 15060,
+          "nontransparent_pixels": 7424,
           "bbox": [
-            54,
-            60,
-            224,
+            82,
+            68,
+            182,
             232
           ],
           "edge_pixels": 0,
@@ -183,11 +184,11 @@
         },
         {
           "index": 1,
-          "nontransparent_pixels": 12644,
+          "nontransparent_pixels": 6504,
           "bbox": [
-            46,
-            84,
-            198,
+            92,
+            88,
+            184,
             232
           ],
           "edge_pixels": 0,
@@ -195,11 +196,11 @@
         },
         {
           "index": 2,
-          "nontransparent_pixels": 13196,
+          "nontransparent_pixels": 7140,
           "bbox": [
-            36,
-            76,
-            210,
+            92,
+            70,
+            188,
             232
           ],
           "edge_pixels": 0,
@@ -207,11 +208,11 @@
         },
         {
           "index": 3,
-          "nontransparent_pixels": 14376,
+          "nontransparent_pixels": 7260,
           "bbox": [
-            30,
-            68,
-            224,
+            76,
+            60,
+            176,
             232
           ],
           "edge_pixels": 0,

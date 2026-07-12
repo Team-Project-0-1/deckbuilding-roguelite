@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "arcanist",
+    "description": "",
+    "base_image": "base-source.png"
+  },
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "explicit",
+    "selection_reason": "base background is flat magenta; navy/blue subject — magenta pinned (P6 D7 chroma gate)"
+  },
+  "states": {
+    "idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "subtle breathing while reading the open grimoire, combat-ready loop"
+    },
+    "attack": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "spell command sequence: reading stance, raise the free hand forward, sharp pointing command gesture, recover to reading stance — body and book motion only, no detached effects"
+    },
+    "hurt": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "flinch back from a hit clutching the grimoire and recover, body-only reaction"
+    }
+  },
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
+  "motion_phase_guides": false,
+  "fit": {
+    "pixel_perfect": true,
+    "logical_height": 86,
+    "palette_size": 32
+  },
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005
+  }
+}

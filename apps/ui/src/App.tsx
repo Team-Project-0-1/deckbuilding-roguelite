@@ -136,6 +136,8 @@ import shamanAtlas from "./assets/generated/sprites/shaman/sprite-sheet-alpha.pn
 import shamanManifestJson from "./assets/generated/sprites/shaman/manifest.json";
 import warriorAtlas from "./assets/generated/sprites/warrior/sprite-sheet-alpha.png";
 import warriorManifestJson from "./assets/generated/sprites/warrior/manifest.json";
+import arcanistAtlas from "./assets/generated/sprites/arcanist/sprite-sheet-alpha.png";
+import arcanistManifestJson from "./assets/generated/sprites/arcanist/manifest.json";
 import guardianAtlas from "./assets/generated/sprites/guardian/sprite-sheet-alpha.png";
 import guardianManifestJson from "./assets/generated/sprites/guardian/manifest.json";
 import sorcererAtlas from "./assets/generated/sprites/sorcerer/sprite-sheet-alpha.png";
@@ -235,6 +237,7 @@ const SPRITES: Record<
   | "guardian"
   | "sorcerer"
   | "frost-knight"
+  | "arcanist"
   | "raider"
   | "shaman"
   | "gatekeeper"
@@ -248,6 +251,10 @@ const SPRITES: Record<
   player: {
     atlasUrl: warriorAtlas,
     manifest: warriorManifestJson as SpriteManifest,
+  },
+  arcanist: {
+    atlasUrl: arcanistAtlas,
+    manifest: arcanistManifestJson as SpriteManifest,
   },
   guardian: {
     atlasUrl: guardianAtlas,
@@ -308,6 +315,7 @@ const enemySprite = (enemyId: string): SpriteAsset => {
 };
 
 const playerSprite = (character: CharacterId): SpriteAsset => {
+  if (String(character) === "arcanist") return SPRITES.arcanist;
   if (String(character) === "guardian") return SPRITES.guardian;
   if (String(character) === "sorcerer") return SPRITES.sorcerer;
   if (String(character) === "frost-knight") return SPRITES["frost-knight"];

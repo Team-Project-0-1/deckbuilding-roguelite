@@ -25,7 +25,8 @@
       255,
       0
     ],
-    "selection": "manual"
+    "selection": "explicit",
+    "selection_reason": "base background is flat green; red hair/warm skin subject — green pinned by P6 D7 chroma gate (auto가 cyan을 골라 명시 핀으로 교정, P4.6 마젠타 핀과 동일 처치)"
   },
   "animation": {
     "cellWidth": 256,

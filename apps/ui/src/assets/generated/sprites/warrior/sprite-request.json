@@ -4,7 +4,7 @@
   "engine": "component-row",
   "character": {
     "id": "warrior",
-    "description": "armored warrior with red scarf and cape, facing right with one sword",
+    "description": "",
     "base_image": "base-source.png"
   },
   "cell": {
@@ -24,33 +24,32 @@
       255,
       0
     ],
-    "selection": "manual"
+    "selection": "explicit",
+    "selection_reason": "base background is flat green; red hair/warm skin subject — green pinned by P6 D7 chroma gate (auto가 cyan을 골라 명시 핀으로 교정, P4.6 마젠타 핀과 동일 처치)"
   },
   "states": {
     "idle": {
       "frames": 4,
       "fps": 4,
       "loop": true,
-      "action": "near-static combat idle loop: frame 4 must be a visually identical duplicate of frame 1, with the exact same planted feet, sword tip coordinate, sword length and angle, guard, hand, cape silhouette, body height, and pose; frame 2 changes only the eyes for one blink, frame 3 changes only the chest by one subtle breathing step; never resize or reposition the weapon"
+      "action": "subtle breathing boxing-guard combat-ready loop, fists stay raised"
     },
     "attack": {
       "frames": 4,
       "fps": 8,
       "loop": false,
-      "action": "readable sword attack: compact windup, forward slash, follow-through, recovery toward combat idle; body and sword only, no detached effects"
+      "action": "simple punch sequence: guard, windup, straight punch with the rear fist, recovery back to guard — body motion only, no detached effects"
     },
     "hurt": {
       "frames": 4,
       "fps": 8,
       "loop": false,
-      "action": "brief impact recoil: flinch backward, stagger, regain footing, settle toward combat idle; no counterattack and no detached effects"
+      "action": "flinch back from a hit and recover, body-only reaction"
     }
   },
-  "style": "match the accepted idle anchor exactly: crisp 16-bit-inspired pixel art, identical proportions, outline weight, detail density, palette, armor, scarf, cape, face, and sword",
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
   "motion_phase_guides": false,
   "fit": {
-    "align_x": "bbox-center",
-    "align_y": "bottom",
     "pixel_perfect": true,
     "logical_height": 86,
     "palette_size": 32
