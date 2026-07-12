@@ -1,9 +1,9 @@
 import type { ConsumeSkillDef, ContentDb, TargetRef } from '../../content-types';
-import { effectiveElements } from '../../content-types';
+import { effectiveElements, skillCooldown } from '../../content-types';
 import type { CoinUid, SlotId } from '../../ids';
 import type { CombatEvent } from '../events';
 import type { CombatState } from '../state';
-import { applyEffectAtom, checkCombatEnd, fireTurnTriggers } from './flip';
+import { applyEffectAtom, checkCombatEnd, fireTurnTriggers, targetsForSkillEffect } from './flip';
 
 export interface ResolveConsumeResult {
   state: CombatState;
@@ -44,10 +44,9 @@ export const resolveConsume = (
   target: number | undefined,
   db: ContentDb
 ): ResolveConsumeResult => {
-  if (input.skillUsesThisTurn >= 3) throw new Error('skill use cap reached');
   const slotState = input.slots[Number(slot)];
   if (slotState === undefined) throw new Error('slot does not exist');
-  if (slotState.usedThisTurn) throw new Error('skill already used this turn');
+  if (slotState.cooldownRemaining > 0) throw new Error('skill is cooling down');
   if (skill.oncePerCombat === true && slotState.usedThisCombat) throw new Error('skill already used this combat');
   if (coins.length !== skill.consume.count) throw new Error('consumed coin count must equal skill cost');
   if (new Set(coins).size !== coins.length) throw new Error('consumed coins must be unique');
@@ -67,14 +66,28 @@ export const resolveConsume = (
     { type: 'skillUsed', slot, skill: skill.id, kind: 'consume' },
     { type: 'coinsConsumed', coins: [...coins] }
   ];
+  // P7 D5 — 소비 스킬도 과열 강화 분기 지원 (해결 후 소비, 단일 finish 경로)
+  const consumesOverheat = input.player.overheat && (skill.overheatBonus?.length ?? 0) > 0;
+  const finish = (finishedState: CombatState): ResolveConsumeResult => {
+    let state = finishedState;
+    if (consumesOverheat && state.player.overheat) {
+      events.push({ type: 'overheatConsumed', skill: skill.id });
+      state = { ...state, player: { ...state.player, overheat: false } };
+    }
+    return { state, events };
+  };
+
   let state: CombatState = {
     ...input,
     slots: input.slots.map((candidate, index) =>
       index === Number(slot)
-        ? { ...candidate, usedThisTurn: true, usedThisCombat: candidate.usedThisCombat || skill.oncePerCombat === true }
+        ? {
+            ...candidate,
+            cooldownRemaining: skillCooldown(skill),
+            usedThisCombat: candidate.usedThisCombat || skill.oncePerCombat === true
+          }
         : candidate
     ),
-    skillUsesThisTurn: input.skillUsesThisTurn + 1,
     zones: {
       ...input.zones,
       hand: removeCoins(input.zones.hand, consumed),
@@ -82,14 +95,31 @@ export const resolveConsume = (
     }
   };
 
-  for (const atom of skill.effects) {
-    state = applyEffectAtom(state, atom, skillTarget, db, events, undefined, { turnTriggerScope });
-    if (state.phase === 'victory' || state.phase === 'defeat') return { state, events };
+  // 피해 전용 과열 보너스는 기본 피해와 같은 타격으로 합산 (flip과 동일 규칙)
+  const overheatBonus = input.player.overheat ? (skill.overheatBonus ?? []) : [];
+  const effects = [...skill.effects];
+  if (overheatBonus.length > 0) {
+    if (overheatBonus.every((atom) => atom.kind === 'damage')) {
+      let insertAt = -1;
+      for (let i = 0; i < effects.length; i += 1) {
+        if (effects[i]!.kind === 'damage') insertAt = i;
+      }
+      if (insertAt >= 0) effects.splice(insertAt + 1, 0, ...overheatBonus);
+      else effects.push(...overheatBonus);
+    } else {
+      effects.push(...overheatBonus);
+    }
+  }
+  for (const atom of effects) {
+    for (const effectTarget of targetsForSkillEffect(state, atom, skill, skillTarget)) {
+      state = applyEffectAtom(state, atom, effectTarget, db, events, undefined, { turnTriggerScope, sourceSlot: slot });
+      if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
+    }
   }
 
   state = checkCombatEnd(state, events);
   if (state.phase !== 'victory' && state.phase !== 'defeat' && skill.tags.includes('attack')) {
     state = fireTurnTriggers(state, 'onAttackSkillResolved', skillTarget, db, events, turnTriggerScope);
   }
-  return { state, events };
+  return finish(state);
 };

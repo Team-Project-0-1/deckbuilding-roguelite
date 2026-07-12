@@ -34,6 +34,15 @@ const GUARDIAN_STARTING_SKILLS = [
   ...(contentDb.characters.guardian?.startingSkills ?? []),
 ];
 
+// P7 D2 — 세이브 v7: 장착 슬롯 8 고정 (null = 빈 슬롯), 강화 플래그 8칸
+const MAX_SLOTS = 8;
+const padSkills = (skills: readonly unknown[]): (string | null)[] => [
+  ...skills.map(String),
+  ...Array.from({ length: MAX_SLOTS - skills.length }, () => null),
+];
+const PADDED_STARTING_SKILLS = padSkills(STARTING_SKILLS);
+const NO_UPGRADES = Array.from({ length: MAX_SLOTS }, () => false);
+
 const legacyGraph = (): RunSave["graph"] => ({
   layers: RUN_ENCOUNTERS.map((encounter, index) => [
     {
@@ -52,7 +61,8 @@ const readySave = (): RunSave => ({
   currentHp: 63,
   maxHp: 70,
   bag: [...STARTING_BAG.slice(1), "mana"] as never,
-  equippedSkills: [...STARTING_SKILLS.slice(0, 5), "smash"] as never,
+  // 첫 빈 슬롯(4)에 smash 장착 = 변경 슬롯 1 (완료 보상 1회로 커버)
+  equippedSkills: padSkills([...STARTING_SKILLS, "smash"]) as never,
   gold: 40,
   graph: legacyGraph(),
   nodeChoices: [0, 0, 0, 0, 0],
@@ -62,7 +72,7 @@ const readySave = (): RunSave => ({
   eventCombats: 0,
   eventCoinGains: 0,
   eventCoinLosses: 0,
-  upgradedSlots: [false, false, false, false, false, false] as never,
+  upgradedSlots: [...NO_UPGRADES] as never,
   acquiredPassives: [] as never,
   shopPurchasedPassives: 0,
   treasureOpened: 0,
@@ -75,7 +85,7 @@ const readySave = (): RunSave => ({
 
 const rewardsSave = (): RunSave => ({
   ...readySave(),
-  equippedSkills: [...STARTING_SKILLS] as never,
+  equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   attempt: 0,
   phase: "rewards",
   pendingRewards: {
@@ -90,7 +100,7 @@ const rewardsSave = (): RunSave => ({
 const combatOneRewardsSave = (): RunSave => ({
   ...readySave(),
   bag: [...STARTING_BAG] as never,
-  equippedSkills: [...STARTING_SKILLS] as never,
+  equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   combatIndex: 1,
   attempt: 0,
   phase: "rewards",
@@ -107,9 +117,9 @@ const freshSave = (): RunSave => ({
   ...readySave(),
   currentHp: 70,
   bag: [...STARTING_BAG] as never,
-  equippedSkills: [...STARTING_SKILLS] as never,
+  equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   gold: 0,
-  upgradedSlots: [false, false, false, false, false, false] as never,
+  upgradedSlots: [...NO_UPGRADES] as never,
   acquiredPassives: [] as never,
   shopPurchasedPassives: 0,
   treasureOpened: 0,
@@ -142,6 +152,9 @@ const legacyRawWith = (overrides: Record<string, unknown>): string => {
   delete legacy.graph;
   delete legacy.nodeChoices;
   delete legacy.shopRemovals;
+  // v1/v2 시대 저장은 null 슬롯·강화 배열이 없다 — 마이그레이션이 8칸으로 패딩해야 한다
+  legacy.equippedSkills = [...STARTING_SKILLS, "smash"];
+  delete legacy.upgradedSlots;
   return JSON.stringify({ ...legacy, ...overrides });
 };
 const parse = (raw: string): RunSave | null =>
@@ -165,7 +178,7 @@ const fallbackRewardsSave = (
   },
 ): RunSave => ({
   ...readySave(),
-  equippedSkills: [...STARTING_SKILLS] as never,
+  equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   attempt: 0,
   phase: "rewards",
   pendingRewards: {
@@ -200,7 +213,7 @@ describe("run save serialization boundary", () => {
     const resumed = { ...readySave(), attempt: 7, phase: "combat" as const };
     const victory = {
       ...readySave(),
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -261,7 +274,7 @@ describe("run save serialization boundary", () => {
       currentHp: 70,
       maxHp: 70,
       bag: [...GUARDIAN_STARTING_BAG] as never,
-      equippedSkills: [...GUARDIAN_STARTING_SKILLS] as never,
+      equippedSkills: padSkills(GUARDIAN_STARTING_SKILLS) as never,
       gold: 0,
       graph: legacyGraph(),
       nodeChoices: [0, 0, 0, 0, 0],
@@ -271,7 +284,7 @@ describe("run save serialization boundary", () => {
       eventCombats: 0,
       eventCoinGains: 0,
       eventCoinLosses: 0,
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -315,12 +328,15 @@ describe("run save serialization boundary", () => {
     expect(parse(rawWith({ contentVersion: "9.9.9-unknown" }))).toBeNull();
   });
 
-  it("migrates v3, v2, and v1 saves explicitly to v4 and rejects unknown versions", () => {
-    // v1 → v2 → v3 → v4: 선형 5전투 저장을 레거시 그래프로 감싼다 (증거 계약 §2 — 명시 마이그레이션)
+  it("migrates v3, v2, and v1 saves explicitly to v7 and rejects unknown versions", () => {
+    // v1 → v2 → v3 → … → v7: 선형 5전투 저장을 레거시 그래프로 감싸고 슬롯 8칸으로 패딩한다
+    // (증거 계약 §2 — 명시 마이그레이션). 구세대 저장은 null 슬롯·강화 8칸이 없다.
     // 0.6.0-p3.2 레거시 콘텐츠 버전도 안전 로드 + 현 버전 정규화 (p3.3 가산 확장 — 공허 엣지 근거는 content index 주석)
     const v3Raw = JSON.stringify({
       ...readySave(),
       version: 3,
+      equippedSkills: [...STARTING_SKILLS, "smash"],
+      upgradedSlots: undefined,
       shopPurchasedCoins: undefined,
       shopPurchasedSkills: undefined,
     });
@@ -354,7 +370,7 @@ describe("run save serialization boundary", () => {
       ...readySave(),
       graph,
       nodeChoices: [0, 0, 0],
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -362,11 +378,11 @@ describe("run save serialization boundary", () => {
       restUpgrades: 0,
       combatIndex: 2,
       bag: [...STARTING_BAG, "fire", "mana"] as never,
-      equippedSkills: [
-        ...STARTING_SKILLS.slice(0, 4),
+      equippedSkills: padSkills([
+        ...STARTING_SKILLS,
         "smash",
         "furnace",
-      ] as never,
+      ]) as never,
     };
     expect(parse(JSON.stringify(save))).toBeNull();
     expect(
@@ -374,7 +390,7 @@ describe("run save serialization boundary", () => {
         JSON.stringify({
           ...save,
           bag: [...STARTING_BAG, "fire"],
-          equippedSkills: [...STARTING_SKILLS] as never,
+          equippedSkills: [...PADDED_STARTING_SKILLS] as never,
         }),
       ),
     ).not.toBeNull();
@@ -388,7 +404,7 @@ describe("run save serialization boundary", () => {
       ...readySave(),
       graph,
       nodeChoices: [0, 0],
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -397,7 +413,7 @@ describe("run save serialization boundary", () => {
       combatIndex: 1,
       attempt: 0,
       phase: "shop",
-      equippedSkills: [...STARTING_SKILLS] as never,
+      equippedSkills: [...PADDED_STARTING_SKILLS] as never,
       pendingShop: {
         coinOptions: ["basic", "fire", "mana"] as never,
         coinPrices: [25, 50, 70],
@@ -463,13 +479,14 @@ describe("run save serialization boundary", () => {
     ["unknown bag coin", { bag: [...readySave().bag, "ash"] }],
     [
       "unknown equipped skill",
-      { equippedSkills: [...readySave().equippedSkills.slice(0, 5), "meteor"] },
+      { equippedSkills: padSkills([...STARTING_SKILLS, "meteor"]) },
     ],
     [
       "unknown coin offer",
       {
         phase: "rewards",
         attempt: 0,
+        equippedSkills: [...PADDED_STARTING_SKILLS],
         pendingRewards: {
           ...rewardsSave().pendingRewards,
           coinOptions: ["basic", "fire", "ash"],
@@ -481,6 +498,7 @@ describe("run save serialization boundary", () => {
       {
         phase: "rewards",
         attempt: 0,
+        equippedSkills: [...PADDED_STARTING_SKILLS],
         pendingRewards: {
           ...rewardsSave().pendingRewards,
           skillOptions: ["fire-infusion", "meteor"],
@@ -508,7 +526,6 @@ describe("run save serialization boundary", () => {
       ["basic", "fire", "mana"],
       ["furnace", "furnace"],
     ],
-    ["one skill offer", ["basic", "fire", "mana"], ["furnace"]],
     [
       "three skill offers",
       ["basic", "fire", "mana"],
@@ -520,6 +537,7 @@ describe("run save serialization boundary", () => {
         rawWith({
           phase: "rewards",
           attempt: 0,
+          equippedSkills: [...PADDED_STARTING_SKILLS],
           pendingRewards: {
             ...rewardsSave().pendingRewards,
             coinOptions,
@@ -546,31 +564,25 @@ describe("run save serialization boundary", () => {
       { bag: Array.from({ length: 20 }, () => "basic") },
     ],
     ["invalid bag entry", { bag: ["basic", ""] }],
-    ["wrong equipped skill count", { equippedSkills: ["slash"] }],
+    // P7 D2 — 장착 배열은 8칸 고정 (짧은 배열은 v7 저장으로 무효)
+    ["wrong equipped skill count", { equippedSkills: ["jab"] }],
+    [
+      "upgraded empty skill slot",
+      {
+        equippedSkills: [...PADDED_STARTING_SKILLS],
+        upgradedSlots: [false, false, false, false, true, false, false, false],
+      },
+    ],
     [
       "duplicate equipped skills",
       {
-        equippedSkills: [
-          "slash",
-          "guard",
-          "burning-strike",
-          "ignite",
-          "smash",
-          "smash",
-        ],
+        equippedSkills: padSkills([...STARTING_SKILLS, "smash", "smash"]),
       },
     ],
     [
       "too many early skill replacements",
       {
-        equippedSkills: [
-          "slash",
-          "guard",
-          "burning-strike",
-          "ignite",
-          "smash",
-          "furnace",
-        ],
+        equippedSkills: padSkills([...STARTING_SKILLS, "smash", "furnace"]),
       },
     ],
     ["negative gold", { gold: -1 }],
@@ -686,7 +698,7 @@ describe("run save serialization boundary", () => {
     [
       "reward at encounter zero",
       {
-        upgradedSlots: [false, false, false, false, false, false] as never,
+        upgradedSlots: [...NO_UPGRADES] as never,
         acquiredPassives: [] as never,
         shopPurchasedPassives: 0,
         treasureOpened: 0,
@@ -729,7 +741,7 @@ describe("run save serialization boundary", () => {
       ...readySave(),
       graph,
       gold: 35,
-      equippedSkills: [...STARTING_SKILLS] as never,
+      equippedSkills: [...PADDED_STARTING_SKILLS] as never,
     };
     expect(parse(JSON.stringify(save))).toEqual(save);
   });
@@ -756,14 +768,15 @@ describe("run save serialization boundary", () => {
       parse(
         JSON.stringify({
           ...freshSave(),
-          upgradedSlots: [false, false, false, false, false, false] as never,
+          upgradedSlots: [...NO_UPGRADES] as never,
           acquiredPassives: [] as never,
           shopPurchasedPassives: 0,
           treasureOpened: 0,
           restHeals: 0,
           restUpgrades: 0,
           combatIndex: 1,
-          equippedSkills: [...STARTING_SKILLS.slice(0, 5), "smash"],
+          // 빈 슬롯 장착도 변경 슬롯 1로 센다 — 완료 보상 0회면 거부
+          equippedSkills: padSkills([...STARTING_SKILLS, "smash"]),
         }),
       ),
     ).toBeNull();
@@ -822,6 +835,18 @@ describe("run save serialization boundary", () => {
     ).toBeNull();
   });
 
+  // P6 신스펙: 엘리트 정산은 스킬 1택을 제안한다 — 단일 스킬 제안은 유효한 저장이다
+  it("accepts a single elite skill offer", () => {
+    const save: RunSave = {
+      ...rewardsSave(),
+      pendingRewards: {
+        ...rewardsSave().pendingRewards!,
+        skillOptions: ["furnace"] as never,
+      },
+    };
+    expect(parse(JSON.stringify(save))).toEqual(save);
+  });
+
   it("accepts every reachable normal reward progression and combat-1 pre-resolved skill stage", () => {
     const initial = rewardsSave();
     const afterCoin: RunSave = {
@@ -858,7 +883,7 @@ describe("run save serialization boundary", () => {
     const selectedFallback: RunSave = {
       ...readySave(),
       bag: [...STARTING_BAG, "basic", "fire", "mana"] as never,
-      equippedSkills: [...STARTING_SKILLS] as never,
+      equippedSkills: [...PADDED_STARTING_SKILLS] as never,
     };
     const skippedFallback: RunSave = {
       ...selectedFallback,
@@ -926,10 +951,15 @@ describe("run save serialization boundary", () => {
     }
   });
 
-  it("migrates v5 saves to v6 with P6 defaults and round-trips (레거시 단일 막 래핑)", () => {
+  it("migrates v5 saves to v7 with P6 defaults + 8-slot padding and round-trips (레거시 단일 막 래핑)", () => {
     // P6 D1: v5 그래프는 acts 부재 = 단일 레거시 막으로 감싸 진행 중 런을 보존하고,
     // 신규 필드(강화 슬롯·패시브·카운터)는 기본값으로 승격한다.
-    const v5 = { ...readySave(), version: 5 } as Record<string, unknown>;
+    // P7 D2: 구세대 장착 배열(null 슬롯 없음)은 v7에서 8칸으로 패딩된다.
+    const v5 = {
+      ...readySave(),
+      version: 5,
+      equippedSkills: [...STARTING_SKILLS, "smash"],
+    } as Record<string, unknown>;
     delete v5.upgradedSlots;
     delete v5.acquiredPassives;
     delete v5.shopPurchasedPassives;
@@ -940,14 +970,30 @@ describe("run save serialization boundary", () => {
     expect(migrated).toEqual(readySave());
     expect(migrated?.version).toBe(RUN_SAVE_VERSION);
     expect(migrated?.graph.acts).toBeUndefined();
-    expect(migrated?.upgradedSlots).toEqual([false, false, false, false, false, false]);
+    expect(migrated?.equippedSkills).toEqual(padSkills([...STARTING_SKILLS, "smash"]));
+    expect(migrated?.upgradedSlots).toEqual(NO_UPGRADES);
     expect(migrated?.acquiredPassives).toEqual([]);
     expect(migrated?.treasureOpened).toBe(0);
     expect(migrated?.restHeals).toBe(0);
     expect(migrated?.restUpgrades).toBe(0);
-    // 마이그레이션 결과는 v6 저장으로 라운드트립한다
+    // 마이그레이션 결과는 v7 저장으로 라운드트립한다
     if (migrated === null) throw new Error("v5 migration failed");
     expect(parse(serialize(migrated))).toEqual(migrated);
+  });
+
+  // P7 D2 — v6 → v7: 필드 의미 불변, 장착/강화 배열만 8칸 패딩
+  it("migrates v6 saves to v7 by padding slot arrays only", () => {
+    const v6 = {
+      ...readySave(),
+      version: 6,
+      equippedSkills: [...STARTING_SKILLS, "smash"],
+      upgradedSlots: [false, false, false, false, false, false],
+    } as Record<string, unknown>;
+    const migrated = parse(JSON.stringify(v6));
+    expect(migrated).toEqual(readySave());
+    expect(migrated?.version).toBe(RUN_SAVE_VERSION);
+    expect(migrated?.equippedSkills).toHaveLength(8);
+    expect(migrated?.upgradedSlots).toHaveLength(8);
   });
 
   it("rejects malformed or contradictory B2 fallback coin stages", () => {

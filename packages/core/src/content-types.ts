@@ -16,10 +16,12 @@ export type StatusId = 'burn' | 'frostbite' | 'shock';
 
 export type TargetRef = { type: 'player' } | { type: 'enemy'; index: number };
 
+// P7 D4 — 양면 속성 코인: 모든 속성 코인이 앞뒤 고유 효과를 가진다.
+// 소비(플립 없음)는 어느 면 proc도 발동하지 않는다 (resolveFlip 전용).
 export interface CoinDef {
   id: CoinDefId;
   element: Element | null;
-  proc?: { face: Face; effects: EffectAtom[] };
+  procs?: { heads?: EffectAtom[]; tails?: EffectAtom[] };
 }
 
 export interface CoinInstance {
@@ -63,7 +65,12 @@ export interface SkillDefBase {
   rarity: 'common' | 'advanced' | 'rare';
   tags: readonly ('attack' | 'defense' | 'utility' | 'ultimate')[];
   targetType: 'single-enemy' | 'all-enemies' | 'self' | 'none';
+  // P7 D1 — 스킬별 쿨다운: 0=반복(같은 턴 무제한), 1~3=사용 후 N-1턴 봉인.
+  // 미지정 기본값 1(기존 턴당 1회 케이던스). oncePerCombat과 1+ 동시 지정 금지.
+  cooldown?: 0 | 1 | 2 | 3;
   oncePerCombat?: boolean;
+  // P7 D5 — 과열 강화 분기: 해결 시 과열이면 기본 효과 뒤에 추가, 해결 후 과열 소비.
+  overheatBonus?: EffectAtom[];
   upgrade?: SkillUpgradeDef;
   // 캐릭터 전용 스킬 — 공용 보상 풀에서 제외되고 해당 캐릭터 런에서만 노출된다.
   // 숨김 프로퍼티 같은 암묵 경계 대신 명시적 데이터로 풀 경계를 표현한다 (P3.2 결정).
@@ -76,7 +83,15 @@ export interface FlipSkillDef extends SkillDefBase {
   base: EffectAtom[];
   heads?: { mode: 'any' | 'per'; effects: EffectAtom[] };
   tails?: { mode: 'any' | 'per'; effects: EffectAtom[] };
+  // P7 D5 — 특정 속성 코인 면 보너스 (일반 면 보너스와 합산, 항상 per 면당)
+  elementFaces?: { element: Element; face: Face; effects: EffectAtom[] }[];
 }
+
+// P7 D1 — 쿨다운 미지정 기본값 1 (기존 usedThisTurn=턴당 1회와 동일 케이던스).
+// 전투당 1회 스킬은 usedThisCombat만으로 잠그며 쿨다운 상태를 만들지 않는다.
+// 강화로 oncePerCombat이 제거되면 다시 기본 쿨다운 1을 적용한다.
+export const skillCooldown = (skill: SkillDefBase): number =>
+  skill.oncePerCombat === true ? 0 : (skill.cooldown ?? 1);
 
 export interface ConsumeSkillDef extends SkillDefBase {
   type: 'consume';
@@ -96,14 +111,21 @@ export type EffectAtom =
   | { kind: 'damage'; amount: number }
   | { kind: 'block'; amount: number }
   | { kind: 'selfDamage'; amount: number }
+  // P7 D4 — 회복 (플레이어 전용, maxHp 상한)
+  | { kind: 'heal'; amount: number }
+  // P7 D3 — 즉시 드로우 / 다음 턴 드로우 보너스
+  | { kind: 'draw'; count: number }
+  | { kind: 'nextTurnDraw'; count: number }
+  // P7 D1 — 쿨다운 감소: 해결 중인 자기 슬롯 제외, 대기 중인 다른 슬롯만
+  | { kind: 'reduceCooldown'; amount: number }
+  // P7 D5 — 과열 진입 (비중첩, no-op 재진입)
+  | { kind: 'enterOverheat' }
   | { kind: 'applyStatus'; status: StatusId; stacks: number; to: 'target' | 'self' }
   | { kind: 'addCoin'; coin: CoinDefId; zone: 'draw' | 'discard' | 'hand'; count: number }
   | { kind: 'grantElement'; element: Element; scope: 'allBasicInHand' | 'chooseBasicInHand' }
   | { kind: 'addTurnTrigger'; trigger: TurnTriggerDef }
   // P6 D5 — 화상 수치 참조 폭발 (스택 비소비, 격투가 화상 빌드 마무리)
   | { kind: 'damagePerTargetBurn'; amountPerStack: number }
-  // P6 D5 — 과열: 손의 화염 코인 수 참조 (지속 상태 없는 직관 계산식)
-  | { kind: 'damagePerFireInHand'; amountPerCoin: number }
   // P6 D6 — 마력 갑주: 현재 방어 참조 피해 (방어 비소모)
   | { kind: 'damagePerBlock'; amountPerBlock: number }
   // P6 D6 — 소환: equipment 'chosen'은 커맨드의 chosenEquipment(기본: 정렬 첫 장비)
@@ -224,6 +246,82 @@ const duplicateIds = <T extends { id: string | number }>(items: readonly T[], la
       errors.push(`duplicate ${label} id: ${String(item.id)}`);
     }
     seen.add(item.id);
+  }
+  return errors;
+};
+
+// P7 D1/D3/D5 — 쿨다운·신규 원자 검증
+const validateCooldowns = (skills: readonly SkillDef[]): string[] => {
+  const errors: string[] = [];
+  for (const skill of skills) {
+    if (skill.cooldown !== undefined) {
+      if (!Number.isInteger(skill.cooldown) || skill.cooldown < 0 || skill.cooldown > 3) {
+        errors.push(`skill ${String(skill.id)}: cooldown must be an integer from 0 to 3`);
+      }
+      if (skill.oncePerCombat === true && skill.cooldown >= 1) {
+        errors.push(`skill ${String(skill.id)}: oncePerCombat and cooldown >= 1 cannot be combined`);
+      }
+    }
+    if (skill.type === 'flip' && skill.elementFaces !== undefined) {
+      for (const bonus of skill.elementFaces) {
+        if (bonus.effects.length === 0) {
+          errors.push(`skill ${String(skill.id)}: elementFaces entry must declare at least one effect`);
+        }
+      }
+    }
+  }
+  return errors;
+};
+
+const validateAtomAmounts = (db: Omit<ContentDb, 'validate'>): string[] => {
+  const errors: string[] = [];
+  const checkAtoms = (atoms: readonly EffectAtom[], owner: string): void => {
+    for (const atom of atoms) {
+      if ((atom.kind === 'draw' || atom.kind === 'nextTurnDraw') && (!Number.isInteger(atom.count) || atom.count <= 0)) {
+        errors.push(`${owner}: ${atom.kind} count must be a positive integer`);
+      }
+      if ((atom.kind === 'heal' || atom.kind === 'reduceCooldown') && (!Number.isInteger(atom.amount) || atom.amount <= 0)) {
+        errors.push(`${owner}: ${atom.kind} amount must be a positive integer`);
+      }
+    }
+  };
+  for (const skill of Object.values(db.skills)) {
+    const owner = `skill ${String(skill.id)}`;
+    if (skill.type === 'consume') {
+      checkAtoms(skill.effects, owner);
+    } else {
+      checkAtoms(skill.base, owner);
+      if (skill.heads) checkAtoms(skill.heads.effects, owner);
+      if (skill.tails) checkAtoms(skill.tails.effects, owner);
+      for (const bonus of skill.elementFaces ?? []) checkAtoms(bonus.effects, owner);
+    }
+    checkAtoms(skill.overheatBonus ?? [], owner);
+  }
+  return errors;
+};
+
+// P7 D4 — 양면 코인 검증: 속성 코인은 앞뒤 모두 1+ 효과, proc은 안전 원자만
+const COIN_PROC_ATOMS = new Set(['damage', 'block', 'heal', 'applyStatus']);
+
+const validateCoinProcs = (coins: Record<string, CoinDef>): string[] => {
+  const errors: string[] = [];
+  for (const coin of Object.values(coins)) {
+    const owner = `coin ${String(coin.id)}`;
+    if (coin.element === null) {
+      if (coin.procs !== undefined) errors.push(`${owner}: basic coin cannot declare procs`);
+      continue;
+    }
+    if ((coin.procs?.heads?.length ?? 0) === 0 || (coin.procs?.tails?.length ?? 0) === 0) {
+      errors.push(`${owner}: elemental coin must declare both heads and tails effects`);
+      continue;
+    }
+    for (const face of ['heads', 'tails'] as const) {
+      for (const atom of coin.procs?.[face] ?? []) {
+        if (!COIN_PROC_ATOMS.has(atom.kind)) {
+          errors.push(`${owner}: proc atom ${atom.kind} is not allowed on a coin face`);
+        }
+      }
+    }
   }
   return errors;
 };
@@ -443,7 +541,10 @@ export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => 
   ...duplicateIds(Object.values(db.enemies), 'enemy'),
   ...duplicateIds(Object.values(db.characters), 'character'),
   ...duplicateIds(Object.values(db.events ?? {}), 'event'),
+  ...validateCoinProcs(db.coins),
   ...validateSkillCosts(Object.values(db.skills)),
+  ...validateCooldowns(Object.values(db.skills)),
+  ...validateAtomAmounts(db),
   ...validateTurnTriggers(db),
   ...validateAttackTargets(Object.values(db.skills)),
   ...validateEvents(Object.values(db.events ?? {}), db.enemies),

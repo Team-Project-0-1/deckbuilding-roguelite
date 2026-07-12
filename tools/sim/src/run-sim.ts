@@ -58,12 +58,20 @@ const character = (value: string): CharacterId => value as CharacterId;
 
 // 사용 우선순위 — attack만이 아니라 utility 셋업(화염검·불의 심장)도 포함한다:
 // 봇은 셋업을 먼저 발동해 이후 공격으로 트리거 가치를 실현한다 (P3.3 의도 문서화).
-// 셋업은 usedThisTurn/소비 코인으로 자연 한정되어 무진행 루프를 만들지 않는다 — 가드가 이를 보증.
+// 셋업은 쿨다운/소비 코인으로 자연 한정되어 무진행 루프를 만들지 않는다 — 가드가 이를 보증.
 const ATTACK_SKILL_PRIORITY = [
   // P6 — 화염 격투가/마도기사 스킬 (봇이 신규 시작 셋을 모르면 warrior/arcanist
   // 밸런스 심이 무의미해진다 — P6 정합, 정책 확장이지 수치 변경 아님)
+  // P7 — 과열 인에이블러(inner-passion)를 과열 수혜 공격보다 먼저 발동해
+  // 같은 턴 강화 분기를 실현한다. 신규 스킬 우선순위는 정책 확장(수치 아님).
+  "inner-passion",
+  "battle-focus",
+  "regroup",
+  "comet-blow",
   "burnout-blow",
   "overheat-vent",
+  "fire-fist",
+  "arsenal-barrage",
   "burning-fist",
   "fire-flurry",
   "overheat-strike",
@@ -98,9 +106,12 @@ const ATTACK_SKILL_PRIORITY = [
   "furnace",
 ];
 const REWARD_SKILL_PRIORITY = [
+  "fire-fist",
+  "comet-blow",
   "burnout-blow",
   "fire-flurry",
   "overheat-strike",
+  "battle-focus",
   "smash",
   "fire-infusion",
   "furnace",
@@ -402,15 +413,16 @@ const runInvariantViolations = (run: RunState): string[] => {
   if (run.currentHp < 0 || run.currentHp > run.maxHp) {
     violations.push("run HP out of range");
   }
-  if (run.equippedSkills.length !== 6) {
-    violations.push("run must have exactly six equipped skills");
+  // P7 D2 — 슬롯 8 고정, null = 빈 슬롯
+  if (run.equippedSkills.length !== 8) {
+    violations.push("run must have exactly eight skill slots");
   }
   if (run.bag.some((coin) => contentDb.coins[String(coin)] === undefined)) {
     violations.push("run bag contains an unknown coin");
   }
   if (
     run.equippedSkills.some(
-      (skill) => contentDb.skills[String(skill)] === undefined,
+      (skill) => skill !== null && contentDb.skills[String(skill)] === undefined,
     )
   ) {
     violations.push("run loadout contains an unknown skill");
@@ -424,7 +436,6 @@ const progressFingerprint = (state: CombatState): string =>
   [
     state.turn,
     state.phase,
-    state.skillUsesThisTurn,
     state.player.hp,
     state.player.block,
     state.enemies.map((enemy) => `${enemy.hp}:${enemy.block}`).join(","),
@@ -435,7 +446,7 @@ const progressFingerprint = (state: CombatState): string =>
     Object.values(state.zones.placed)
       .map((coins) => coins.length)
       .join(","),
-    state.slots.map((slot) => (slot.usedThisTurn ? 1 : 0)).join(""),
+    state.slots.map((slot) => slot.cooldownRemaining).join(""),
     state.turnTriggers.length,
   ].join("|");
 

@@ -20,16 +20,26 @@ const elementLabel = (value: string): string =>
     blood: '혈액'
   })[value] ?? value;
 
-export const coinRewardDetailFor = (db: ContentDb, coin: string): string => {
-  const proc = db.coins[coin]?.proc;
-  if (proc === undefined) return '속성 효과 없음';
-  const effect = proc.effects[0];
-  const face = proc.face === 'heads' ? '앞면' : '뒷면';
-  if (effect?.kind === 'block') return `${face} · 방어 +${effect.amount}`;
-  if (effect?.kind === 'applyStatus') {
-    const name = statusKo(effect.status);
+// P7 D4 — 양면 proc: 면별 효과를 각각 서술 ("앞면 화상 +1 · 뒷면 피해 1" 형식)
+const procEffectText = (effect: { kind: string } & Record<string, unknown>): string => {
+  if (effect.kind === 'block') return `방어 +${effect.amount as number}`;
+  if (effect.kind === 'damage') return `피해 ${effect.amount as number}`;
+  if (effect.kind === 'heal') return `회복 ${effect.amount as number}`;
+  if (effect.kind === 'applyStatus') {
+    const name = statusKo(effect.status as never);
     // statusKo가 원문을 되돌리면 미등록 상태 — 일반 문구로 폴백
-    if (name !== effect.status) return `${face} · ${name} +${effect.stacks}`;
+    if (name !== effect.status) return `${name} +${effect.stacks as number}`;
   }
-  return `${face} · 속성 효과`;
+  return '속성 효과';
+};
+
+export const coinRewardDetailFor = (db: ContentDb, coin: string): string => {
+  const procs = db.coins[coin]?.procs;
+  if (procs === undefined) return '속성 효과 없음';
+  const parts: string[] = [];
+  const heads = procs.heads?.[0];
+  const tails = procs.tails?.[0];
+  if (heads !== undefined) parts.push(`앞면 ${procEffectText(heads)}`);
+  if (tails !== undefined) parts.push(`뒷면 ${procEffectText(tails)}`);
+  return parts.length === 0 ? '속성 효과 없음' : parts.join(' · ');
 };

@@ -45,7 +45,7 @@ const withFaces = (state: CombatState, faces: readonly Face[]): CombatState => (
 const withEquippedSkill = (state: CombatState, value: string): CombatState => ({
   ...state,
   slots: state.slots.map((candidate, index) =>
-    index === 0 ? { ...candidate, skillId: skillId(value), usedThisTurn: false, usedThisCombat: false } : candidate
+    index === 0 ? { ...candidate, skillId: skillId(value), cooldownRemaining: 0, usedThisCombat: false } : candidate
   )
 });
 
@@ -54,7 +54,7 @@ const withEquippedSkills = (state: CombatState, values: readonly string[]): Comb
   slots: state.slots.map((candidate, index) =>
     values[index] === undefined
       ? candidate
-      : { ...candidate, skillId: skillId(values[index]), usedThisTurn: false, usedThisCombat: false }
+      : { ...candidate, skillId: skillId(values[index]), cooldownRemaining: 0, usedThisCombat: false }
   )
 });
 
@@ -309,9 +309,10 @@ describe('P3.3 heart-of-flame interaction regressions', () => {
 });
 
 describe('P3.4 shipped content goldens', () => {
-  it('ships the p4 version with legacy allowlist', () => {
-    // P6: 3막 런 구조·패시브·강화·신규 캐릭터 출하에 결속된 버전 승격, 직전 rc.1은 레거시로
-    expect(CONTENT_VERSION).toBe('1.1.0-p6');
+  it('ships the p7 version with legacy allowlist', () => {
+    // P7: 쿨다운 행동 모델·8슬롯·양면 코인·과열 출하에 결속된 버전 승격, 직전 p6는 레거시로
+    expect(CONTENT_VERSION).toBe('1.2.0-p7');
+    expect(LEGACY_CONTENT_VERSIONS[0]).toBe('1.1.0-p6');
     expect(LEGACY_CONTENT_VERSIONS).toContain('1.0.0-rc.1');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.9.0-p4');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.8.0-p3.4');
@@ -320,16 +321,23 @@ describe('P3.4 shipped content goldens', () => {
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.5.0-m5');
   });
 
-  it('ships frost and lightning coins with hostile heads procs', () => {
+  // P7 D4 — 모든 속성 코인은 양면 고유 효과 (v1.3 표 그대로)
+  it('ships frost and lightning coins with two-sided procs', () => {
     expect(coins.frost).toEqual({
       id: coinId('frost'),
       element: 'frost',
-      proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }] }
+      procs: {
+        heads: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }],
+        tails: [{ kind: 'block', amount: 1 }]
+      }
     });
     expect(coins.lightning).toEqual({
       id: coinId('lightning'),
       element: 'lightning',
-      proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'shock', stacks: 1, to: 'target' }] }
+      procs: {
+        heads: [{ kind: 'applyStatus', status: 'shock', stacks: 1, to: 'target' }],
+        tails: [{ kind: 'damage', amount: 1 }]
+      }
     });
   });
 
@@ -338,8 +346,9 @@ describe('P3.4 shipped content goldens', () => {
     expect(sorcerer.maxHp).toBe(70);
     expect(sorcerer.startingBag.filter((coin) => String(coin) === 'lightning')).toHaveLength(2);
     expect(sorcerer.startingBag.filter((coin) => String(coin) === 'basic')).toHaveLength(8);
+    // P7 D2 — 시작 4스킬: 공용 기본기 2 + 캐릭터 스킬 2 (빠진 스킬은 보상/상점 풀 존속)
     expect(sorcerer.startingSkills.map(String)).toEqual([
-      'slash', 'guard', 'spark-strike', 'chain-surge', 'static-field', 'volt-lash'
+      'slash', 'guard', 'spark-strike', 'chain-surge'
     ]);
     expect(sorcerer.trait.hook).toBe('combatStart');
 
@@ -347,7 +356,7 @@ describe('P3.4 shipped content goldens', () => {
     expect(frostKnight.maxHp).toBe(70);
     expect(frostKnight.startingBag.filter((coin) => String(coin) === 'frost')).toHaveLength(2);
     expect(frostKnight.startingSkills.map(String)).toEqual([
-      'slash', 'guard', 'frost-slash', 'glacial-wall', 'chilling-field', 'glacier-strike'
+      'slash', 'guard', 'frost-slash', 'glacial-wall'
     ]);
   });
 
@@ -362,13 +371,33 @@ describe('P3.4 shipped content goldens', () => {
     }
     expect(contentDb.validate()).toEqual([]);
   });
+
+  it('creates Fire Fist temporary fuel even when its overheat hit ends combat', () => {
+    let state = withEquippedSkill(combat('fire-fist-finisher'), 'fire-fist');
+    state = withFaces(
+      {
+        ...state,
+        player: { ...state.player, overheat: true },
+        enemies: state.enemies.map((enemy) => ({ ...enemy, hp: 14, maxHp: 14 }))
+      },
+      ['tails', 'tails']
+    );
+    const result = useFlip(state, state.zones.hand.slice(0, 2), 0);
+    expect(result.state.phase).toBe('victory');
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ type: 'coinCreated', defId: 'fire', zone: 'draw' })
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ type: 'damageDealt', amount: 14, target: { type: 'enemy', index: 0 } })
+    );
+  });
 });
 
 describe('P4.2 provisional enemy content goldens', () => {
   // D2 조우 대역 산술: goblin+ghoul=70(2마리 65~85), thief+goblin=58(감전 압박 예외),
   // ghoul+goblin+slime=86(3마리 75~95). 수치 전부 balance-provisional.
-  it('pins the six enemy definitions — P6(1.1.0-p6)에서도 적 6종 정의는 불변이어야 한다', () => {
-    expect(CONTENT_VERSION).toBe('1.1.0-p6');
+  it('pins the six enemy definitions — P7(1.2.0-p7)에서도 적 6종 정의는 불변이어야 한다', () => {
+    expect(CONTENT_VERSION).toBe('1.2.0-p7');
     expect(enemies.goblin).toEqual({
       id: 'goblin',
       name: '고블린',
@@ -589,7 +618,7 @@ describe('P3.4 hostile coin proc rerouting regressions', () => {
     state = withHandDefs(state, [defId]);
     const coinUid = state.zones.hand[0];
     if (coinUid === undefined) throw new Error('missing coin');
-    const result = useFlip(withFaces(state, ['heads']), [coinUid], undefined);
+    const result = useFlip(withFaces(state, ['heads']), [coinUid], 0);
     return result;
   };
 
@@ -608,11 +637,15 @@ describe('P3.4 hostile coin proc rerouting regressions', () => {
 
 describe('M5 shipped content', () => {
   it('ships the M5 version, mana coin, skills, and fixed enemy definitions', () => {
-    expect(CONTENT_VERSION).toBe('1.1.0-p6');
+    expect(CONTENT_VERSION).toBe('1.2.0-p7');
+    // P7 D4 — mana 앞면 2→1 하향 + 뒷면 2 신설 (v1.3 표 우선)
     expect(coins.mana).toEqual({
       id: coinId('mana'),
       element: 'mana',
-      proc: { face: 'heads', effects: [{ kind: 'block', amount: 2 }] }
+      procs: {
+        heads: [{ kind: 'block', amount: 1 }],
+        tails: [{ kind: 'block', amount: 2 }]
+      }
     });
     expect(skills.smash).toMatchObject({
       name: '강타',
@@ -677,7 +710,9 @@ describe('M5 shipped content', () => {
             hook: 'onDamageDealt',
             effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }]
           }
-        }
+        },
+        // P7 D3 — 지원 스킬 즉시 리턴 표준: draw 1 라이더
+        { kind: 'draw', count: 1 }
       ]
     });
     expect(skills['heart-of-flame']).toMatchObject({
@@ -695,7 +730,9 @@ describe('M5 shipped content', () => {
             hook: 'onAttackSkillResolved',
             effects: [{ kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }]
           }
-        }
+        },
+        // P7 D3 — 지원 스킬 즉시 리턴 표준: draw 1 라이더
+        { kind: 'draw', count: 1 }
       ]
     });
     expect(skills.conflagration).toMatchObject({
@@ -708,7 +745,9 @@ describe('M5 shipped content', () => {
       cost: 5,
       base: [
         { kind: 'damage', amount: 18 },
-        { kind: 'applyStatus', status: 'burn', stacks: 4, to: 'target' }
+        { kind: 'applyStatus', status: 'burn', stacks: 4, to: 'target' },
+        // P7 D3 — 4+비용 표준: 다음 턴 이득 라이더
+        { kind: 'nextTurnDraw', count: 1 }
       ],
       heads: { mode: 'per', effects: [{ kind: 'damage', amount: 4 }] }
     });
@@ -736,13 +775,12 @@ describe('M5 shipped content', () => {
         coinId('mana'),
         coinId('mana')
       ],
+      // P7 D2 — 시작 4스킬 (shield-reprisal/mana-well은 보상·상점 풀 존속)
       startingSkills: [
         skillId('slash'),
         skillId('guard'),
         skillId('warding-strike'),
-        skillId('mana-bulwark'),
-        skillId('shield-reprisal'),
-        skillId('mana-well')
+        skillId('mana-bulwark')
       ],
       trait: {
         id: 'quiet-spring',
@@ -791,15 +829,19 @@ describe('M5 shipped content', () => {
     expect(averageAction(enemies['gatekeeper-plus'], 'block') / averageAction(enemies.gatekeeper, 'block')).toBeLessThanOrEqual(1.15);
   });
 
-  it('mana heads grants exactly two player block in attack, defense, and self-target contexts', () => {
+  // P7 D4 — mana 양면: 앞 방어 1 / 뒤 방어 2, 스킬 대상과 무관하게 항상 플레이어
+  it('mana procs grant player block on both faces in attack, defense, and self-target contexts', () => {
     const cases = [
-      { skill: 'slash', expectedBlock: 2, target: 0 },
-      { skill: 'guard', expectedBlock: 7, target: undefined },
-      { skill: 'flame-rampage', expectedBlock: 2, target: undefined }
+      // guard 기본 방어 4 (P7 기본기 하향) + 앞 proc 1 = 5, 뒤는 +3 면 보너스 포함 4+3+2 = 9
+      { skill: 'slash', face: 'heads', procBlock: 1, expectedBlock: 1, target: 0 },
+      { skill: 'guard', face: 'heads', procBlock: 1, expectedBlock: 5, target: undefined },
+      { skill: 'flame-rampage', face: 'heads', procBlock: 1, expectedBlock: 1, target: undefined },
+      { skill: 'slash', face: 'tails', procBlock: 2, expectedBlock: 2, target: 0 },
+      { skill: 'guard', face: 'tails', procBlock: 2, expectedBlock: 9, target: undefined }
     ] as const;
 
     for (const testCase of cases) {
-      let state = withFaces(combat(`mana-${testCase.skill}`), ['heads']);
+      let state = withFaces(combat(`mana-${testCase.skill}-${testCase.face}`), [testCase.face]);
       state = withEquippedSkill(state, testCase.skill);
       state = withHandDefs(state, ['mana']);
       const cost = state.zones.hand[0];
@@ -807,7 +849,9 @@ describe('M5 shipped content', () => {
       const result = useFlip(state, [cost], testCase.target);
 
       expect(result.state.player.block).toBe(testCase.expectedBlock);
-      expect(result.events.filter((event) => event.type === 'blockGained' && event.amount === 2)).toHaveLength(1);
+      expect(
+        result.events.filter((event) => event.type === 'blockGained' && event.amount === testCase.procBlock)
+      ).toHaveLength(1);
     }
   });
 
@@ -988,15 +1032,16 @@ describe('P6 shipped content goldens (1.1.0-p6)', () => {
     const warrior = characters.warrior;
     expect(String(warrior.id)).toBe('warrior');
     expect(warrior.name).toBe('화염 격투가');
+    // P7 D2 — 시작 4스킬: 반복 기본기 2 + 버닝 스트라이크 + 과열 인에이블러
     expect(warrior.startingSkills.map(String)).toEqual([
-      'jab', 'fist-guard', 'burning-fist', 'ignite', 'ignite-sword', 'flame-rampage'
+      'jab', 'fist-guard', 'burning-fist', 'inner-passion'
     ]);
     // 기존 검술 기본기는 공용 defs로 존치 (타 캐릭터 시작 셋·구 세이브 참조 유효)
     for (const legacy of ['slash', 'guard', 'burning-strike']) {
       expect(contentDb.skills[legacy]).toBeDefined();
       expect(contentDb.skills[legacy]?.exclusiveTo).toBeUndefined();
     }
-    for (const fist of ['jab', 'fist-guard', 'burning-fist']) {
+    for (const fist of ['jab', 'fist-guard', 'burning-fist', 'inner-passion']) {
       expect(String(contentDb.skills[fist]?.exclusiveTo)).toBe('warrior');
     }
   });
@@ -1008,8 +1053,9 @@ describe('P6 shipped content goldens (1.1.0-p6)', () => {
     expect(arcanist.name).toBe('마도기사');
     expect(arcanist.maxHp).toBe(65);
     expect(arcanist.trait.hook).toBe('turnStart');
+    // P7 D2 — 시작 4스킬 (aegis-pulse/shield-summon은 보상·상점 풀 존속)
     expect(arcanist.startingSkills.map(String)).toEqual([
-      'slash', 'guard', 'arcane-charge', 'arcane-command', 'aegis-pulse', 'shield-summon'
+      'slash', 'guard', 'arcane-charge', 'arcane-command'
     ]);
     expect(characters.guardian.name).toBe('수호자');
   });
@@ -1038,6 +1084,85 @@ describe('P6 shipped content goldens (1.1.0-p6)', () => {
     expect(equipment['mana-shield']).toMatchObject({
       name: '마나 방패',
       action: { kind: 'ward', block: 2 }
+    });
+    expect(contentDb.validate()).toEqual([]);
+  });
+});
+
+describe('P7 shipped content goldens (1.2.0-p7)', () => {
+  it('ships the blood coin with heal heads and block tails (D4)', () => {
+    expect(coins.blood).toEqual({
+      id: coinId('blood'),
+      element: 'blood',
+      procs: {
+        heads: [{ kind: 'heal', amount: 1 }],
+        tails: [{ kind: 'block', amount: 1 }]
+      }
+    });
+  });
+
+  it('ships repeatable basics at 4 (+3) with cooldown 0 (D1/D2 — v1.3 하향)', () => {
+    for (const [attack, defense] of [
+      ['slash', 'guard'],
+      ['jab', 'fist-guard']
+    ] as const) {
+      expect(contentDb.skills[attack]).toMatchObject({
+        cooldown: 0,
+        cost: 1,
+        base: [{ kind: 'damage', amount: 4 }],
+        heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] }
+      });
+      expect(contentDb.skills[defense]).toMatchObject({
+        cooldown: 0,
+        cost: 1,
+        base: [{ kind: 'block', amount: 4 }],
+        tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
+      });
+    }
+  });
+
+  it('pins the warrior overheat kit and the new draw/cooldown utilities (D3/D5)', () => {
+    expect(skills['inner-passion']).toMatchObject({
+      type: 'consume',
+      cooldown: 3,
+      consume: { element: 'fire', count: 1 },
+      effects: [{ kind: 'enterOverheat' }, { kind: 'draw', count: 1 }]
+    });
+    expect(skills['fire-fist']).toMatchObject({
+      cost: 2,
+      cooldown: 1,
+      base: [
+        { kind: 'addCoin', coin: coinId('fire'), zone: 'draw', count: 1 },
+        { kind: 'damage', amount: 10 }
+      ],
+      heads: { mode: 'per', effects: [{ kind: 'damage', amount: 1 }] },
+      // '화염 앞면 +2'는 일반 앞면 +1과 합산되는 추가 +1로 구현 (모호성 결정 11)
+      elementFaces: [{ element: 'fire', face: 'heads', effects: [{ kind: 'damage', amount: 1 }] }],
+      overheatBonus: [{ kind: 'damage', amount: 4 }]
+    });
+    // 재설계된 과열 스킬은 damagePerFireInHand 없이 overheatBonus 분기만 갖는다
+    expect(skills['overheat-strike']).toMatchObject({
+      cooldown: 1,
+      overheatBonus: [{ kind: 'damage', amount: 4 }]
+    });
+    expect(skills['overheat-vent']).toMatchObject({
+      oncePerCombat: true,
+      overheatBonus: [{ kind: 'damage', amount: 10 }]
+    });
+    // 4+비용 대표 2종 (D3 표준: 강한 기본치 + 즉시/다음 턴 리턴)
+    expect(skills['comet-blow']).toMatchObject({ cost: 4, cooldown: 2 });
+    expect(skills['arsenal-barrage']).toMatchObject({ cost: 4, cooldown: 2 });
+    // 공용 유틸리티
+    expect(skills['battle-focus']).toMatchObject({
+      cooldown: 2,
+      base: [{ kind: 'draw', count: 2 }]
+    });
+    expect(skills.regroup).toMatchObject({
+      cooldown: 3,
+      base: [
+        { kind: 'reduceCooldown', amount: 1 },
+        { kind: 'draw', count: 1 }
+      ]
     });
     expect(contentDb.validate()).toEqual([]);
   });

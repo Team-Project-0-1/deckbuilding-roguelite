@@ -314,8 +314,8 @@ const runInvariantViolations = (run: RunState): string[] => {
   }
   if (run.gold < 0) violations.push("run gold is negative");
   if (run.bag.length === 0) violations.push("run bag is empty");
-  if (run.equippedSkills.length !== 6) {
-    violations.push("run must have exactly six equipped skills");
+  if (run.equippedSkills.length !== 8) {
+    violations.push("run must have exactly eight skill slots");
   }
   if (run.bag.some((id) => contentDb.coins[String(id)] === undefined)) {
     violations.push("run bag contains an unknown coin");
@@ -327,7 +327,6 @@ const progressFingerprint = (state: CombatState): string =>
   [
     state.turn,
     state.phase,
-    state.skillUsesThisTurn,
     state.player.hp,
     state.player.block,
     state.enemies.map((enemy) => `${enemy.hp}:${enemy.block}`).join(","),
@@ -338,7 +337,7 @@ const progressFingerprint = (state: CombatState): string =>
     Object.values(state.zones.placed)
       .map((coins) => coins.length)
       .join(","),
-    state.slots.map((slot) => (slot.usedThisTurn ? 1 : 0)).join(""),
+    state.slots.map((slot) => slot.cooldownRemaining).join(""),
     state.turnTriggers.length,
   ].join("|");
 

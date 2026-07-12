@@ -3,6 +3,9 @@ import type { CharacterId, PassiveId, EquipmentDefId, CoinUid, EnemyDefId, Skill
 import type { Rng, RngSnapshot } from '../rng';
 import type { CombatEvent } from './events';
 
+// P7 D2 — 기본 최대 장착 슬롯 (단일 정본 — reducer/run/types/저장 검증이 모두 이 상수를 쓴다)
+export const MAX_SKILL_SLOTS = 8;
+
 export type StatusState =
   | { kind: 'stack'; stacks: number }
   | { kind: 'duration'; turns: number };
@@ -26,6 +29,10 @@ export interface UnitState {
 
 export interface PlayerState extends UnitState {
   nextDrawPenalty: number;
+  // P7 D3 — 다음 턴 드로우 보너스 (턴 시작 총 드로우는 [0,8] 클램프)
+  nextDrawBonus: number;
+  // P7 D5 — 과열: 비중첩 불리언, 턴 넘어 지속, 과열 강화 스킬 해결 후 소비
+  overheat: boolean;
 }
 
 export interface EnemyState extends UnitState {
@@ -35,9 +42,11 @@ export interface EnemyState extends UnitState {
   nextAttackBonus: number;
 }
 
+// P7 D1/D2 — usedThisTurn(턴당 1회) 폐지 → cooldownRemaining(0=가용, 턴 시작 감소).
+// skillId null = 빈 슬롯 (기본 최대 8슬롯, 시작 4스킬).
 export interface SlotState {
-  skillId: SkillId;
-  usedThisTurn: boolean;
+  skillId: SkillId | null;
+  cooldownRemaining: number;
   usedThisCombat: boolean;
 }
 
@@ -63,7 +72,6 @@ export interface CombatState {
   zones: CombatZones;
   slots: SlotState[];
   turnTriggers: TurnTriggerInstance[];
-  skillUsesThisTurn: number;
   rng: { flip: RngSnapshot; shuffle: RngSnapshot; ai: RngSnapshot };
   rngImpl?: { flip?: Rng; shuffle?: Rng; ai?: Rng };
   nextUid: number;

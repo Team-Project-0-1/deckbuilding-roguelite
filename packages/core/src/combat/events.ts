@@ -16,6 +16,11 @@ export type CombatEvent =
     }
   | { type: 'blockGained'; target: TargetRef; amount: number }
   | { type: 'blockCleared'; target: TargetRef; amount: number }
+  // P7 — 회복(D4)·쿨다운 감소(D1)·과열(D5)
+  | { type: 'healed'; target: TargetRef; amount: number; hp: number }
+  | { type: 'cooldownReduced'; slots: number[]; amount: number }
+  | { type: 'overheatEntered' }
+  | { type: 'overheatConsumed'; skill: SkillId }
   | { type: 'statusApplied'; target: TargetRef; status: StatusId; stacks: number; turns?: number }
   | { type: 'statusTicked'; target: TargetRef; status: StatusId; amount: number; remaining: number; turns?: number }
   | { type: 'coinCreated'; coin: CoinUid; defId: string; zone: 'draw' | 'discard' | 'hand' }

@@ -1,4 +1,4 @@
-import type { ContentDb, FlipSkillDef } from '../content-types';
+import type { ContentDb, EffectAtom, FlipSkillDef } from '../content-types';
 import { effectiveElements } from '../content-types';
 import type { CoinUid, EquipmentDefId, SlotId } from '../ids';
 import type { CombatState } from './state';
@@ -13,8 +13,48 @@ export type Command =
 const livingEnemyTargets = (state: CombatState): number[] =>
   state.enemies.flatMap((enemy, index) => (enemy.hp > 0 ? [index] : []));
 
-const targetsForSkill = (state: CombatState, targetType: 'single-enemy' | 'all-enemies' | 'self' | 'none'): (number | undefined)[] =>
-  targetType === 'single-enemy' ? livingEnemyTargets(state) : [undefined];
+const HOSTILE_STATUSES = new Set(['burn', 'frostbite', 'shock']);
+
+const isHostileProc = (atom: EffectAtom): boolean =>
+  atom.kind === 'damage' ||
+  atom.kind === 'damagePerTargetBurn' ||
+  atom.kind === 'damagePerBlock' ||
+  (atom.kind === 'applyStatus' && atom.to === 'target' && HOSTILE_STATUSES.has(atom.status));
+
+/**
+ * 자기/무대상 플립 스킬에 공격형 속성 코인이 장전되면 적용할 적을 명시해야 한다.
+ * 플립 전에는 면을 알 수 없으므로 어느 면이든 적대 proc이 있으면 대상을 요구한다.
+ */
+export const flipSkillRequiresEnemyTarget = (
+  state: CombatState,
+  slot: SlotId,
+  skill: FlipSkillDef,
+  db: ContentDb
+): boolean => {
+  if (skill.targetType !== 'self' && skill.targetType !== 'none') return false;
+  for (const coinUid of state.zones.placed[slot] ?? []) {
+    const instance = state.coins[Number(coinUid)];
+    if (instance === undefined) continue;
+    for (const element of effectiveElements(instance, db)) {
+      const coinDef = Object.values(db.coins).find((candidate) => candidate.element === element);
+      if ([...(coinDef?.procs?.heads ?? []), ...(coinDef?.procs?.tails ?? [])].some(isHostileProc)) return true;
+    }
+  }
+  return false;
+};
+
+const targetsForSkill = (
+  state: CombatState,
+  skill: ContentDb['skills'][string],
+  slot: SlotId,
+  db: ContentDb
+): (number | undefined)[] => {
+  if (skill.targetType === 'single-enemy') return livingEnemyTargets(state);
+  if (skill.type === 'flip' && flipSkillRequiresEnemyTarget(state, slot, skill, db)) {
+    return livingEnemyTargets(state);
+  }
+  return [undefined];
+};
 
 const isBasicCoinInHand = (state: CombatState, db: ContentDb, coin: CoinUid): boolean => {
   const instance = state.coins[Number(coin)];
@@ -56,7 +96,8 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
   for (let i = 0; i < state.slots.length; i += 1) {
     const slot = i as SlotId;
     const slotState = state.slots[i];
-    if (slotState === undefined || slotState.usedThisTurn || state.skillUsesThisTurn >= 3) continue;
+    // P7 D1 — 캡 폐지: 쿨다운 0(가용) 슬롯만. 빈 슬롯(null)은 제안 없음
+    if (slotState === undefined || slotState.skillId === null || slotState.cooldownRemaining > 0) continue;
     const skill = db.skills[String(slotState.skillId)];
     if (skill === undefined || (skill.oncePerCombat === true && slotState.usedThisCombat)) continue;
 
@@ -69,7 +110,7 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
           ? (Object.keys(db.equipment ?? {}).sort()[0] as EquipmentDefId | undefined)
           : undefined;
         const chosenSummon = skillCommandsSummon(skill) ? state.summons[0]?.uid : undefined;
-        for (const target of targetsForSkill(state, skill.targetType)) {
+        for (const target of targetsForSkill(state, skill, slot, db)) {
           const command: Command = { type: 'useFlipSkill', slot, target };
           if (chosen !== undefined) command.chosen = chosen;
           if (chosenEquipment !== undefined) command.chosenEquipment = chosenEquipment;
@@ -96,7 +137,7 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
         })
         .slice(0, skill.consume.count);
       if (usable.length === skill.consume.count) {
-        for (const target of targetsForSkill(state, skill.targetType)) {
+        for (const target of targetsForSkill(state, skill, slot, db)) {
           commands.push({ type: 'useConsumeSkill', slot, coins: usable, target });
         }
       }

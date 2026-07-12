@@ -54,7 +54,11 @@ const describeEffect = (effect: EffectAtom, db: ContentDb): string => {
   if (effect.kind === "empowerSummons") return `소환 장비 강화 +${effect.amount}`;
   if (effect.kind === "commandChosenSummon") return "소환 장비에 즉시 행동 명령";
   if (effect.kind === "damagePerTargetBurn") return `화상 1당 피해 ${effect.amountPerStack}`;
-  if (effect.kind === "damagePerFireInHand") return `손의 화염 코인 1개당 피해 ${effect.amountPerCoin}`;
+  if (effect.kind === "heal") return `회복 ${effect.amount}`;
+  if (effect.kind === "draw") return `코인 ${effect.count}개 뽑기`;
+  if (effect.kind === "nextTurnDraw") return `다음 턴 뽑기 +${effect.count}`;
+  if (effect.kind === "reduceCooldown") return `다른 스킬 쿨다운 -${effect.amount}`;
+  if (effect.kind === "enterOverheat") return "과열 진입";
   if (effect.kind === "damagePerBlock") return `현재 방어 1당 피해 ${effect.amountPerBlock}`;
   return "효과";
 };

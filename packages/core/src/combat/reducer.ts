@@ -1,14 +1,18 @@
 import type { ContentDb, FlipSkillDef } from '../content-types';
 import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, PassiveId, SkillId, SlotId } from '../ids';
 import { derive, rngFrom, seedFromString } from '../rng';
+import { flipSkillRequiresEnemyTarget } from './commands';
 import type { Command } from './commands';
+import { drawCards } from './draw';
 import { initialIntent, runEnemyPhase } from './enemy';
 import { runSummonPhase } from './summons';
 import type { CombatEvent } from './events';
 import { resolveConsume } from './resolve/consume';
 import { applyDamage, applyEffectAtom, checkCombatEnd, resolveFlip } from './resolve/flip';
-import { cloneState, statusStacks } from './state';
+import { cloneState, MAX_SKILL_SLOTS, statusStacks } from './state';
 import type { CombatState, CombatZones } from './state';
+
+export { MAX_SKILL_SLOTS } from './state';
 
 export type StepResult = { ok: true; state: CombatState; events: CombatEvent[] } | { ok: false; error: string };
 
@@ -16,7 +20,7 @@ export interface CreateCombatConfig {
   character: CharacterId;
   enemies: readonly EnemyDefId[];
   bag?: readonly CoinDefId[];
-  equippedSkills?: readonly SkillId[];
+  equippedSkills?: readonly (SkillId | null)[];
   currentHp?: number;
   maxHp?: number;
   combatIndex?: number;
@@ -31,39 +35,8 @@ const uid = (value: number): CoinUid => value as CoinUid;
 
 const emptyPlaced = (): Record<SlotId, CoinUid[]> => {
   const placed: Partial<Record<SlotId, CoinUid[]>> = {};
-  for (let i = 0; i < 6; i += 1) placed[slot(i)] = [];
+  for (let i = 0; i < MAX_SKILL_SLOTS; i += 1) placed[slot(i)] = [];
   return placed as Record<SlotId, CoinUid[]>;
-};
-
-const drawCards = (input: CombatState, count: number): { state: CombatState; events: CombatEvent[] } => {
-  const events: CombatEvent[] = [];
-  let state = input;
-  let draw = [...state.zones.draw];
-  let discard = [...state.zones.discard];
-  const rng = state.rngImpl?.shuffle ?? rngFrom(state.rng.shuffle);
-  const drawn: CoinUid[] = [];
-  let remaining = count;
-
-  while (remaining > 0) {
-    if (draw.length === 0) {
-      if (discard.length === 0) break;
-      events.push({ type: 'pileShuffled', count: discard.length });
-      draw = rng.shuffle(discard);
-      discard = [];
-    }
-    const coin = draw.shift();
-    if (coin === undefined) break;
-    drawn.push(coin);
-    remaining -= 1;
-  }
-
-  if (drawn.length > 0) events.push({ type: 'coinsDrawn', coins: drawn });
-  state = {
-    ...state,
-    rng: { ...state.rng, shuffle: rng.snapshot() },
-    zones: { ...state.zones, draw, discard, hand: [...state.zones.hand, ...drawn] }
-  };
-  return { state, events };
 };
 
 // P6 D2 — 시작 고유 특성(trait)과 획득 패시브를 같은 훅 실행기로 처리한다.
@@ -96,19 +69,35 @@ const runHook = (
   return { state, events };
 };
 
-const startPlayerTurn = (input: CombatState, db: ContentDb): { state: CombatState; events: CombatEvent[] } => {
+const startPlayerTurn = (
+  input: CombatState,
+  db: ContentDb,
+  clearBlock = true
+): { state: CombatState; events: CombatEvent[] } => {
   const events: CombatEvent[] = [];
   let state: CombatState = {
     ...input,
     phase: 'player' as const,
-    slots: input.slots.map((candidate) => ({ ...candidate, usedThisTurn: false })),
-    skillUsesThisTurn: 0
+    // P7 D1 — 턴 시작에 쿨다운 감소 (쿨1=다음 턴 가용, 쿨3=두 턴 봉인 후 가용)
+    slots: input.slots.map((candidate) => ({
+      ...candidate,
+      cooldownRemaining: Math.max(0, candidate.cooldownRemaining - 1)
+    }))
   };
-  if (state.player.block > 0) {
+  if (clearBlock && state.player.block > 0) {
     events.push({ type: 'blockCleared', target: { type: 'player' }, amount: state.player.block });
   }
-  const drawCount = Math.max(0, 5 - state.player.nextDrawPenalty);
-  state = { ...state, player: { ...state.player, block: 0, nextDrawPenalty: 0 } };
+  // P7 D3 — 턴 시작 총 드로우 [0,8] 클램프 (nextTurnDraw 폭주 방지)
+  const drawCount = Math.min(8, Math.max(0, 5 - state.player.nextDrawPenalty + state.player.nextDrawBonus));
+  state = {
+    ...state,
+    player: {
+      ...state.player,
+      block: clearBlock ? 0 : state.player.block,
+      nextDrawPenalty: 0,
+      nextDrawBonus: 0
+    }
+  };
   // turnStart 훅(trait·획득 패시브) — 드로우 전에 발동해 생성 코인이 이번 드로우에 섞인다
   const hooked = runHook(state, db, 'turnStart');
   state = hooked.state;
@@ -131,12 +120,13 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   for (const coin of bag) {
     if (db.coins[String(coin)] === undefined) throw new Error(`unknown coin: ${String(coin)}`);
   }
-  if (cfg.equippedSkills !== undefined && cfg.equippedSkills.length !== 6) {
-    throw new Error('equippedSkills must contain exactly six skills');
+  // P7 D2 — 슬롯 8 일반화: 1~8개 전달, null=빈 슬롯, 부족분은 null 패딩
+  if (cfg.equippedSkills !== undefined && (cfg.equippedSkills.length < 1 || cfg.equippedSkills.length > MAX_SKILL_SLOTS)) {
+    throw new Error(`equippedSkills must contain between 1 and ${MAX_SKILL_SLOTS} skills`);
   }
-  const skills = cfg.equippedSkills === undefined ? character.startingSkills : [...cfg.equippedSkills];
+  const skills: (SkillId | null)[] = cfg.equippedSkills === undefined ? [...character.startingSkills] : [...cfg.equippedSkills];
   for (const skill of skills) {
-    if (db.skills[String(skill)] === undefined) throw new Error(`unknown skill: ${String(skill)}`);
+    if (skill !== null && db.skills[String(skill)] === undefined) throw new Error(`unknown skill: ${String(skill)}`);
   }
   const maxHp = cfg.maxHp ?? character.maxHp;
   const currentHp = cfg.currentHp ?? maxHp;
@@ -187,17 +177,16 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   const base: CombatState = {
     turn: 1,
     phase: 'player',
-    player: { hp: currentHp, maxHp, block: 0, statuses: {}, nextDrawPenalty: 0 },
+    player: { hp: currentHp, maxHp, block: 0, statuses: {}, nextDrawPenalty: 0, nextDrawBonus: 0, overheat: false },
     enemies,
     coins,
     zones: { draw: shuffledBag, hand: [], placed: emptyPlaced(), discard: [], exhausted: [] },
-    slots: Array.from({ length: 6 }, (_, index) => ({
-      skillId: skills[index] ?? ('' as never),
-      usedThisTurn: false,
+    slots: Array.from({ length: MAX_SKILL_SLOTS }, (_, index) => ({
+      skillId: skills[index] ?? null,
+      cooldownRemaining: 0,
       usedThisCombat: false
     })),
     turnTriggers: [],
-    skillUsesThisTurn: 0,
     rng: { flip: derive(combat, 'flip'), shuffle: shuffleRng.snapshot(), ai: derive(combat, 'ai') },
     nextUid: bag.length + 1,
     nextTurnTriggerUid: 1,
@@ -210,7 +199,9 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   };
 
   const trait = runHook(base, db, 'combatStart');
-  const started = startPlayerTurn(trait.state, db);
+  // 전투 시작 훅은 첫 턴 초기화보다 먼저 실행된다. 여기서 방어를 지우면
+  // "전투 시작 시 방어" 특성/패시브가 보이지 않게 소멸하므로 첫 턴만 보존한다.
+  const started = startPlayerTurn(trait.state, db, false);
   return { ...started.state, events: [...trait.events, ...started.events] };
 };
 
@@ -277,6 +268,7 @@ const placeCoin = (input: CombatState, coin: CoinUid, slotId: SlotId, db: Conten
   if (!input.zones.hand.includes(coin)) return { ok: false, error: 'coin is not in hand' };
   const slotState = input.slots[Number(slotId)];
   if (slotState === undefined) return { ok: false, error: 'slot does not exist' };
+  if (slotState.skillId === null) return { ok: false, error: 'slot is empty' };
   const skill = db.skills[String(slotState.skillId)];
   if (skill?.type === 'flip' && (input.zones.placed[slotId]?.length ?? 0) >= skill.cost) {
     return { ok: false, error: 'slot cost is already full' };
@@ -380,6 +372,10 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
       const skill = db.skills[String(slotState.skillId)];
       if (skill === undefined || skill.type !== 'flip') return { ok: false, error: 'slot is not a flip skill' };
       if (skill.targetType === 'single-enemy') {
+        const targetError = validateSingleEnemyTarget(input, cmd.target);
+        if (targetError !== undefined) return targetError;
+      }
+      if (flipSkillRequiresEnemyTarget(input, cmd.slot, skill, db)) {
         const targetError = validateSingleEnemyTarget(input, cmd.target);
         if (targetError !== undefined) return targetError;
       }

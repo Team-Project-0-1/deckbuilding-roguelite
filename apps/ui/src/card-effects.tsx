@@ -6,7 +6,7 @@ import type { KeywordTerm } from "./keywords";
 import "./card-effects.css";
 
 export interface EffectRowModel {
-  kind: "base" | "heads" | "tails" | "cost" | "effect";
+  kind: "base" | "heads" | "tails" | "cost" | "effect" | "element-face" | "overheat";
   badge: string;
   modeNote?: string;
   segments: Array<{ text: string; term?: KeywordTerm }>;
@@ -69,8 +69,20 @@ const atomSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => 
   if (atom.kind === "damagePerTargetBurn") {
     return { text: `화상 1당 피해 ${atom.amountPerStack}`, term: "burn" };
   }
-  if (atom.kind === "damagePerFireInHand") {
-    return { text: `손의 화염 코인 1개당 피해 ${atom.amountPerCoin}` };
+  if (atom.kind === "heal") {
+    return { text: `회복 ${atom.amount}` };
+  }
+  if (atom.kind === "draw") {
+    return { text: `코인 ${atom.count}개 뽑기` };
+  }
+  if (atom.kind === "nextTurnDraw") {
+    return { text: `다음 턴 뽑기 +${atom.count}` };
+  }
+  if (atom.kind === "reduceCooldown") {
+    return { text: `다른 스킬 쿨다운 -${atom.amount}` };
+  }
+  if (atom.kind === "enterOverheat") {
+    return { text: "과열 진입", term: "overheat" };
   }
   if (atom.kind === "damagePerBlock") {
     return { text: `현재 방어 1당 피해 ${atom.amountPerBlock}`, term: "block" };
@@ -122,7 +134,7 @@ const bonusSegments = (
 
 export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
   if (skill.type === "consume") {
-    return [
+    const rows: EffectRowModel[] = [
       {
         kind: "cost",
         badge: "비용",
@@ -139,6 +151,18 @@ export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
         segments: atomSegments(skill.effects),
       },
     ];
+    // P7 D5 — 과열 강화 분기 (있을 때만)
+    if (skill.overheatBonus !== undefined && skill.overheatBonus.length > 0) {
+      rows.push({
+        kind: "overheat",
+        badge: "과열",
+        segments: bonusSegments(skill.overheatBonus).map((segment) => ({
+          ...segment,
+          term: segment.term ?? "overheat",
+        })),
+      });
+    }
+    return rows;
   }
 
   const rows: EffectRowModel[] = [
@@ -165,6 +189,26 @@ export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
       segments: bonusSegments(skill.tails.effects),
     });
   }
+  // P7 D5 — 특정 속성 코인 면 보너스 (예: 화염 앞면 추가 +1)
+  for (const bonus of skill.elementFaces ?? []) {
+    rows.push({
+      kind: "element-face",
+      badge: `${elementKo(bonus.element)} ${bonus.face === "heads" ? "앞면" : "뒷면"}`,
+      modeNote: "동전마다",
+      segments: bonusSegments(bonus.effects),
+    });
+  }
+  // P7 D5 — 과열 강화 분기
+  if (skill.overheatBonus !== undefined && skill.overheatBonus.length > 0) {
+    rows.push({
+      kind: "overheat",
+      badge: "과열",
+      segments: bonusSegments(skill.overheatBonus).map((segment) => ({
+        ...segment,
+        term: segment.term ?? "overheat",
+      })),
+    });
+  }
 
   return rows;
 }
@@ -172,8 +216,8 @@ export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
 export function CardEffectRows(props: { skill: SkillDef }): JSX.Element {
   return (
     <div className="card-effects" aria-label={`${props.skill.name} 효과`}>
-      {skillEffectRows(props.skill).map((row) => (
-        <div className={`card-effect-row ${row.kind}`} key={row.kind}>
+      {skillEffectRows(props.skill).map((row, rowIndex) => (
+        <div className={`card-effect-row ${row.kind}`} key={`${row.kind}-${rowIndex}`}>
           <span className="card-effect-badge">{row.badge}</span>
           <span className="card-effect-copy">
             {/* 값이 먼저, 발동 조건은 접미 — 좁은 카드에서 잘려도 수치는 항상 보인다 */}

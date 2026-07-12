@@ -1,8 +1,15 @@
 import type {
-  StatusId, ContentDb, EffectAtom, FlipSkillDef, TargetRef } from '../../content-types';
-import { effectiveElements } from '../../content-types';
-import type { EquipmentDefId, CoinUid, Face, SlotId } from '../../ids';
+  StatusId,
+  ConsumeSkillDef,
+  ContentDb,
+  EffectAtom,
+  FlipSkillDef,
+  TargetRef
+} from '../../content-types';
+import { effectiveElements, skillCooldown } from '../../content-types';
+import type { Element, EquipmentDefId, CoinUid, Face, SlotId } from '../../ids';
 import { rngFrom } from '../../rng';
+import { drawCards, HAND_LIMIT } from '../draw';
 import type { CombatEvent } from '../events';
 import { statusStacks, statusTurns } from '../state';
 import type { CombatState, StatusState, TurnTriggerInstance } from '../state';
@@ -20,6 +27,8 @@ interface ApplyEffectOptions {
   chosenSummon?: number;
   suppressTurnTriggers?: boolean;
   turnTriggerScope?: readonly TurnTriggerInstance[];
+  // P7 D1 — reduceCooldown이 해결 중인 자기 슬롯을 제외하기 위한 출처 슬롯
+  sourceSlot?: SlotId;
 }
 
 const isAliveEnemy = (state: CombatState, index: number): boolean => {
@@ -146,7 +155,7 @@ const addTemporaryCoin = (
       continue;
     }
 
-    if (atom.zone === 'hand' && nextState.zones.hand.length < 10) {
+    if (atom.zone === 'hand' && nextState.zones.hand.length < HAND_LIMIT) {
       nextState = {
         ...nextState,
         coins,
@@ -221,6 +230,43 @@ export const applyEffectAtom = (
       return applyBlock(state, { type: 'player' }, atom.amount, events);
     case 'selfDamage':
       return applyDamage(state, { type: 'player' }, atom.amount, 'self', events);
+    // P7 D4 — 회복: 플레이어 전용, maxHp 상한
+    case 'heal': {
+      const healed = Math.min(state.player.maxHp, state.player.hp + atom.amount);
+      const gained = healed - state.player.hp;
+      if (gained <= 0) return state;
+      events.push({ type: 'healed', target: { type: 'player' }, amount: gained, hp: healed });
+      return { ...state, player: { ...state.player, hp: healed } };
+    }
+    // P7 D3 — 즉시 드로우 / 다음 턴 드로우 보너스
+    case 'draw': {
+      const drawn = drawCards(state, atom.count);
+      events.push(...drawn.events);
+      return drawn.state;
+    }
+    case 'nextTurnDraw':
+      return { ...state, player: { ...state.player, nextDrawBonus: state.player.nextDrawBonus + atom.count } };
+    // P7 D1 — 쿨다운 감소: 자기 슬롯 제외, 대기 중인 슬롯만.
+    // 반복(쿨0)은 대기 상태가 없어 구조적으로 제외되고, 전투당 1회는 명시 제외한다.
+    case 'reduceCooldown': {
+      const affected: number[] = [];
+      const slots = state.slots.map((slotState, index) => {
+        if (index === Number(options?.sourceSlot ?? -1) || slotState.cooldownRemaining <= 0) return slotState;
+        const slotSkill = slotState.skillId === null ? undefined : db.skills[String(slotState.skillId)];
+        if (slotSkill === undefined || slotSkill.oncePerCombat === true || skillCooldown(slotSkill) === 0) return slotState;
+        affected.push(index);
+        return { ...slotState, cooldownRemaining: Math.max(0, slotState.cooldownRemaining - atom.amount) };
+      });
+      if (affected.length === 0) return state;
+      events.push({ type: 'cooldownReduced', slots: affected, amount: atom.amount });
+      return { ...state, slots };
+    }
+    // P7 D5 — 과열 진입: 비중첩, 재진입 no-op
+    case 'enterOverheat': {
+      if (state.player.overheat) return state;
+      events.push({ type: 'overheatEntered' });
+      return { ...state, player: { ...state.player, overheat: true } };
+    }
     case 'applyStatus': {
       const statusTarget = atom.to === 'self' ? { type: 'player' as const } : target;
       if (statusTarget.type === 'enemy' && !isAliveEnemy(state, statusTarget.index)) return state;
@@ -264,19 +310,6 @@ export const applyEffectAtom = (
       const stacks = statusStacks(state.enemies[target.index]?.statuses ?? {}, 'burn');
       if (stacks <= 0) return state;
       const damaged = applyDamage(state, target, stacks * atom.amountPerStack, 'skill', events, { type: 'player' });
-      return options?.suppressTurnTriggers !== true
-        ? fireTurnTriggers(damaged, 'onDamageDealt', target, db, events, options?.turnTriggerScope)
-        : damaged;
-    }
-    // P6 D5 — 과열: 손의 화염 코인 수 참조
-    case 'damagePerFireInHand': {
-      if (target.type !== 'enemy' || !isAliveEnemy(state, target.index)) return state;
-      const fireInHand = state.zones.hand.filter((coin) => {
-        const instance = state.coins[Number(coin)];
-        return instance !== undefined && effectiveElements(instance, db).includes('fire');
-      }).length;
-      if (fireInHand <= 0) return state;
-      const damaged = applyDamage(state, target, fireInHand * atom.amountPerCoin, 'skill', events, { type: 'player' });
       return options?.suppressTurnTriggers !== true
         ? fireTurnTriggers(damaged, 'onDamageDealt', target, db, events, options?.turnTriggerScope)
         : damaged;
@@ -349,18 +382,47 @@ export const fireTurnTriggers = (
 
 const HOSTILE_STATUSES: ReadonlySet<StatusId> = new Set(['burn', 'frostbite', 'shock']);
 
-const targetForElementProc = (state: CombatState, atom: EffectAtom, skillTarget: TargetRef): TargetRef | undefined => {
-  // 적대 상태(화상·동상·감전)만 명시 집합으로 라우팅 — self 스킬에 속성 코인을 장전해도
-  // 플레이어가 자기 상태를 뒤집어쓰지 않는다. 미래의 우호/미지 상태는 skillTarget 유지
-  // (P3.4 감사 2건: burn 전용 결함 수정 + 전량 강제 라우팅의 과잉 일반화 방지)
-  if (atom.kind === 'applyStatus' && atom.to === 'target' && HOSTILE_STATUSES.has(atom.status)) {
-    if (skillTarget.type === 'enemy' && isAliveEnemy(state, skillTarget.index)) return skillTarget;
-    const fallback = firstAliveEnemy(state);
-    return fallback === undefined ? undefined : { type: 'enemy', index: fallback };
+// P7 D4 — 코인 proc 대상 규칙: 공격형(피해·적대 상태)은 단일 대상 스킬→그 적,
+// 전체 스킬→모든 생존 적 각각, 자기 대상 스킬→명시 target(cmd) 필수.
+// 우호형(방어·회복·자기 상태)은 스킬 대상과 무관하게 플레이어.
+const targetsForElementProc = (
+  state: CombatState,
+  atom: EffectAtom,
+  skill: FlipSkillDef,
+  skillTarget: TargetRef,
+  explicitTarget: number | undefined
+): TargetRef[] => {
+  const hostile =
+    atom.kind === 'damage' ||
+    atom.kind === 'damagePerTargetBurn' ||
+    (atom.kind === 'applyStatus' && atom.to === 'target' && HOSTILE_STATUSES.has(atom.status));
+  if (!hostile) return [{ type: 'player' }];
+  if (skill.targetType === 'all-enemies') {
+    return state.enemies.flatMap((enemy, index) => (enemy.hp > 0 ? [{ type: 'enemy' as const, index }] : []));
   }
-  if (atom.kind === 'applyStatus' && atom.to === 'self') return { type: 'player' };
-  return skillTarget;
+  if (skillTarget.type === 'enemy' && isAliveEnemy(state, skillTarget.index)) return [skillTarget];
+  if (explicitTarget !== undefined && isAliveEnemy(state, explicitTarget)) {
+    return [{ type: 'enemy', index: explicitTarget }];
+  }
+  return [];
 };
+
+const isTargetEffect = (atom: EffectAtom): boolean =>
+  atom.kind === 'damage' ||
+  atom.kind === 'damagePerTargetBurn' ||
+  atom.kind === 'damagePerBlock' ||
+  (atom.kind === 'applyStatus' && atom.to === 'target');
+
+/** 전체 대상 스킬의 본체/면 효과를 모든 생존 적에게 적용한다. */
+export const targetsForSkillEffect = (
+  state: CombatState,
+  atom: EffectAtom,
+  skill: FlipSkillDef | ConsumeSkillDef,
+  fallback: TargetRef
+): TargetRef[] =>
+  skill.targetType === 'all-enemies' && isTargetEffect(atom)
+    ? state.enemies.flatMap((enemy, index) => (enemy.hp > 0 ? [{ type: 'enemy' as const, index }] : []))
+    : [fallback];
 
 const targetForSkill = (state: CombatState, skill: FlipSkillDef, target?: number): TargetRef => {
   if (skill.targetType === 'self') return { type: 'player' };
@@ -375,7 +437,12 @@ const targetForSkill = (state: CombatState, skill: FlipSkillDef, target?: number
   return { type: 'enemy', index: fallback };
 };
 
-const collectEffects = (skill: FlipSkillDef, faces: readonly Face[]): EffectAtom[] => {
+const collectEffects = (
+  skill: FlipSkillDef,
+  faces: readonly Face[],
+  coinElements: readonly (readonly Element[])[] = [],
+  overheatActive = false
+): EffectAtom[] => {
   const headCount = faces.filter((face) => face === 'heads').length;
   const tailCount = faces.length - headCount;
   const effects: EffectAtom[] = [...skill.base];
@@ -386,6 +453,30 @@ const collectEffects = (skill: FlipSkillDef, faces: readonly Face[]): EffectAtom
   };
   addFaceEffects(skill.heads, headCount);
   addFaceEffects(skill.tails, tailCount);
+  // P7 D5 — 특정 속성 코인 면 보너스 (일반 면 보너스와 합산, 코인·면당 1회)
+  for (const bonus of skill.elementFaces ?? []) {
+    for (let i = 0; i < faces.length; i += 1) {
+      if (faces[i] === bonus.face && (coinElements[i] ?? []).includes(bonus.element)) {
+        effects.push(...bonus.effects);
+      }
+    }
+  }
+  // P7 D5 — 과열 강화 분기 (해결 후 소비는 resolveFlip finish에서).
+  // 피해 전용 보너스는 기본 피해와 같은 타격으로 합산되도록 기본부의 마지막 피해
+  // 원자 뒤에 삽입한다 (화염 정권 10→14 단일 타격 — 감사 보정).
+  const overheatBonus = overheatActive ? (skill.overheatBonus ?? []) : [];
+  if (overheatBonus.length > 0) {
+    if (overheatBonus.every((atom) => atom.kind === 'damage')) {
+      let insertAt = -1;
+      for (let i = 0; i < skill.base.length; i += 1) {
+        if (skill.base[i]!.kind === 'damage') insertAt = i;
+      }
+      if (insertAt >= 0) effects.splice(insertAt + 1, 0, ...overheatBonus);
+      else effects.push(...overheatBonus);
+    } else {
+      effects.push(...overheatBonus);
+    }
+  }
 
   let damage = 0;
   const combined: EffectAtom[] = [];
@@ -413,10 +504,9 @@ export const resolveFlip = (
   chosen?: readonly CoinUid[],
   summonChoice?: { chosenEquipment?: EquipmentDefId; chosenSummon?: number }
 ): ResolveResult => {
-  if (input.skillUsesThisTurn >= 3) throw new Error('skill use cap reached');
   const slotState = input.slots[Number(slot)];
   if (slotState === undefined) throw new Error('slot does not exist');
-  if (slotState.usedThisTurn) throw new Error('skill already used this turn');
+  if (slotState.cooldownRemaining > 0) throw new Error('skill is cooling down');
   if (skill.oncePerCombat === true && slotState.usedThisCombat) throw new Error('skill already used this combat');
 
   const placed = input.zones.placed[slot] ?? [];
@@ -424,29 +514,36 @@ export const resolveFlip = (
   const skillTarget = targetForSkill(input, skill, target);
   const events: CombatEvent[] = [{ type: 'skillUsed', slot, skill: skill.id, kind: 'flip' }];
   const turnTriggerScope = input.turnTriggers;
+  // P7 D5 — 과열 강화 분기 보유 스킬이 성공 해결되면 해결 후 과열 소비 (finish 단일 경로)
+  const consumesOverheat = input.player.overheat && (skill.overheatBonus?.length ?? 0) > 0;
   const finish = (finishedState: CombatState): ResolveResult => {
     events.push({ type: 'coinsDiscarded', coins: [...placed], reason: 'skillCost' });
-    return {
-      state: {
-        ...finishedState,
-        zones: {
-          ...finishedState.zones,
-          placed: { ...finishedState.zones.placed, [slot]: [] },
-          discard: [...finishedState.zones.discard, ...placed]
-        }
-      },
-      events
+    let state = {
+      ...finishedState,
+      zones: {
+        ...finishedState.zones,
+        placed: { ...finishedState.zones.placed, [slot]: [] },
+        discard: [...finishedState.zones.discard, ...placed]
+      }
     };
+    if (consumesOverheat && state.player.overheat) {
+      events.push({ type: 'overheatConsumed', skill: skill.id });
+      state = { ...state, player: { ...state.player, overheat: false } };
+    }
+    return { state, events };
   };
 
   let state: CombatState = {
     ...input,
     slots: input.slots.map((candidate, index) =>
       index === Number(slot)
-        ? { ...candidate, usedThisTurn: true, usedThisCombat: candidate.usedThisCombat || skill.oncePerCombat === true }
+        ? {
+            ...candidate,
+            cooldownRemaining: skillCooldown(skill),
+            usedThisCombat: candidate.usedThisCombat || skill.oncePerCombat === true
+          }
         : candidate
-    ),
-    skillUsesThisTurn: input.skillUsesThisTurn + 1
+    )
   };
 
   const rng = state.rngImpl?.flip ?? rngFrom(state.rng.flip);
@@ -458,15 +555,22 @@ export const resolveFlip = (
   }
   state = { ...state, rng: { ...state.rng, flip: rng.snapshot() } };
 
+  const coinElements = placed.map((coin) => {
+    const instance = state.coins[Number(coin)];
+    return instance === undefined ? [] : effectiveElements(instance, db);
+  });
   const tailsCount = faces.filter((face) => face === 'tails').length;
-  for (const atom of collectEffects(skill, faces)) {
-    state = applyEffectAtom(state, atom, skillTarget, db, events, chosen, {
-      turnTriggerScope,
-      tailsCount,
-      chosenEquipment: summonChoice?.chosenEquipment,
-      chosenSummon: summonChoice?.chosenSummon
-    });
-    if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
+  for (const atom of collectEffects(skill, faces, coinElements, input.player.overheat)) {
+    for (const effectTarget of targetsForSkillEffect(state, atom, skill, skillTarget)) {
+      state = applyEffectAtom(state, atom, effectTarget, db, events, chosen, {
+        turnTriggerScope,
+        tailsCount,
+        chosenEquipment: summonChoice?.chosenEquipment,
+        chosenSummon: summonChoice?.chosenSummon,
+        sourceSlot: slot
+      });
+      if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
+    }
   }
 
   for (let i = 0; i < placed.length; i += 1) {
@@ -474,13 +578,13 @@ export const resolveFlip = (
     const face = faces[i];
     if (coin === undefined || face === undefined) continue;
     for (const element of effectiveElements(coin, db)) {
-      const proc = Object.values(db.coins).find((def) => def.element === element)?.proc;
-      if (proc === undefined || proc.face !== face) continue;
-      for (const atom of proc.effects) {
-        const procTarget = targetForElementProc(state, atom, skillTarget);
-        if (procTarget === undefined) continue;
-        state = applyEffectAtom(state, atom, procTarget, db, events, undefined, { turnTriggerScope });
-        if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
+      const procs = Object.values(db.coins).find((def) => def.element === element)?.procs;
+      const atoms = face === 'heads' ? procs?.heads : procs?.tails;
+      for (const atom of atoms ?? []) {
+        for (const procTarget of targetsForElementProc(state, atom, skill, skillTarget, target)) {
+          state = applyEffectAtom(state, atom, procTarget, db, events, undefined, { turnTriggerScope });
+          if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
+        }
       }
     }
   }

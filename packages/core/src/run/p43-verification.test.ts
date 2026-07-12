@@ -50,10 +50,50 @@ const enemyDef = (value: string) => ({
 const testDb = (): ContentDb => ({
   coins: {
     basic: { id: id<CoinDefId>("basic"), element: null },
-    fire: { id: id<CoinDefId>("fire"), element: "fire" },
-    mana: { id: id<CoinDefId>("mana"), element: "mana" },
-    frost: { id: id<CoinDefId>("frost"), element: "frost" },
-    lightning: { id: id<CoinDefId>("lightning"), element: "lightning" },
+    // P7 D4 — 속성 코인 양면 proc 스키마 (런 계층 테스트에서는 플립되지 않는다)
+    fire: {
+      id: id<CoinDefId>("fire"),
+      element: "fire",
+      procs: {
+        heads: [
+          { kind: "applyStatus", status: "burn", stacks: 1, to: "target" },
+        ],
+        tails: [{ kind: "damage", amount: 1 }],
+      },
+    },
+    mana: {
+      id: id<CoinDefId>("mana"),
+      element: "mana",
+      procs: {
+        heads: [{ kind: "block", amount: 1 }],
+        tails: [{ kind: "block", amount: 2 }],
+      },
+    },
+    frost: {
+      id: id<CoinDefId>("frost"),
+      element: "frost",
+      procs: {
+        heads: [
+          {
+            kind: "applyStatus",
+            status: "frostbite",
+            stacks: 1,
+            to: "target",
+          },
+        ],
+        tails: [{ kind: "block", amount: 1 }],
+      },
+    },
+    lightning: {
+      id: id<CoinDefId>("lightning"),
+      element: "lightning",
+      procs: {
+        heads: [
+          { kind: "applyStatus", status: "shock", stacks: 1, to: "target" },
+        ],
+        tails: [{ kind: "damage", amount: 1 }],
+      },
+    },
   },
   skills: {
     s1: skillDef("s1"),
@@ -213,7 +253,9 @@ describe("P4.3 independent verification", () => {
     expect(shop.phase).toBe("shop");
     expect(completedCombatCount(shop)).toBe(2);
     expect(shop.bag).toHaveLength(10);
-    expect(shop.equippedSkills).toHaveLength(6);
+    // P7 D2 — 장착 슬롯 8 고정 (시작 6스킬 + null 패딩 2)
+    expect(shop.equippedSkills).toHaveLength(8);
+    expect(shop.equippedSkills.slice(6)).toEqual([null, null]);
 
     const next = leaveShop(shop, db);
     expect(next.phase).toBe("ready");

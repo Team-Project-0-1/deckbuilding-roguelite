@@ -51,7 +51,15 @@ const damageOnDamage = {
 const testDb = (): ContentDb => ({
   coins: {
     basic: { id: id<CoinDefId>('basic'), element: null },
-    fire: { id: id<CoinDefId>('fire'), element: 'fire' }
+    fire: {
+      id: id<CoinDefId>('fire'),
+      element: 'fire',
+      // P7 D4 — 속성 코인은 양면 proc 필수 (이 픽스처의 화염은 소비 연료로만 쓰인다)
+      procs: {
+        heads: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }],
+        tails: [{ kind: 'damage', amount: 1 }]
+      }
+    }
   },
   skills: {
     setup: {
@@ -282,8 +290,9 @@ describe('turn triggers', () => {
     const before = JSON.stringify(state);
     const preview = previewFlip(state, slot(0), testDb());
 
-    expect(Object.keys(preview.byAxis)).toEqual(['damage', 'block', 'selfDamage', 'burn', 'coinsCreated']);
-    expect(preview.expected).toEqual({ damage: 0, block: 0, selfDamage: 0, burn: 0, coinsCreated: 0 });
+    // P7 D4 — heal 축 추가 (혈액 코인/heal 원자 프리뷰)
+    expect(Object.keys(preview.byAxis)).toEqual(['damage', 'block', 'selfDamage', 'heal', 'burn', 'coinsCreated']);
+    expect(preview.expected).toEqual({ damage: 0, block: 0, selfDamage: 0, heal: 0, burn: 0, coinsCreated: 0 });
     expect(JSON.stringify(state)).toBe(before);
     expect(state.turnTriggers).toHaveLength(0);
   });

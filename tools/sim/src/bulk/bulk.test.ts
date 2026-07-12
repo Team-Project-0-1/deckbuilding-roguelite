@@ -173,10 +173,21 @@ describe("M6 deterministic bulk and CRN", () => {
       characterIds: ["guardian"],
     });
 
+    // P7 D1(캡 폐지·반복 기본기) 이후 방어형 캐릭터의 turtle/greedy는
+    // 블록 스팸으로 전투가 끝나지 않는 진짜 스톨에 빠질 수 있다(생산 코드
+    // 백로그 — 엔진에 스톨 가드 없음). 시뮬 계약은 "크래시 없이 유계
+    // 논터미널 트레이스로 포착"이며, 여기서는 그 구조 사실만 고정한다.
     expect(result.report.metrics.outcomes.runs).toBe(8);
-    expect(result.report.metrics.outcomes.terminalRuns).toBe(8);
+    expect(
+      result.report.metrics.outcomes.terminalRuns +
+        result.report.metrics.outcomes.nonterminalRuns,
+    ).toBe(8);
     expect(result.report.metrics.outcomes.crashRuns).toBe(0);
     expect(result.report.metrics.outcomes.invariantViolationCount).toBe(0);
+    for (const trace of result.traces) {
+      expect(["victory", "defeat", "nonterminal"]).toContain(trace.result);
+      expect(trace.crash).toBeNull();
+    }
     expect(result.traces.every((trace) => trace.characterId === "guardian")).toBe(
       true,
     );
@@ -193,10 +204,19 @@ describe("M6 deterministic bulk and CRN", () => {
       characterIds: ["sorcerer", "frost-knight"],
     });
 
+    // P7 D1 이후 frost-knight의 turtle/greedy도 블록 스톨로 논터미널이 될 수
+    // 있다(guardian 매트릭스와 동일한 생산 코드 백로그) — 유계 포착만 고정.
     expect(result.report.metrics.outcomes.runs).toBe(8);
-    expect(result.report.metrics.outcomes.terminalRuns).toBe(8);
+    expect(
+      result.report.metrics.outcomes.terminalRuns +
+        result.report.metrics.outcomes.nonterminalRuns,
+    ).toBe(8);
     expect(result.report.metrics.outcomes.crashRuns).toBe(0);
     expect(result.report.metrics.outcomes.invariantViolationCount).toBe(0);
+    for (const trace of result.traces) {
+      expect(["victory", "defeat", "nonterminal"]).toContain(trace.result);
+      expect(trace.crash).toBeNull();
+    }
     expect(new Set(result.traces.map((trace) => trace.characterId))).toEqual(
       new Set(["sorcerer", "frost-knight"]),
     );

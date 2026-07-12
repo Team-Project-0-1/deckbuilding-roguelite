@@ -15,7 +15,10 @@ export type KeywordTerm =
   | "attack-buff"
   | "passive"
   | "temporary"
-  | "elementCoin";
+  | "elementCoin"
+  | "cooldown"
+  | "oncePerCombat"
+  | "overheat";
 
 export const KEYWORD_GLOSSARY: Record<
   KeywordTerm,
@@ -74,7 +77,22 @@ export const KEYWORD_GLOSSARY: Record<
   elementCoin: {
     label: "속성 코인",
     description:
-      "면 결과에 따라 속성 효과가 추가로 발동하는 동전 (예: 화염 앞면 = 화상 +1).",
+      "앞면과 뒷면에 서로 다른 속성 효과가 있는 동전. 플립할 때만 발동하고, 소비하면 발동하지 않는다.",
+  },
+  // P7 D1/D5 — 쿨다운·전투당 1회·과열 (공식 용어 정본)
+  cooldown: {
+    label: "쿨다운",
+    description:
+      "사용 후 표시된 턴 수만큼 다시 쓸 수 없다. 내 턴이 시작될 때 1씩 줄어든다. 쿨다운 0(반복) 스킬은 코인이 남는 한 같은 턴에 계속 쓸 수 있다.",
+  },
+  oncePerCombat: {
+    label: "전투당 1회",
+    description: "이번 전투에서 한 번만 쓸 수 있다. 다음 전투에서 다시 쓸 수 있다.",
+  },
+  overheat: {
+    label: "과열",
+    description:
+      "화염 코인을 소비하는 스킬로 진입한다. 하나만 유지되고 턴이 지나도 남는다. 과열 강화 스킬을 성공시키면 강화 효과가 적용된 뒤 과열이 사라진다.",
   },
 };
 

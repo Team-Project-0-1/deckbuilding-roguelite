@@ -23,12 +23,14 @@ describe('M5 full-run simulator', () => {
     // P6 재고정: 3막 그래프에서 guardian fight-first는 더 길게 생존하며 보상
     // 코인으로 가방이 26까지 자란다 — balance-provisional 관측치.
     expect(guardian.summary.finalBag).toHaveLength(26);
-    expect(guardian.summary.finalEquippedSkills).toHaveLength(6);
+    // P7 D2: 장착 슬롯은 항상 8 (빈 슬롯 = null, summary 직렬화는 String()으로 "null")
+    expect(guardian.summary.finalEquippedSkills).toHaveLength(8);
   });
 
   it('completes the deterministic generated-graph run with boundary state intact', () => {
-    // P6 재고정 (1.1.0-p6 결속): 3막×10방문 그래프 + 화염 격투가 시작 셋(jab 계열).
-    // seed 42 fight-first는 1막 방문2 수문장에서 패배한다 — balance-provisional 관측치
+    // P7 재고정 (1.2.0-p7 결속): 3막×10방문 그래프 + 캡 폐지/쿨다운(D1) + 슬롯 8·시작 4스킬(D2).
+    // warrior 시작 셋 = jab·fist-guard·burning-fist·inner-passion + 빈 슬롯 4(null).
+    // seed 42 fight-first는 여전히 11번째 전투에서 패배한다 — balance-provisional 관측치
     // (baseline 정책 우선순위가 신규 격투 스킬 ID를 모른다는 한계 포함, 백로그 보고).
     const simulation = simulateRun('42');
 
@@ -55,10 +57,10 @@ describe('M5 full-run simulator', () => {
       seed: '42',
       result: 'defeat',
       combatsCompleted: 11,
-      turnsPerCombat: [3, 3, 4, 3, 3, 3, 3, 4, 3, 4, 2], // 1.1.0-p6 재고정 — 막 스케일 ×1.15/1.3·막 보스 전체 회복 (balance-provisional)
+      turnsPerCombat: [3, 4, 4, 3, 4, 3, 3, 5, 4, 5, 2], // 1.2.0-p7 재고정 — 캡 폐지·쿨다운·기본기 4/4 하향·P7 봇 정책 확장(inner-passion 우선) 반영 (balance-provisional)
       carriedHp: 0,
-      finalBag: ["basic", "basic", "basic", "basic", "basic", "basic", "basic", "basic", "fire", "fire", "fire", "fire", "basic", "fire", "fire", "fire", "mana", "mana", "mana", "mana"],
-      finalEquippedSkills: ["jab", "fist-guard", "burning-fist", "heart-of-flame", "ignite-sword", "conflagration"],
+      finalBag: ["basic", "basic", "basic", "basic", "basic", "basic", "basic", "basic", "fire", "fire", "fire", "fire", "basic", "fire", "fire", "fire", "basic", "basic", "basic", "basic"],
+      finalEquippedSkills: ["jab", "fist-guard", "burning-fist", "inner-passion", "null", "null", "null", "conflagration"],
       encounterOrder: [
         ['raider'],
         ['gatekeeper'],

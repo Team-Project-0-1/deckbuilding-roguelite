@@ -134,8 +134,8 @@ const waitForTurnBuffTooltip = (page, expected, visible) =>
     { text: expected, shouldBeVisible: visible },
   );
 
-const BURN_DESCRIPTION =
-  "대상의 턴이 끝날 때 스택만큼 피해를 준다 (방어 무시). 그 뒤 스택이 1 줄어든다.";
+const TEMPORARY_COIN_DESCRIPTION =
+  "이번 전투에서만 쓰는 동전. 전투가 끝나면 사라진다.";
 
 const waitForCombatOrBoundary = (page, timeout = 15000) =>
   page.waitForFunction(
@@ -163,10 +163,12 @@ const waitForOpaqueSkillCards = async (page) =>
     return (
       row !== null &&
       !row.classList.contains("dimmed") &&
-      cards.length >= 6 &&
-      cards.every(
+      cards.length === 8 &&
+      cards
+        .filter((card) => !card.classList.contains("empty-slot"))
+        .every(
         (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
-      )
+        )
     );
   });
 
@@ -221,42 +223,20 @@ const useFlipSkill = async (page, slotIndex) => {
 
 const winCurrentCombat = async (page) => {
   for (let turn = 0; turn < 18; turn += 1) {
-    let actions = 0;
-    if (await useConsumeIfReady(page, 4)) actions += 1;
-    if (
-      (await page
-        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
-        .count()) > 0
-    )
-      return;
-    if (actions < 3 && (await useFlipSkill(page, 2))) actions += 1;
-    if (
-      (await page
-        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
-        .count()) > 0
-    )
-      return;
-    if (actions < 3 && (await useFlipSkill(page, 1))) actions += 1;
-    if (
-      (await page
-        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
-        .count()) > 0
-    )
-      return;
-    if (actions < 3 && (await useFlipSkill(page, 0))) actions += 1;
-    if (
-      (await page
-        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
-        .count()) > 0
-    )
-      return;
-    if (actions < 3) await useFlipSkill(page, 3);
-    if (
-      (await page
-        .locator('[data-testid="reward-overlay"], [data-testid="run-result"]')
-        .count()) > 0
-    )
-      return;
+    for (let action = 0; action < 10; action += 1) {
+      const atBoundary =
+        (await page
+          .locator(
+            '[data-testid="reward-overlay"], [data-testid="run-result"]',
+          )
+          .count()) > 0;
+      if (atBoundary) return;
+      if (await useConsumeIfReady(page, 3)) continue;
+      if (await useFlipSkill(page, 2)) continue;
+      if (await useFlipSkill(page, 0)) continue;
+      if (await useFlipSkill(page, 1)) continue;
+      break;
+    }
     await page.locator(".end-turn").click();
     await waitForCombatOrBoundary(page, 20000);
     if (
@@ -381,8 +361,9 @@ const winCurrentCombat = async (page) => {
     { timeout: 15000 },
   );
   check(
-    "S1 사용됨 표시",
-    (await page.locator(".skill-card.spent").count()) >= 1,
+    "S1 기본기 반복 표시",
+    (await page.locator(".skill-card").first().locator(".repeat-label").count()) ===
+      1 && (await page.locator(".skill-card").first().getAttribute("class"))?.includes("spent") === false,
   );
   check("S1 해결 후 손패 4개", (await handCount(page)) === 4);
   check("S1 콘솔/페이지 에러 0", errors.length === 0, errors.join(" | "));
@@ -463,8 +444,9 @@ const winCurrentCombat = async (page) => {
     { timeout: 15000 },
   );
   check(
-    "S3 키보드 사용 완료",
-    (await page.locator(".skill-card.spent").count()) >= 1,
+    "S3 키보드 사용 후 기본기 반복 가능",
+    (await page.locator(".skill-card").first().locator(".repeat-label").count()) ===
+      1 && (await page.locator(".skill-card").first().getAttribute("class"))?.includes("spent") === false,
   );
   check("S3 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
@@ -576,7 +558,7 @@ const winCurrentCombat = async (page) => {
 
 // ---------- 시나리오 7: 다중 슬롯·다중 코인 스트레스 (한 판 연속) ----------
 // 사용자 재현 보고 검증: ① 불타는 일격 부분 장전 생존 ② 여러 스킬 동시 장전 후 사용
-// (턴 3회 캡 상태에서 완충 카드 렌더 — 구 프리뷰 크래시 경로) ③ 연속 장전 무잠금
+// (행동 제한 없이 4회 연속 사용 — 구 프리뷰 크래시 경로) ③ 연속 장전 무잠금
 // ④ 플립·면 공개가 피해 피드백보다 먼저 ⑤ 턴 전환 후 낡은 상태 없음
 {
   const { page, errors } = await boot();
@@ -644,24 +626,25 @@ const winCurrentCombat = async (page) => {
     (await card(2).locator(".preview-tip").count()) === 1,
   );
 
-  // 6. 점화·베기 사용 → 턴 3회 캡. 완충 스트라이크가 남은 채 렌더 — 구 크래시 경로
-  await placeInto(3, 0);
-  await useCard(3);
+  // 6. 스트라이크 사용 후 기본 공격 2회 — 별도 행동 카운트 없이 한 턴 4회 행동
+  await useCard(2);
   await placeInto(0, 0);
   await useCard(0);
-  check("S7 캡 상태 화면 생존 (완충 카드 렌더)", await shellAlive(page));
+  await placeInto(0, 0);
+  await useCard(0);
+  check("S7 4회 행동 후 화면 생존", await shellAlive(page));
   check(
-    "S7 캡 상태 스트라이크 사용 불가 (ready 아님)",
+    "S7 사용한 스트라이크는 쿨타임 상태",
     (await card(2).evaluate((el) => el.classList.contains("ready"))) === false,
   );
   check(
-    "S7 캡 상태 프리뷰 숨김",
+    "S7 사용한 스트라이크 프리뷰 숨김",
     (await card(2).locator(".preview-tip").count()) === 0,
   );
-  check("S7 캡 상태 에러 0", errors.length === 0, errors.join(" | "));
-  await page.screenshot({ path: `${outDir}/14-capped-loaded.png` });
+  check("S7 4회 행동 에러 0", errors.length === 0, errors.join(" | "));
+  await page.screenshot({ path: `${outDir}/14-four-actions.png` });
 
-  // 7. 턴 종료 — E0/D7: 미선언 장전 코인은 손패 복귀 후 폐기, 다음 턴 5장·낡은 면 0
+  // 7. 턴 종료 — 다음 턴 드로우·쿨타임 복귀·낡은 면 제거 확인
   await page.locator(".end-turn").click();
   await page.waitForFunction(
     () =>
@@ -1085,12 +1068,12 @@ const winCurrentCombat = async (page) => {
   await page.screenshot({ path: `${outDir}/26-discard-inspector.png` });
   await page.keyboard.press("Escape");
 
-  // 시작 손패의 영구 화염 동전을 점화 검술로 소비 → 전투 중 제외, 전투 후 복귀 안내.
+  // 시작 손패의 영구 화염 동전을 내면의 열정으로 소비 → 전투 중 제외, 전투 후 복귀 안내.
   check(
     "S11 소비 전 화염 동전 보유",
     (await page.locator(".hand-tray .coin.fire").count()) >= 1,
   );
-  await page.locator(".skill-card").nth(4).locator(".card-title").click();
+  await page.locator(".skill-card").nth(3).locator(".card-title").click();
   const sawExhaustFeedback = await page
     .waitForFunction(
       () =>
@@ -1193,10 +1176,12 @@ const winCurrentCombat = async (page) => {
       return (
         row !== null &&
         !row.classList.contains("dimmed") &&
-        cards.length === 6 &&
-        cards.every(
+        cards.length === 8 &&
+        cards
+          .filter((card) => !card.classList.contains("empty-slot"))
+          .every(
           (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
-        )
+          )
       );
     };
     await page.waitForFunction(cardsAreStable);
@@ -1446,9 +1431,11 @@ const winCurrentCombat = async (page) => {
     await page
       .locator(".skill-card")
       .evaluateAll((cards) =>
-        cards.every(
+        cards
+          .filter((card) => !card.classList.contains("empty-slot"))
+          .every(
           (card) => Number.parseFloat(getComputedStyle(card).opacity) === 1,
-        ),
+          ),
       ),
   );
   await page.screenshot({ path: `${outDir}/36-m5-combat-stable-1920.png` });
@@ -1487,11 +1474,11 @@ const winCurrentCombat = async (page) => {
     await page2.goto(baseUrl, { waitUntil: "networkidle" });
     return { page: page2, errors: errors2, context };
   };
-  // v6 저장 픽스처 — acts 메타 포함 = P6 규칙 적용 (스킬 제안 원천 = 엘리트 정산).
+  // v7 저장 픽스처 — acts 메타 포함 = P6+P7 규칙 적용 (스킬 제안 원천 = 엘리트 정산).
   // 경제 보존: 골드 105 = 완료 노드(전투 35 + 엘리트 70) 총수입과 일치.
   const injectBase = {
-    version: 6,
-    contentVersion: "1.1.0-p6",
+    version: 7,
+    contentVersion: "1.2.0-p7",
     runSeed: "S12-INJECT",
     character: "warrior",
     currentHp: 63,
@@ -1501,11 +1488,13 @@ const winCurrentCombat = async (page) => {
       "jab",
       "fist-guard",
       "burning-fist",
-      "ignite",
-      "ignite-sword",
-      "flame-rampage",
+      "inner-passion",
+      null,
+      null,
+      null,
+      null,
     ],
-    upgradedSlots: [false, false, false, false, false, false],
+    upgradedSlots: [false, false, false, false, false, false, false, false],
     acquiredPassives: [],
     gold: 105,
     graph: {
@@ -1559,8 +1548,8 @@ const winCurrentCombat = async (page) => {
     );
     await choices.first().click();
     check(
-      "S12 스킬 선택 후 명시적 6슬롯 교체 화면",
-      (await p2.locator('[data-testid^="replace-slot-"]').count()) === 6,
+      "S12 스킬 선택 후 명시적 8슬롯 교체 화면",
+      (await p2.locator('[data-testid^="replace-slot-"]').count()) === 8,
     );
     await p2.locator('[data-testid="replace-cancel"]').click();
     check(
@@ -1947,14 +1936,14 @@ const winCurrentCombat = async (page) => {
 // ---------- 시나리오 14: UX 키워드 툴팁 접근성 ----------
 {
   const { page, errors } = await boot();
-  // 화상 키워드 버튼을 텍스트로 전역 선택 — 슬롯 인덱스 가정 금지 (콘텐츠 순서가 바뀌어도 유효)
+  // 임시 코인 키워드 버튼을 텍스트로 전역 선택 — 슬롯 인덱스 가정 금지
   const trigger = page
     .locator(".card-effects .kw")
-    .filter({ hasText: "화상" })
+    .filter({ hasText: "임시" })
     .first();
   const card = page
     .locator(".skill-card")
-    .filter({ has: page.locator(".card-effects .kw", { hasText: "화상" }) })
+    .filter({ has: page.locator(".card-effects .kw", { hasText: "임시" }) })
     .first();
   const handBefore = await handCount(page);
   const spentBefore = await page.locator(".skill-card.spent").count();
@@ -1962,48 +1951,48 @@ const winCurrentCombat = async (page) => {
   check("S14 카드 효과 키워드 트리거 존재", (await trigger.count()) >= 1);
   await card.hover();
   await trigger.hover();
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, true);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, true);
   check(
     "S14 hover 툴팁 정의 표시",
-    await keywordTooltipVisible(page, BURN_DESCRIPTION),
+    await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION),
   );
   await page.mouse.move(20, 200);
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, false);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, false);
   check(
     "S14 hover 해제 툴팁 닫힘",
-    !(await keywordTooltipVisible(page, BURN_DESCRIPTION)),
+    !(await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION)),
   );
 
   await trigger.focus();
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, true);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, true);
   check(
     "S14 Tab 포커스 툴팁 표시",
-    await keywordTooltipVisible(page, BURN_DESCRIPTION),
+    await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION),
   );
   await page.keyboard.press("Escape");
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, false);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, false);
 
   await trigger.click();
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, true);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, true);
   await page.mouse.move(20, 200);
   check(
     "S14 클릭 툴팁 열림 유지",
-    await keywordTooltipVisible(page, BURN_DESCRIPTION),
+    await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION),
   );
   await page.keyboard.press("Escape");
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, false);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, false);
   check(
     "S14 Escape 클릭 툴팁 닫힘",
-    !(await keywordTooltipVisible(page, BURN_DESCRIPTION)),
+    !(await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION)),
   );
 
   await trigger.click();
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, true);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, true);
   await page.mouse.click(20, 200);
-  await waitForKeywordTooltip(page, BURN_DESCRIPTION, false);
+  await waitForKeywordTooltip(page, TEMPORARY_COIN_DESCRIPTION, false);
   check(
     "S14 바깥 클릭 툴팁 닫힘",
-    !(await keywordTooltipVisible(page, BURN_DESCRIPTION)),
+    !(await keywordTooltipVisible(page, TEMPORARY_COIN_DESCRIPTION)),
   );
   check(
     "S14 키워드 클릭이 카드 사용 오발 없음",
@@ -2023,20 +2012,24 @@ const winCurrentCombat = async (page) => {
   const slash = await rowsText(0);
   const guard = await rowsText(1);
   const burningStrike = await rowsText(2);
-  const ignition = await rowsText(4);
+  const ignition = await rowsText(3);
   const cardMetrics = await page.locator(".skill-card").evaluateAll((cards) =>
     cards.map((card) => {
       const rect = card.getBoundingClientRect();
       return {
         width: Math.round(rect.width),
         rows: card.querySelectorAll(".card-effect-row").length,
+        empty: card.classList.contains("empty-slot"),
       };
     }),
   );
+  const equippedMetrics = cardMetrics.filter((item) => !item.empty);
 
   check(
-    "S15 모든 스킬 카드 효과 행 존재",
-    cardMetrics.length >= 6 && cardMetrics.slice(0, 6).every((item) => item.rows >= 1),
+    "S15 장착 스킬 4종 효과 행 존재",
+    cardMetrics.length === 8 &&
+      equippedMetrics.length === 4 &&
+      equippedMetrics.every((item) => item.rows >= 1),
     JSON.stringify(cardMetrics),
   );
   check(
@@ -2078,7 +2071,7 @@ const winCurrentCombat = async (page) => {
   );
   // 회귀 (행 클리핑): 어떤 카드도 효과 행이 세로로 잘리면 안 된다 — 부족분은 아트가 양보
   const rowClipReport = await page.locator(".skill-card").evaluateAll((cards) =>
-    cards.slice(0, 6).map((card) => {
+    cards.filter((card) => !card.classList.contains("empty-slot")).map((card) => {
       const wrap = card.querySelector(".card-effects");
       if (wrap === null) return { overflow: true, title: "" };
       return {
@@ -2093,13 +2086,13 @@ const winCurrentCombat = async (page) => {
     JSON.stringify(rowClipReport.filter((item) => item.overflow)),
   );
   check(
-    "S15 점화 검술 비용 행",
+    "S15 내면의 발화 비용 행",
     ignition.includes("비용") && ignition.includes("소비"),
     ignition.replace(/\n/g, " / "),
   );
   check(
     "S15 카드 폭 기존 한계 유지",
-    cardMetrics.slice(0, 6).every((item) => item.width <= 126),
+    cardMetrics.every((item) => item.width <= 126),
     cardMetrics.map((item) => String(item.width)).join(","),
   );
   check("S15 에러 0", errors.length === 0, errors.join(" | "));
@@ -2323,25 +2316,15 @@ const winCurrentCombat = async (page) => {
     else await waitForCombatOrBoundary(page);
     return true;
   };
-  const useConsumeAttackAt = async (page, cardIndex, target) => {
-    const card = page.locator(".skill-card").nth(cardIndex);
-    if ((await card.locator(".card-title").getAttribute("aria-disabled")) !== "false")
-      return false;
-    await card.locator(".card-title").click();
-    if ((await page.locator(".unit.enemy.targetable").count()) > 0)
-      await confirmTarget(page, target);
-    else await waitForCombatOrBoundary(page);
-    return true;
-  };
   const defeatEnemy = async (page, target) => {
     for (let turn = 0; turn < 5; turn += 1) {
       if ((await enemyHpList(page))[target] <= 0) return true;
       await useArmedAttackAt(page, 2, 2, target);
       if ((await enemyHpList(page))[target] <= 0) return true;
-      await useConsumeAttackAt(page, 4, target);
-      if ((await enemyHpList(page))[target] <= 0) return true;
-      await useArmedAttackAt(page, 0, 1, target);
-      if ((await enemyHpList(page))[target] <= 0) return true;
+      for (let attack = 0; attack < 3; attack += 1) {
+        if (!(await useArmedAttackAt(page, 0, 1, target))) break;
+        if ((await enemyHpList(page))[target] <= 0) return true;
+      }
       if ((await page.locator(".end-turn:not(:disabled)").count()) === 0)
         return false;
       await page.locator(".end-turn").click();
@@ -2646,9 +2629,8 @@ const winCurrentCombat = async (page) => {
     .allInnerTexts();
   check(
     "S21 수호자 전용 스킬 카드 렌더",
-    ["수호 타격", "마나 방벽", "방패 반격", "마나 샘"].every((name) =>
-      cardTitles.includes(name),
-    ),
+    ["수호 타격", "마나 방벽"].every((name) => cardTitles.includes(name)) &&
+      cardTitles.filter((name) => name === "빈 슬롯").length === 4,
     cardTitles.join(","),
   );
   check(
@@ -2936,13 +2918,13 @@ const winCurrentCombat = async (page) => {
 
 // ---------- 시나리오 24: P3.4 신규 캐릭터 부팅·전용 스킬 스모크 ----------
 {
-  for (const [character, skillName, coinClass, statusName, chipSelector] of [
+  for (const [character, skillId, skillName, coinClass, statusName, chipSelector] of [
     // 정전기장·한파: base가 상태를 확정 부여 — 면 결과 무관한 결정론 검증
-    ["sorcerer", "정전기장", "lightning", "감전", ".shock-chip"],
-    ["frost-knight", "한파", "frost", "동상", ".frost-chip"],
+    ["sorcerer", "static-field", "정전기장", "lightning", "감전", ".shock-chip"],
+    ["frost-knight", "chilling-field", "한파", "frost", "동상", ".frost-chip"],
   ]) {
     const { page, errors } = await boot(undefined, {
-      url: `${baseUrl}?seed=${SEED}&character=${character}`,
+      url: urlWith({ character, skills: `${skillId},slash,guard` }),
     });
     check(
       `S24 ${character} 부팅 대표 코인 2닢`,
@@ -2963,8 +2945,9 @@ const winCurrentCombat = async (page) => {
     // 주머니 인스펙터 — 신규 원소 그룹이 정본 element 클래스로 유색 렌더 (감사 2)
     await page.locator(".pouch-circle").click();
     check(
-      `S24 ${character} 주머니 인스펙터 ${coinClass} 코인 시각`,
-      (await page.locator(`.pouch-pop .pop-coin.${coinClass}`).count()) === 1,
+      `S24 ${character} ${coinClass} 코인 시각`,
+      (await page.locator(`.pouch-pop .pop-coin.${coinClass}`).count()) >= 1 ||
+        (await page.locator(`.hand-tray .coin.${coinClass}`).count()) >= 1,
     );
     await page.locator(".pouch-circle").click();
     check(
@@ -3015,21 +2998,23 @@ const winCurrentCombat = async (page) => {
 }
 
 // ---------- 시나리오 25: P4.3 상점·갈림길 — 저장 주입 결정론 검증 ----------
-// v6 저장을 localStorage에 주입해 상점/갈림길 화면을 직접 부팅한다 (테스트 전용 경로,
+// v7 저장을 localStorage에 주입해 상점/갈림길 화면을 직접 부팅한다 (테스트 전용 경로,
 // 정식 콘텐츠 무접촉). 가격·경계 진실은 코어/저장 검증기가 소유 — 여기선 DOM 반영만 확인.
 // P6: 상점 패시브 1슬롯 진열·구매 커버리지 추가.
 {
-  const CONTENT_VERSION_PIN = "1.1.0-p6"; // 버전 승격 시 골든처럼 함께 재고정
+  const CONTENT_VERSION_PIN = "1.2.0-p7"; // 버전 승격 시 골든처럼 함께 재고정
   const WARRIOR_SKILLS = [
     "jab",
     "fist-guard",
     "burning-fist",
-    "ignite",
-    "ignite-sword",
-    "flame-rampage",
+    "inner-passion",
+    null,
+    null,
+    null,
+    null,
   ];
   const baseSave = {
-    version: 6,
+    version: 7,
     contentVersion: CONTENT_VERSION_PIN,
     runSeed: "S25-SHOP",
     character: "warrior",
@@ -3037,7 +3022,7 @@ const winCurrentCombat = async (page) => {
     maxHp: 70,
     bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
     equippedSkills: WARRIOR_SKILLS,
-    upgradedSlots: [false, false, false, false, false, false],
+    upgradedSlots: [false, false, false, false, false, false, false, false],
     acquiredPassives: [],
     gold: 150,
     nodeChoices: [0, 0, 0],
@@ -3261,7 +3246,7 @@ const winCurrentCombat = async (page) => {
 }
 
 // ---------- 시나리오 26: P4.4 이벤트 4종 — 저장 주입 결정론 검증 ----------
-// pendingEvent는 롤 결과가 저장되는 사실이므로 v6 저장 주입으로 4종을 각각 고정한다.
+// pendingEvent는 롤 결과가 저장되는 사실이므로 v7 저장 주입으로 4종을 각각 고정한다.
 {
   const injectEvent = async (eventId, extra = {}) => {
     // 경제 보존 법칙: 골드 120은 엘리트 2승(140) 프리픽스로 정당화한다
@@ -3272,8 +3257,8 @@ const winCurrentCombat = async (page) => {
       [{ id: "v3", kind: "boss", encounter: ["ember-archmage"] }],
     ];
     const save = {
-      version: 6,
-      contentVersion: "1.1.0-p6",
+      version: 7,
+      contentVersion: "1.2.0-p7",
       runSeed: "S26-EVENT",
       character: "warrior",
       currentHp: 63,
@@ -3283,11 +3268,13 @@ const winCurrentCombat = async (page) => {
         "jab",
         "fist-guard",
         "burning-fist",
-        "ignite",
-        "ignite-sword",
-        "flame-rampage",
+        "inner-passion",
+        null,
+        null,
+        null,
+        null,
       ],
-      upgradedSlots: [false, false, false, false, false, false],
+      upgradedSlots: [false, false, false, false, false, false, false, false],
       acquiredPassives: [],
       gold: 120,
       graph: { layers },
@@ -3477,8 +3464,8 @@ const winCurrentCombat = async (page) => {
       v: document.documentElement.scrollHeight <= window.innerHeight,
     }));
   const mobileSave = (phase, extra = {}) => ({
-    version: 6,
-    contentVersion: "1.1.0-p6",
+    version: 7,
+    contentVersion: "1.2.0-p7",
     runSeed: "S28",
     character: "warrior",
     currentHp: 63,
@@ -3488,11 +3475,13 @@ const winCurrentCombat = async (page) => {
       "jab",
       "fist-guard",
       "burning-fist",
-      "ignite",
-      "ignite-sword",
-      "flame-rampage",
+      "inner-passion",
+      null,
+      null,
+      null,
+      null,
     ],
-    upgradedSlots: [false, false, false, false, false, false],
+    upgradedSlots: [false, false, false, false, false, false, false, false],
     acquiredPassives: [],
     // 경제 보존: 엘리트 2승 총수입 140 이내
     gold: 135,
@@ -3684,8 +3673,8 @@ const winCurrentCombat = async (page) => {
     await page.keyboard.press("Enter");
   };
   const kbSave = (phase, extra = {}) => ({
-    version: 6,
-    contentVersion: "1.1.0-p6",
+    version: 7,
+    contentVersion: "1.2.0-p7",
     runSeed: "S29",
     character: "warrior",
     currentHp: 63,
@@ -3695,11 +3684,13 @@ const winCurrentCombat = async (page) => {
       "jab",
       "fist-guard",
       "burning-fist",
-      "ignite",
-      "ignite-sword",
-      "flame-rampage",
+      "inner-passion",
+      null,
+      null,
+      null,
+      null,
     ],
-    upgradedSlots: [false, false, false, false, false, false],
+    upgradedSlots: [false, false, false, false, false, false, false, false],
     acquiredPassives: [],
     gold: 135,
     graph: {
@@ -3883,8 +3874,8 @@ const winCurrentCombat = async (page) => {
 // P6: rest/treasure 페이즈 2케이스 추가 (신규 노드의 리로드 영속 계약).
 {
   const phaseSave = (phase, extra = {}) => ({
-    version: 6,
-    contentVersion: "1.1.0-p6",
+    version: 7,
+    contentVersion: "1.2.0-p7",
     runSeed: "S31",
     character: "warrior",
     currentHp: 63,
@@ -3894,11 +3885,13 @@ const winCurrentCombat = async (page) => {
       "jab",
       "fist-guard",
       "burning-fist",
-      "ignite",
-      "ignite-sword",
-      "flame-rampage",
+      "inner-passion",
+      null,
+      null,
+      null,
+      null,
     ],
-    upgradedSlots: [false, false, false, false, false, false],
+    upgradedSlots: [false, false, false, false, false, false, false, false],
     acquiredPassives: [],
     gold: 60,
     graph: {
@@ -4156,24 +4149,26 @@ const bootV6 = async (save, waitSel) => {
   if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
   return { page, errors, context };
 };
-const V6_WARRIOR_SKILLS = [
+const V7_WARRIOR_SKILLS = [
   "jab",
   "fist-guard",
   "burning-fist",
-  "ignite",
-  "ignite-sword",
-  "flame-rampage",
+  "inner-passion",
+  null,
+  null,
+  null,
+  null,
 ];
 const v6Save = (overrides = {}) => ({
-  version: 6,
-  contentVersion: "1.1.0-p6",
+  version: 7,
+  contentVersion: "1.2.0-p7",
   runSeed: "S33-P6",
   character: "warrior",
   currentHp: 63,
   maxHp: 70,
   bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
-  equippedSkills: V6_WARRIOR_SKILLS,
-  upgradedSlots: [false, false, false, false, false, false],
+  equippedSkills: V7_WARRIOR_SKILLS,
+  upgradedSlots: [false, false, false, false, false, false, false, false],
   acquiredPassives: [],
   gold: 35,
   nodeChoices: [0, 0, 0],
@@ -4218,11 +4213,11 @@ const phaseAttr = (page, name) =>
       "+21",
     ),
   );
-  // P6 warrior 시작 스킬 6종은 전부 upgrade 정의 보유 — 6슬롯 모두 활성
+  // P7 warrior 시작 스킬 4종은 모두 upgrade 정의 보유 — 빈 슬롯은 목록에서 제외
   const upgradeButtons = page.locator('[data-testid^="rest-upgrade-"]');
   check(
-    "S33 강화 리스트 6슬롯 전부 활성 (전 스킬 강화 정의)",
-    (await upgradeButtons.count()) === 6 &&
+    "S33 강화 리스트 시작 스킬 4종 전부 활성",
+    (await upgradeButtons.count()) === 4 &&
       (await upgradeButtons.evaluateAll((buttons) =>
         buttons.every((button) => !button.disabled),
       )),
@@ -4248,14 +4243,16 @@ const phaseAttr = (page, name) =>
       combatIndex: 2,
       gold: 70,
       restUpgrades: 1,
-      upgradedSlots: [false, true, false, false, false, false],
+      upgradedSlots: [false, true, false, false, false, false, false, false],
       equippedSkills: [
         "jab",
         "fist-guard",
         "burning-fist",
-        "ignite",
-        "ignite-sword",
         "flame-sword", // upgrade 미정의 스킬 (화염 붕대)
+        null,
+        null,
+        null,
+        null,
       ],
       graph: {
         layers: [
@@ -4279,9 +4276,9 @@ const phaseAttr = (page, name) =>
   );
   check(
     "S33 강화 미정의 스킬 비활성 + 사유 title",
-    (await page.locator('[data-testid="rest-upgrade-5"]').isDisabled()) &&
+    (await page.locator('[data-testid="rest-upgrade-3"]').isDisabled()) &&
       (await page
-        .locator('[data-testid="rest-upgrade-5"]')
+        .locator('[data-testid="rest-upgrade-3"]')
         .getAttribute("title")) === "강화가 정의되지 않은 스킬",
   );
   await page.locator('[data-testid="rest-upgrade-0"]').click();
@@ -4494,9 +4491,9 @@ const phaseAttr = (page, name) =>
     .allInnerTexts();
   check(
     "S36 마도기사 전용 스킬 카드 렌더",
-    ["마력 충전", "명령", "완충 방벽", "방패 전개"].every((name) =>
+    ["마력 충전", "명령"].every((name) =>
       arcanistTitles.some((title) => title.includes(name)),
-    ),
+    ) && arcanistTitles.filter((name) => name === "빈 슬롯").length === 4,
     arcanistTitles.join(","),
   );
   await page.screenshot({ path: `${outDir}/64-p6-arcanist-summon.png` });

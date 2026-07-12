@@ -137,7 +137,7 @@ const groupTurns = (
 
 const hasConsumeOpportunity = (state: CombatState): boolean =>
   state.slots.some((slot, index) => {
-    if (slot.usedThisTurn) return false;
+    if (slot.cooldownRemaining > 0 || slot.skillId === null) return false;
     const skill = contentDb.skills[String(slot.skillId)];
     if (skill === undefined || skill.type !== "consume") return false;
     const validFuel = state.zones.hand.filter((coin) =>
@@ -149,7 +149,7 @@ const hasConsumeOpportunity = (state: CombatState): boolean =>
 
 const hasMultiCoinOpportunity = (state: CombatState): boolean =>
   state.slots.some((slot, index) => {
-    if (slot.usedThisTurn) return false;
+    if (slot.cooldownRemaining > 0 || slot.skillId === null) return false;
     const skill = contentDb.skills[String(slot.skillId)];
     if (skill === undefined || skill.type !== "flip" || skill.cost < 2) {
       return false;

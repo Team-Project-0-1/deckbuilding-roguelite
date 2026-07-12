@@ -32,11 +32,12 @@ describe("skillEffectRows", () => {
   });
 
   // 회귀 (값 잘림): 면 보너스 행은 값이 먼저 오고 +로 가산임을 명시한다 — 잘려도 수치는 보인다
+  // P7 D2 기본기 하향: slash 기본 4 / 앞면 +3 (반복 기본기가 유료 스킬을 지배하지 않게)
   it("puts the bonus magnitude first with a plus sign", () => {
     const slashHeads = skillEffectRows(skill("slash")).find(
       (row) => row.kind === "heads",
     );
-    expect(slashHeads?.segments[0]?.text).toBe("피해 +4");
+    expect(slashHeads?.segments[0]?.text).toBe("피해 +3");
     const strikeHeads = skillEffectRows(skill("burning-strike")).find(
       (row) => row.kind === "heads",
     );
@@ -56,6 +57,29 @@ describe("skillEffectRows", () => {
       "base",
       "heads",
       "tails",
+    ]);
+  });
+
+  // P7 신규 원자 문구 — draw / nextTurnDraw / reduceCooldown / enterOverheat
+  it("renders the P7 draw and cooldown atoms", () => {
+    const focus = skillEffectRows(skill("battle-focus"));
+    expect(focus[0]?.segments[0]?.text).toBe("코인 2개 뽑기");
+    const focusHeads = focus.find((row) => row.kind === "heads");
+    expect(focusHeads?.segments[0]?.text).toBe("다음 턴 뽑기 +1");
+
+    const regroup = skillEffectRows(skill("regroup"));
+    expect(regroup[0]?.segments.map((segment) => segment.text)).toEqual([
+      "다른 스킬 쿨다운 -1",
+      "코인 1개 뽑기",
+    ]);
+  });
+
+  it("tags overheat entry with the overheat keyword", () => {
+    const rows = skillEffectRows(skill("inner-passion"));
+    const effect = rows.find((row) => row.kind === "effect");
+    expect(effect?.segments).toEqual([
+      { text: "과열 진입", term: "overheat" },
+      { text: "코인 1개 뽑기" },
     ]);
   });
 

@@ -2,6 +2,7 @@ import { LEGACY_CONTENT_VERSIONS } from "@game/content";
 import {
   RUN_ENCOUNTERS,
   RUN_SAVE_VERSION,
+  MAX_SKILL_SLOTS,
   completedCombatCount,
   nodeGoldReward,
   rolledEventIdFor,
@@ -97,6 +98,10 @@ const sameStrings = (
   left.length === right.length &&
   left.every((value, index) => String(value) === String(right[index]));
 
+const isSkillSlotArray = (value: unknown): value is (string | null)[] =>
+  Array.isArray(value) &&
+  value.every((entry) => entry === null || typeof entry === "string");
+
 const isKnownCoin = (value: string, context: RunValidationContext): boolean =>
   context.coins[value] !== undefined;
 const isKnownSkill = (value: string, context: RunValidationContext): boolean =>
@@ -112,16 +117,37 @@ const legacyGraphForSave = (): RunSave["graph"] => ({
   ]),
 });
 
+// P7 D2 — v7 공통 패딩: 장착 8칸(null=빈 슬롯) / 강화 8칸(false)
+const MAX_SLOTS = MAX_SKILL_SLOTS;
+
+const paddedToV7 = (value: Record<string, unknown>): Record<string, unknown> => {
+  const equipped = Array.isArray(value.equippedSkills)
+    ? [...(value.equippedSkills as unknown[])]
+    : [];
+  while (equipped.length < MAX_SLOTS) equipped.push(null);
+  const upgraded = Array.isArray(value.upgradedSlots)
+    ? [...(value.upgradedSlots as unknown[])]
+    : [];
+  while (upgraded.length < MAX_SLOTS) upgraded.push(false);
+  return {
+    ...value,
+    version: RUN_SAVE_VERSION,
+    equippedSkills: equipped,
+    upgradedSlots: upgraded,
+  };
+};
+
 const migratedLegacySave = (
   value: Record<string, unknown>,
 ): Record<string, unknown> | null => {
   if (value.version === RUN_SAVE_VERSION) return value;
+  // P7 D2 — v6 → v7: 장착/강화 배열을 8칸 패딩(빈 슬롯 null / false)만 — 필드 의미 불변.
+  if (value.version === 6) return paddedToV7(value);
   // v5 → v6 (P6 D1): 기존 그래프는 acts 부재 = 단일 레거시 막으로 해석되고,
   // 신규 필드는 기본값. 진행 중 런은 기존 규칙(actOfLayer=0, 스케일 ×1)으로 완주한다.
   if (value.version === 5)
-    return {
+    return paddedToV7({
       ...value,
-      version: RUN_SAVE_VERSION,
       upgradedSlots: [false, false, false, false, false, false],
       acquiredPassives: [],
       shopPurchasedPassives: 0,
@@ -129,11 +155,10 @@ const migratedLegacySave = (
       restHeals: 0,
       restUpgrades: 0,
       pendingTreasure: undefined,
-    };
+    });
   if (value.version === 4)
-    return {
+    return paddedToV7({
       ...value,
-      version: RUN_SAVE_VERSION,
       pendingEvent: undefined,
       pendingEventCombat: undefined,
       eventCombats: 0,
@@ -146,11 +171,10 @@ const migratedLegacySave = (
       restHeals: 0,
       restUpgrades: 0,
       pendingTreasure: undefined,
-    };
+    });
   if (value.version === 3)
-    return {
+    return paddedToV7({
       ...value,
-      version: RUN_SAVE_VERSION,
       pendingShop: undefined,
       shopPurchasedCoins: 0,
       shopPurchasedSkills: 0,
@@ -166,12 +190,11 @@ const migratedLegacySave = (
       restHeals: 0,
       restUpgrades: 0,
       pendingTreasure: undefined,
-    };
+    });
   if (value.version !== 1 && value.version !== 2) return null;
   const graph = legacyGraphForSave();
-  return {
+  return paddedToV7({
     ...value,
-    version: RUN_SAVE_VERSION,
     graph,
     nodeChoices: Array.from({ length: graph.layers.length }, () => 0),
     shopRemovals: 0,
@@ -190,7 +213,7 @@ const migratedLegacySave = (
     restHeals: 0,
     restUpgrades: 0,
     pendingTreasure: undefined,
-  };
+  });
 };
 
 const coinShopPrice = (
@@ -295,7 +318,9 @@ const validCharacterContext = (
   return (
     startingBag.length > 0 &&
     startingBag.every((coin) => isKnownCoin(coin, context)) &&
-    startingSkills.length === 6 &&
+    // P7 D2 — 시작 스킬 1~8 (기본 4): 슬롯 상한 안에서 콘텐츠가 결정
+    startingSkills.length >= 1 &&
+    startingSkills.length <= MAX_SLOTS &&
     hasUniqueStrings(startingSkills) &&
     startingSkills.every((skill) => isKnownSkill(skill, context))
   );
@@ -306,7 +331,7 @@ const validCharacterContext = (
 // 코어의 v5 커맨드(resolveCoinRemoval 등)가 남아 있어 흐름이 완주 가능하다.
 const parsePendingRewards = (
   value: unknown,
-  equippedSkills: readonly string[],
+  equippedSkills: readonly (string | null)[],
   acquiredPassives: readonly string[],
   context: RunValidationContext,
 ): PendingRewards | null => {
@@ -333,7 +358,7 @@ const parsePendingRewards = (
   ) {
     return null;
   }
-  const equipped = new Set(equippedSkills);
+  const equipped = new Set(equippedSkills.filter((skill) => skill !== null));
   if (
     skillOptions.length > 2 ||
     !hasUniqueStrings(skillOptions) ||
@@ -561,7 +586,7 @@ const normalizeRunSave = (
     return null;
   if (
     !Array.isArray(value.upgradedSlots) ||
-    value.upgradedSlots.length !== 6 ||
+    value.upgradedSlots.length !== MAX_SLOTS ||
     !value.upgradedSlots.every((flag) => typeof flag === "boolean")
   )
     return null;
@@ -684,15 +709,31 @@ const normalizeRunSave = (
   if (value.combatIndex === 0 && !sameStrings(value.bag, startingBag))
     return null;
 
-  if (!isStringArray(value.equippedSkills) || value.equippedSkills.length !== 6)
+  // P7 D2 — 슬롯 8 고정, null = 빈 슬롯. 중복/존재 검증은 non-null만.
+  if (
+    !isSkillSlotArray(value.equippedSkills) ||
+    value.equippedSkills.length !== MAX_SLOTS
+  )
     return null;
   if (
-    !hasUniqueStrings(value.equippedSkills) ||
-    !value.equippedSkills.every((skill) => isKnownSkill(skill, context))
+    value.equippedSkills.some(
+      (skill, index) =>
+        skill === null && (value.upgradedSlots as boolean[])[index] === true,
+    )
+  )
+    return null;
+  const equippedNonNull = value.equippedSkills.filter(
+    (skill): skill is string => skill !== null,
+  );
+  if (
+    equippedNonNull.length === 0 ||
+    !hasUniqueStrings(equippedNonNull) ||
+    !equippedNonNull.every((skill) => isKnownSkill(skill, context))
   ) {
     return null;
   }
-  const startingSkills = character.startingSkills.map(String);
+  const startingSkills: (string | null)[] = character.startingSkills.map(String);
+  while (startingSkills.length < MAX_SLOTS) startingSkills.push(null);
   const changedSlots = value.equippedSkills.filter(
     (skill, index) => skill !== startingSkills[index],
   ).length;

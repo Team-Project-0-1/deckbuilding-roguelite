@@ -19,6 +19,7 @@ import {
   chooseCoinReward,
   chooseRunNode,
   choosePassiveReward,
+  skillCooldown,
   deriveUpgradedSkill,
   claimTreasure,
   restHeal,
@@ -49,6 +50,7 @@ import "./App.css";
 import "./vfx.css";
 import { AtlasSprite } from "./AtlasSprite";
 import { REJECTION_TEXT, rejectionReason } from "./action-feedback";
+import { TutorialStrip } from "./tutorial";
 import { isMuted, playSfx, setMuted } from "./audio";
 import { CardEffectRows } from "./card-effects";
 import { CharacterSelect } from "./character-select";
@@ -110,6 +112,13 @@ import cardMirrorPlate from "./assets/card-mirror-plate.webp";
 import cardBulwarkCharge from "./assets/card-bulwark-charge.webp";
 import cardWeaponTuning from "./assets/card-weapon-tuning.webp";
 import cardTwinArmory from "./assets/card-twin-armory.webp";
+// P7 신규 스킬 6종 — 프롬프트 킷 검증 + SID provenance (docs/ui/card-art-prompt-validation)
+import cardInnerPassion from "./assets/card-inner-passion.webp";
+import cardFireFist from "./assets/card-fire-fist.webp";
+import cardCometBlow from "./assets/card-comet-blow.webp";
+import cardBattleFocus from "./assets/card-battle-focus.webp";
+import cardRegroup from "./assets/card-regroup.webp";
+import cardArsenalBarrage from "./assets/card-arsenal-barrage.webp";
 import cardGuard from "./assets/card-guard.webp";
 import cardBurningStrike from "./assets/card-burning-strike.webp";
 import cardIgnite from "./assets/card-ignite.webp";
@@ -222,6 +231,12 @@ const CARD_ART: Record<string, string> = {
   "bulwark-charge": cardBulwarkCharge,
   "weapon-tuning": cardWeaponTuning,
   "twin-armory": cardTwinArmory,
+  "inner-passion": cardInnerPassion,
+  "fire-fist": cardFireFist,
+  "comet-blow": cardCometBlow,
+  "battle-focus": cardBattleFocus,
+  "regroup": cardRegroup,
+  "arsenal-barrage": cardArsenalBarrage,
   slash: cardSlash,
   guard: cardGuard,
   "burning-strike": cardBurningStrike,
@@ -699,7 +714,7 @@ const testSkillsFromUrl = (
     .split(",")
     .map((skill) => skill.trim())
     .filter((skill) => contentDb.skills[skill] !== undefined)
-    .slice(0, 6)
+    .slice(0, 8)
     .map((skill) => skill as SkillId);
   if (valid.length === 0) return null;
   return fallback.map((skill, index) => valid[index] ?? skill) as RunState["equippedSkills"];
@@ -1432,7 +1447,7 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
                       >
                         {run.equippedSkills.map((skill, index) => (
                           <button
-                            aria-label={`슬롯 ${index + 1} ${contentDb.skills[String(skill)]?.name ?? String(skill)} 교체`}
+                            aria-label={`슬롯 ${index + 1} ${skill !== null ? `${contentDb.skills[String(skill)]?.name ?? String(skill)} 교체` : "빈 슬롯 장착"}`}
                             data-testid={`replace-slot-${index}`}
                             key={`${String(skill)}-${index}`}
                             ref={index === 0 ? primaryRef : undefined}
@@ -1455,15 +1470,20 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
                               aria-hidden="true"
                               className="replacement-mark"
                             >
-                              <SkillRewardMark scale={2.6} skill={skill} />
+                              {skill !== null ? (
+                                <SkillRewardMark scale={2.6} skill={skill} />
+                              ) : null}
                             </span>
                             <span className="replacement-copy">
                               <small>
-                                슬롯 {index + 1} · {skillRarityName(skill)}
+                                슬롯 {index + 1} ·{" "}
+                                {skill !== null ? skillRarityName(skill) : "빈 슬롯"}
                               </small>
                               <strong>
-                                {contentDb.skills[String(skill)]?.name ??
-                                  String(skill)}
+                                {skill !== null
+                                  ? contentDb.skills[String(skill)]?.name ??
+                                    String(skill)
+                                  : "장착"}
                               </strong>
                             </span>
                           </button>
@@ -1727,6 +1747,7 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
               </button>
               <div aria-label="강화할 스킬 선택" className="rest-upgrade-list">
                 {run.equippedSkills.map((skill, index) => {
+                  if (skill === null) return null;
                   const def = contentDb.skills[String(skill)];
                   const upgradable =
                     def?.upgrade !== undefined && !run.upgradedSlots[index];
@@ -1848,8 +1869,10 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
               }))}
               rejection={shopRejection}
               skillPick={shopSkillPick}
-              slotLabels={run.equippedSkills.map(
-                (skill) => contentDb.skills[String(skill)]?.name ?? String(skill),
+              slotLabels={run.equippedSkills.map((skill) =>
+                skill === null
+                  ? "빈 슬롯"
+                  : contentDb.skills[String(skill)]?.name ?? String(skill),
               )}
               onBuyCoin={(index) =>
                 runShopAction(
@@ -2171,6 +2194,9 @@ const CombatBoard = ({
             ))),
     );
 
+  const commandRequiresTargeting = (command: TargetingCommand): boolean =>
+    legalTargetsForCommand(legal, command).length > 0;
+
   const showRejection = (text: string) => {
     if (showResult) return;
     if (rejectionTimer.current !== null)
@@ -2368,7 +2394,7 @@ const CombatBoard = ({
     // legalCommands auto suggestion immediately, without fuel-selection state.
     if (!requiresFuelSelection(state, slotId, contentDb)) {
       if (autoCommand !== undefined) {
-        if (skill.targetType === "single-enemy")
+        if (commandRequiresTargeting(autoCommand))
           beginTargeting(autoCommand, showFeedback);
         else useSkill(autoCommand, showFeedback);
       } else
@@ -2438,7 +2464,7 @@ const CombatBoard = ({
           contentDb,
         );
         if (command !== null) {
-          if (skill.targetType === "single-enemy")
+          if (commandRequiresTargeting(command))
             beginTargeting(command, showFeedback);
           else useSkill(command, showFeedback);
         } else
@@ -2468,7 +2494,7 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.coinCost);
       return;
     }
-    if (skill.targetType === "single-enemy") beginTargeting(command, showFeedback);
+    if (commandRequiresTargeting(command)) beginTargeting(command, showFeedback);
     else useSkill(command, showFeedback);
   };
 
@@ -2910,6 +2936,7 @@ const CombatBoard = ({
           maxHp={state.player.maxHp}
           block={state.player.block}
           statuses={state.player.statuses}
+          overheat={state.player.overheat}
           floats={floats}
           motion={playerMotion}
           playKey={playerMotion === "idle" ? 0 : spritePlayKey}
@@ -3011,7 +3038,7 @@ const CombatBoard = ({
             <ResolutionTicket summary={resolutionTicket} />
           ) : null}
         </div>
-        {state.slots.slice(0, 6).map((slotState, index) => {
+        {state.slots.map((slotState, index) => {
           const baseSkill = contentDb.skills[String(slotState.skillId)];
           // P6 D3 — 강화 슬롯은 코어와 같은 파생 정본으로 표시 (수치 이중 표기 방지)
           const upgraded = run.upgradedSlots[index] === true;
@@ -3054,7 +3081,7 @@ const CombatBoard = ({
           const dropTarget = dragging && drag.targets.has(index);
           const canPlace = canPlaceSelected || dropTarget;
           // 프리뷰는 사용 커맨드가 합법일 때만 (§3.5 preview → Preview | null) — 부분 장전·
-          // 턴 3회 캡·재사용·전투 종료 등 코어가 해결을 거부하는 모든 상태를 legalCommands가 거른다
+          // 쿨다운·전투당 1회·전투 종료 등 코어가 해결을 거부하는 모든 상태를 legalCommands가 거른다
           const preview =
             skill?.type === "flip" &&
             placed.length === skill.cost &&
@@ -3099,9 +3126,9 @@ const CombatBoard = ({
           };
           return (
             <article
-              className={`skill-card ${use !== undefined ? "ready" : ""} ${slotState.usedThisTurn ? "spent" : ""} ${lockedOnce ? "combat-locked" : ""} ${placed.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
+              className={`skill-card ${use !== undefined ? "ready" : ""} ${slotState.cooldownRemaining > 0 ? "spent" : ""} ${slotState.skillId === null ? "empty-slot" : ""} ${lockedOnce ? "combat-locked" : ""} ${placed.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
               data-slot={index}
-              key={String(slotState.skillId)}
+              key={`${index}-${String(slotState.skillId)}`}
               onClick={() => {
                 if (clickGuard()) return;
                 // 동전을 고른 동안 카드 클릭은 장전 전용 — 장전 불가면 아무 것도 하지 않는다
@@ -3271,13 +3298,18 @@ const CombatBoard = ({
                   />
                 ) : (
                   <span>
-                    <SwordIcon scale={4.2} />
+                    <EmberIcon scale={4.2} />
                   </span>
                 )}
               </div>
               {skill !== undefined ? <CardEffectRows skill={skill} /> : null}
-              {slotState.usedThisTurn ? (
-                <span className="spent-label">사용됨</span>
+              {slotState.cooldownRemaining > 0 ? (
+                <span className="spent-label">쿨 {slotState.cooldownRemaining}</span>
+              ) : null}
+              {skill !== undefined && skillCooldown(skill) === 0 ? (
+                <span className="repeat-label" title="반복 — 같은 턴에 코인이 남는 한 계속 사용">
+                  반복
+                </span>
               ) : null}
               {lockedOnce ? <span className="locked-label">잠금</span> : null}
               {preview !== null ? (
@@ -3318,6 +3350,13 @@ const CombatBoard = ({
               ? "동전을 클릭해 고르고 카드를 눌러 장전 — 드래그로도 됩니다"
               : "카드 제목을 누르면 사용 · 장전된 동전을 누르면 회수"}
           </div>
+        ) : null}
+        {!ended ? (
+          <TutorialStrip
+            db={contentDb}
+            fuelSelectionOpen={fuelSelection !== null}
+            state={state}
+          />
         ) : null}
       </section>
 
@@ -3490,6 +3529,7 @@ interface UnitPanelProps {
   onTarget?: () => void;
   attackBuff?: number;
   passive?: { name: string; description: string };
+  overheat?: boolean;
 }
 
 const UnitPanel = ({
@@ -3512,6 +3552,7 @@ const UnitPanel = ({
   onTarget,
   attackBuff = 0,
   passive,
+  overheat = false,
 }: UnitPanelProps) => (
   <div
     className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
@@ -3578,6 +3619,13 @@ const UnitPanel = ({
               className="shock-chip"
             >
               감전 {statusTurns(statuses, "shock")}
+            </em>
+          </Keyword>
+        ) : null}
+        {overheat ? (
+          <Keyword className="chip-keyword" term="overheat">
+            <em aria-label="과열" className="overheat-chip">
+              과열
             </em>
           </Keyword>
         ) : null}

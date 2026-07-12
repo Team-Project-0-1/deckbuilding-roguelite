@@ -4,14 +4,16 @@ import { effectiveElements, legalCommands } from "@game/core";
 export const REJECTION_TEXT = {
   generic: "지금은 할 수 없다",
   notPlayerPhase: "해결 중에는 안 된다",
-  skillCap: "스킬은 턴당 3회까지",
-  usedThisTurn: "이미 사용한 스킬이다",
+  // P7 D1 — 턴당 3회 캡 폐지 → 스킬별 쿨다운 사유로 대체
   usedThisCombat: "이번 전투에 이미 썼다",
   socketFull: "소켓이 이미 가득 찼다",
   coinCost: "동전이 더 필요하다",
   noFuel: "필요한 동전이 없다",
   coinNotSelectable: "고를 수 없는 동전이다",
+  emptySlot: "빈 슬롯이다",
 } as const;
+
+export const cooldownReason = (turns: number): string => `재사용 대기 ${turns}턴`;
 
 const sameCommand = (left: Command, right: Command): boolean => {
   if (left.type !== right.type) return false;
@@ -39,12 +41,13 @@ const slotReason = (
 ): string | null => {
   const slotState = state.slots[Number(command.slot)];
   if (slotState === undefined) return null;
+  if (slotState.skillId === null) return REJECTION_TEXT.emptySlot;
   const skill = db.skills[String(slotState.skillId)];
   if (skill === undefined) return null;
-  if (state.skillUsesThisTurn >= 3) return REJECTION_TEXT.skillCap;
-  if (slotState.usedThisTurn) return REJECTION_TEXT.usedThisTurn;
   if (skill.oncePerCombat === true && slotState.usedThisCombat)
     return REJECTION_TEXT.usedThisCombat;
+  if (slotState.cooldownRemaining > 0)
+    return cooldownReason(slotState.cooldownRemaining);
 
   if (command.type === "useFlipSkill") {
     if (skill.type !== "flip") return null;

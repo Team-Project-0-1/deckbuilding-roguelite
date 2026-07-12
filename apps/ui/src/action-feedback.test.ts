@@ -3,10 +3,11 @@ import type { CoinUid, CombatState, SlotId } from "@game/core";
 import { createCombat, step } from "@game/core";
 import { describe, expect, it } from "vitest";
 
-import { REJECTION_TEXT, rejectionReason } from "./action-feedback";
+import { REJECTION_TEXT, cooldownReason, rejectionReason } from "./action-feedback";
 
 const slot = (value: number): SlotId => value as SlotId;
 
+// P7 D2 워리어 슬롯: 0 정권 / 1 가드 / 2 불꽃 스트레이트 / 3 내면의 발화(소비) / 4~7 빈 슬롯
 const boot = (): CombatState =>
   createCombat(
     { character: "warrior" as never, enemies: ["raider" as never] },
@@ -34,6 +35,17 @@ const placeFirst = (
   return { state: result.state, coin };
 };
 
+const withSlotState = (
+  state: CombatState,
+  slotIndex: number,
+  patch: Partial<CombatState["slots"][number]>,
+): CombatState => ({
+  ...state,
+  slots: state.slots.map((candidate, index) =>
+    index === slotIndex ? { ...candidate, ...patch } : candidate,
+  ),
+});
+
 describe("rejectionReason", () => {
   it("returns null for legal commands", () => {
     const state = boot();
@@ -53,47 +65,56 @@ describe("rejectionReason", () => {
     );
   });
 
-  it("classifies the three-skill turn cap", () => {
-    const { state } = placeFirst(boot(), 0);
+  // P7 D1 — 턴당 3회 캡 폐지: 봉인 사유는 스킬별 쿨다운 잔여 턴으로 서술한다
+  it("classifies a multi-turn cooldown with the remaining turns", () => {
+    const { state } = placeFirst(boot(), 2);
     expect(
       rejectionReason(
-        { ...state, skillUsesThisTurn: 3 },
-        { type: "useFlipSkill", slot: slot(0), target: 0 },
+        withSlotState(state, 2, { cooldownRemaining: 2 }),
+        { type: "useFlipSkill", slot: slot(2), target: 0 },
         contentDb,
       ),
-    ).toBe(REJECTION_TEXT.skillCap);
+    ).toBe(cooldownReason(2));
+    expect(cooldownReason(2)).toBe("재사용 대기 2턴");
   });
 
-  it("classifies a skill already used this turn", () => {
+  // 구 '이번 턴에 이미 썼다' 케이던스 = 쿨다운 1 (다음 턴 시작에 다시 가용)
+  it("classifies a skill cooling down until next turn", () => {
     const { state } = placeFirst(boot(), 0);
     expect(
       rejectionReason(
-        {
-          ...state,
-          slots: state.slots.map((candidate, index) =>
-            index === 0 ? { ...candidate, usedThisTurn: true } : candidate,
-          ),
-        },
+        withSlotState(state, 0, { cooldownRemaining: 1 }),
         { type: "useFlipSkill", slot: slot(0), target: 0 },
         contentDb,
       ),
-    ).toBe(REJECTION_TEXT.usedThisTurn);
+    ).toBe("재사용 대기 1턴");
   });
 
   it("classifies a once-per-combat lock", () => {
-    const { state } = placeFirst(boot(), 5);
+    // 워리어 시작 셋에는 전투당 1회 스킬이 없다 — 빈 슬롯에 화염 폭주를 합성 장착
+    const state = withSlotState(boot(), 4, {
+      skillId: "flame-rampage" as never,
+      cooldownRemaining: 0,
+      usedThisCombat: true,
+    });
     expect(
       rejectionReason(
-        {
-          ...state,
-          slots: state.slots.map((candidate, index) =>
-            index === 5 ? { ...candidate, usedThisCombat: true } : candidate,
-          ),
-        },
-        { type: "useFlipSkill", slot: slot(5) },
+        state,
+        { type: "useFlipSkill", slot: slot(4) },
         contentDb,
       ),
     ).toBe(REJECTION_TEXT.usedThisCombat);
+  });
+
+  // P7 D2 — 슬롯 8, 시작 4스킬: 뒷 슬롯은 비어 있고 사용 불가 사유가 구분된다
+  it("classifies an empty slot", () => {
+    expect(
+      rejectionReason(
+        boot(),
+        { type: "useFlipSkill", slot: slot(5) },
+        contentDb,
+      ),
+    ).toBe(REJECTION_TEXT.emptySlot);
   });
 
   it("classifies a full socket when placing another coin", () => {
@@ -131,7 +152,7 @@ describe("rejectionReason", () => {
     expect(
       rejectionReason(
         state,
-        { type: "useConsumeSkill", slot: slot(4), coins: [], target: 0 },
+        { type: "useConsumeSkill", slot: slot(3), coins: [], target: 0 },
         contentDb,
       ),
     ).toBe(REJECTION_TEXT.noFuel);

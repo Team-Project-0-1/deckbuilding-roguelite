@@ -38,7 +38,7 @@ interface ShopScreenProps {
   passiveOffers: ShopPassiveOffer[];
   bagCoins: ShopBagCoin[];
   rejection: string | null;
-  /** 구매 확정 대기 중인 스킬 옵션 인덱스 — 교체 슬롯 선택 단계 (6슬롯 고정 규칙) */
+  /** 구매 확정 대기 중인 스킬 옵션 인덱스 — 장착/교체 슬롯 선택 단계 (P7 8슬롯·빈 슬롯) */
   skillPick: number | null;
   slotLabels: string[];
   onBuyCoin: (index: number) => void;
@@ -148,7 +148,7 @@ export const ShopScreen = ({
       </ul>
       {skillPick === null ? null : (
         <div className="shop-slot-picker" data-testid="shop-slot-picker">
-          <p>교체할 슬롯을 고릅니다 — 6슬롯 고정 규칙.</p>
+          <p>장착할 슬롯을 고릅니다 — 빈 슬롯은 바로 장착, 사용 중 슬롯은 교체.</p>
           <ul>
             {slotLabels.map((label, slot) => (
               <li key={slot}>

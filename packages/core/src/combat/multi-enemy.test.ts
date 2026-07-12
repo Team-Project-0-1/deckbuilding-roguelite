@@ -34,9 +34,10 @@ const testDb = (): ContentDb => ({
     fire: {
       id: id<CoinDefId>('fire'),
       element: 'fire',
-      proc: {
-        face: 'heads',
-        effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }]
+      // P7 D4 — 양면: 앞 화상 1 / 뒤 피해 1
+      procs: {
+        heads: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }],
+        tails: [{ kind: 'damage', amount: 1 }]
       }
     }
   },
@@ -224,7 +225,7 @@ describe('multi-enemy combat harness', () => {
     if (!rejected.ok) expect(rejected.error).toBe('target enemy is not alive');
   });
 
-  it('routes a self-target fire coin proc to the first alive enemy when enemy 0 is dead', () => {
+  it('requires an explicit living enemy for a self-target offensive coin proc', () => {
     const db = testDb();
     const state = withHandDefs(replaceFlipRng(twoEnemyCombat(db, 'first-alive-proc'), ['heads']), ['fire']);
     const enemy0Dead = {
@@ -232,7 +233,12 @@ describe('multi-enemy combat harness', () => {
       enemies: state.enemies.map((enemy, index) => (index === 0 ? { ...enemy, hp: 0 } : enemy))
     };
 
-    const focused = useFirstCoin(enemy0Dead, 2, undefined, db);
+    const loaded = placeFirstCoin(enemy0Dead, 2, db);
+    const missing = step(loaded, { type: 'useFlipSkill', slot: slot(2) }, db);
+    expect(missing).toEqual({ ok: false, error: 'target enemy is not alive' });
+    expect(loaded.zones.placed[slot(2)]).toHaveLength(1);
+
+    const focused = step(loaded, { type: 'useFlipSkill', slot: slot(2), target: 1 }, db);
     expect(focused.ok).toBe(true);
     if (!focused.ok) return;
     expect(statusStacks(focused.state.enemies[0]?.statuses ?? {}, 'burn')).toBe(0);

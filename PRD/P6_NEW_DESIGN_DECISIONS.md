@@ -14,9 +14,9 @@
 | 모호성/충돌 | ① 후보 노드 수 미명시 ② 막별 난이도/보스 미명시 ③ 기존 이벤트 노드 의미론(레이어 자체가 event)과 "분기 후보 중 하나" 충돌 없음(후보로 일반화) ④ 기존 단일 런과 완전 충돌 |
 | 채택 결정 | **RunGraph를 평탄 layers + `acts: {start:number}[]` 메타로 일반화** (전 코드가 `layers[combatIndex]` 평탄 인덱스 — 최소 변경). 분기 방문은 **후보 2~3개**(그래프 스트림 롤, 2:60%/3:40%). `chooseRunNode` length>=2로 일반화. 방문9=rest 고정, 방문10=boss 고정. 가드레일(설계 보충): **1막 방문1은 combat 강제**(학습·초기 경제), **1막 방문1~2 후보에서 elite 제외**(조기 스파이크 방지), 후보 내 kind 중복 허용(중복 시 각자 독립 롤 결과 유지) |
 | 후보 분포 | 생성 분포 50/10/2/15/3/20 — **후보 생성 분포이며 실제 방문 분포와 구분** (문서·economy 텔레메트리에 generatedKindCounts/visitedKindCounts 분리 기록) |
-| 막별 스케일링 | 적 재사용 + 결정론 수치 변형: **hp·피해 ×(1 + 0.4×(act-1))** 반올림 (act1 ×1.0 / act2 ×1.4 / act3 ×1.8). `scaleEnemyForAct` 순수 함수, createCombat config로 전달. balance-provisional |
-| 막 보스 | act1=**gatekeeper-plus**(단일 승격) / act2=**raider-plus+gatekeeper-plus**(2체) / act3=**ember-archmage**. 전부 보스 보상 의미론(재화100+동전3택+패시브3택). 재사용 결정 근거: 신규 보스 아트/패턴 비용 통제(요구 A "재사용+막별 수치/패턴 변형"). balance-provisional |
-| 노드 보상 | 일반=금35+동전3중1택 / 엘리트=금70+동전3택+**스킬 1 제안**(교체/스킵) / 보물=금100+패시브 1 부여 / 보스=금100+동전3택+패시브 3중1택. **기존 보상 흐름(3전투째부터 스킬 2택+제거 단계)은 신규 스펙으로 대체** — 제거는 상점 전용으로 회귀(요구 A 명시 우선). seed42 골든 재고정 필요 |
+| 막별 스케일링 | 적 재사용 + 결정론 수치 변형: hp·피해 반올림 **act1 ×1.0 / act2 ×1.15 / act3 ×1.3**. 초기 ×1.4/×1.8은 500런 완주 0으로 폐기했다(D9). `enemyScaleForAct` 순수 함수, createCombat config로 전달. balance-provisional |
+| 막 보스 | act1=**gatekeeper-plus**(단일 승격) / act2=**raider-plus+gatekeeper-plus**(2체) / act3=**ember-archmage**. act1·2는 보스 보상(재화100+동전3택+패시브3택), act3는 즉시 런 클리어(재화는 결산에 기록하되 후속 사용처가 없는 선택 보상은 생략). 최종 보상 생략은 요구의 모호점을 StS식 종결 흐름과 무의미한 사후 선택 방지 기준으로 결정했다. 재사용 결정 근거: 신규 보스 아트/패턴 비용 통제. balance-provisional |
+| 노드 보상 | 일반=금35+동전3중1택 / 엘리트=금70+동전3택+**스킬 1 제안**(교체/스킵) / 보물=금100+패시브 1 부여 / act1·2 보스=금100+동전3택+패시브 3중1택 / act3 보스=금100 결산 후 클리어. **기존 보상 흐름(3전투째부터 스킬 2택+제거 단계)은 신규 스펙으로 대체** — 제거는 상점 전용으로 회귀(요구 A 명시 우선). |
 | 휴식 | 최대HP 30% 회복(내림, 상한 maxHp) **또는** 장착 스킬 강화 1회(D3) 택1 |
 | 세이브 | **v6**: acts, acquiredPassives, upgradedSlots, pendingRest/pendingTreasure, 카운터(treasureOpened/restHeals/restUpgrades/passivesPurchased/passivesFromBoss/passivesFromTreasure). **v5→v6 마이그레이션: 기존 graph를 단일 레거시 막(acts=[{start:0}])으로 감싸 진행 중 런 보존**, 신규 필드 기본값. v1→…→v6 체인 유지 |
 | 결정론 | 그래프: `derive(runSeed,'graph')` 단일 스트림 유지(막·방문 순서 소비 고정). 상점/이벤트/보상 스트림 기존 규칙(`shop-<layer>`/`event-<layer>`/`reward`) 유지. 보물/보스 패시브: `passive-<layer>` 신규 스트림 |

@@ -77,12 +77,16 @@ export const combatInvariantViolations = (
     violations.push("player HP out of range");
   }
   if (state.player.block < 0) violations.push("player block is negative");
-  if (
-    !Number.isInteger(state.skillUsesThisTurn) ||
-    state.skillUsesThisTurn < 0 ||
-    state.skillUsesThisTurn > 3
-  ) {
-    violations.push("skill use count is out of range");
+  // P7 D1 — 캡 카운터 폐지: 슬롯 쿨다운 범위만 검증 (0~3)
+  for (const slot of state.slots) {
+    if (
+      !Number.isInteger(slot.cooldownRemaining) ||
+      slot.cooldownRemaining < 0 ||
+      slot.cooldownRemaining > 3
+    ) {
+      violations.push("slot cooldown is out of range");
+      break;
+    }
   }
   for (const enemy of state.enemies) {
     if (enemy.hp < 0 || enemy.hp > enemy.maxHp) {

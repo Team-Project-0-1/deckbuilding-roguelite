@@ -811,6 +811,26 @@ button:focus-visible {
   z-index: 2;
 }
 
+/* P7 D1 — 반복(쿨다운 0) 기본기 표기 */
+.repeat-label {
+  position: absolute;
+  top: 24px;
+  left: 4px;
+  padding: 1px 4px;
+  font-size: 10px;
+  background: #274a2c;
+  color: #cfe8c8;
+  border: 2px solid var(--out);
+  z-index: 2;
+}
+
+/* P7 D2 — 빈 슬롯: 테두리만 남긴 자리 표시 */
+.skill-card.empty-slot {
+  opacity: 0.45;
+  background: transparent;
+  border-style: dashed;
+}
+
 .preview-tip {
   position: absolute;
   bottom: calc(100% + 16px);
@@ -1423,6 +1443,47 @@ button:focus-visible {
   border: 2px solid var(--out);
   color: #cfe0ff;
   z-index: 2;
+}
+
+/* P7 D6 — 점진 튜토리얼: 닫기 버튼이 있는 문맥 안내 (hint-strip 위층) */
+.tutorial-strip {
+  position: absolute;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(92vw, 560px);
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  background: #14201b;
+  border: 2px solid #4f7a58;
+  color: #d9f2dc;
+  animation: hint-in 0.35s steps(4);
+}
+
+.tutorial-strip .tutorial-dismiss {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #274a2c;
+  color: #d9f2dc;
+  border: 2px solid #4f7a58;
+  cursor: pointer;
+}
+
+.tutorial-strip .tutorial-dismiss:focus-visible {
+  outline: 2px solid #d9f2dc;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-strip {
+    animation: none;
+  }
 }
 
 /* 문맥 힌트 — 동사를 한 번 수행하면 다음 단계로, 첫 스킬 사용 후 사라진다 */
@@ -2142,6 +2203,18 @@ button:focus-visible {
   background: #2b4a66;
   color: #d9f1ff;
 }
+/* P7 D5 — 과열 칩 */
+.overheat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  background: #4a1d10;
+  color: #ffb37a;
+  border: 2px solid var(--out);
+}
+
 .shock-chip {
   display: inline-flex;
   align-items: center;

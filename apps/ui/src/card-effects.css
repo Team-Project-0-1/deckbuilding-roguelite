@@ -48,6 +48,19 @@
   background: var(--flame, #f0902c);
 }
 
+/* P7 D5 — 과열 분기·속성 면 보너스 배지 */
+.card-effect-row.overheat .card-effect-badge {
+  color: #ffb37a;
+  background: #4a1d10;
+  border-color: #b3572c;
+}
+
+.card-effect-row.element-face .card-effect-badge {
+  color: #ffd9c0;
+  background: #5a2e18;
+  border-color: #b3572c;
+}
+
 /* 줄바꿈 허용 — 수치는 절대 숨기지 않는다 (카드 폭·HUD 높이는 그대로).
    한국어 어절 단위 줄바꿈(keep-all)으로 "소비"가 "소/비"로 끊기지 않게 한다 */
 .card-effect-copy {

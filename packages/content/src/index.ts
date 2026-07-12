@@ -4,8 +4,8 @@ import type { CharacterDef, CoinDef, ContentDb, EnemyDef, EquipmentDef, EventDef
 
 // P3.2 승격: 수호자·마나 스킬·exclusiveTo 시대. m5 콘텐츠는 현 버전의 부분집합이고
 // 기존 수치가 불변이므로 m5 저장은 안전하게 로드(마이그레이션)할 수 있다.
-export const CONTENT_VERSION = '1.1.0-p6';
-export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['1.0.0-rc.1', '0.10.0-p4.4', '0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
+export const CONTENT_VERSION = '1.2.0-p7';
+export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['1.1.0-p6', '1.0.0-rc.1', '0.10.0-p4.4', '0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
 // p4→p4.4 호환 근거: 이벤트 4종 가산·기존 플레이어/전투 콘텐츠 수치 불변.
 // p3.4→p4 호환 근거: 몬스터 6종 가산뿐(플레이어 콘텐츠·기존 수치 불변)이라 기존 저장의
 // 모든 참조가 유효하다. 신규 적은 신규 조우(P4.2+ 그래프)에서만 등장한다.
@@ -21,28 +21,50 @@ const event = (value: string) => value as EventDefId;
 const passive = (value: string) => value as PassiveId;
 const equip = (value: string) => value as EquipmentDefId;
 
+// P7 D4 — 양면 속성 코인 (v1.3 표 그대로): 공격형 proc 대상은 단일 스킬→그 적,
+// 전체 스킬→모든 생존 적, 자기 대상 스킬→선택한 적. 우호형(방어·회복)은 항상 플레이어.
 export const coins = {
   basic: { id: coin('basic'), element: null },
   fire: {
     id: coin('fire'),
     element: 'fire',
-    proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] }
+    procs: {
+      heads: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }],
+      tails: [{ kind: 'damage', amount: 1 }]
+    }
   },
   mana: {
     id: coin('mana'),
     element: 'mana',
-    proc: { face: 'heads', effects: [{ kind: 'block', amount: 2 }] }
+    procs: {
+      heads: [{ kind: 'block', amount: 1 }],
+      tails: [{ kind: 'block', amount: 2 }]
+    }
   },
-  // P3.4 — 냉기·전기 (PRD 코인 표 168~169행 그대로: 앞면 proc, 지속형 상태 1턴)
   frost: {
     id: coin('frost'),
     element: 'frost',
-    proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }] }
+    procs: {
+      heads: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }],
+      tails: [{ kind: 'block', amount: 1 }]
+    }
   },
   lightning: {
     id: coin('lightning'),
     element: 'lightning',
-    proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'shock', stacks: 1, to: 'target' }] }
+    procs: {
+      heads: [{ kind: 'applyStatus', status: 'shock', stacks: 1, to: 'target' }],
+      tails: [{ kind: 'damage', amount: 1 }]
+    }
+  },
+  // P7 D4 — 피 코인: 비시그니처 단독 드래프트 가치(회복/방어 유지 픽)
+  blood: {
+    id: coin('blood'),
+    element: 'blood',
+    procs: {
+      heads: [{ kind: 'heal', amount: 1 }],
+      tails: [{ kind: 'block', amount: 1 }]
+    }
   }
 } satisfies Record<string, CoinDef>;
 
@@ -55,9 +77,11 @@ export const skills = {
     rarity: 'common',
     tags: ['attack'],
     targetType: 'single-enemy',
+    // P7 D2 — 반복 기본기 (쿨다운 0): 코인이 남는 한 같은 턴 반복 사용
+    cooldown: 0,
     cost: 1,
-    base: [{ kind: 'damage', amount: 6 }],
-    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] }
+    base: [{ kind: 'damage', amount: 4 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] }
   },
   guard: {
     id: skill('guard'),
@@ -67,8 +91,9 @@ export const skills = {
     rarity: 'common',
     tags: ['defense'],
     targetType: 'self',
+    cooldown: 0,
     cost: 1,
-    base: [{ kind: 'block', amount: 5 }],
+    base: [{ kind: 'block', amount: 4 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
   },
   'burning-strike': {
@@ -145,7 +170,9 @@ export const skills = {
           hook: 'onDamageDealt',
           effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }]
         }
-      }
+      },
+      // P7 D3 — 지원 스킬 즉시 리턴 표준: draw 1 동반
+      { kind: 'draw', count: 1 }
     ]
   },
   'heart-of-flame': {
@@ -164,7 +191,8 @@ export const skills = {
           hook: 'onAttackSkillResolved',
           effects: [{ kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }]
         }
-      }
+      },
+      { kind: 'draw', count: 1 }
     ]
   },
   conflagration: {
@@ -178,7 +206,9 @@ export const skills = {
     cost: 5,
     base: [
       { kind: 'damage', amount: 18 },
-      { kind: 'applyStatus', status: 'burn', stacks: 4, to: 'target' }
+      { kind: 'applyStatus', status: 'burn', stacks: 4, to: 'target' },
+      // P7 D3 — 4+비용 표준: 다음 턴 이득 라이더
+      { kind: 'nextTurnDraw', count: 1 }
     ],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 4 }] }
   },
@@ -418,18 +448,18 @@ export const skills = {
   jab: {
     id: skill('jab'),
     name: '정권',
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cost: 1,
+    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 0, cost: 1,
     exclusiveTo: character('warrior'),
-    base: [{ kind: 'damage', amount: 6 }],
-    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 4 }] },
+    base: [{ kind: 'damage', amount: 4 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] },
     upgrade: { name: '묵직한 정권', description: '기본 피해 +2', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
   },
   'fist-guard': {
     id: skill('fist-guard'),
     name: '가드',
-    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'self', cost: 1,
+    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'self', cooldown: 0, cost: 1,
     exclusiveTo: character('warrior'),
-    base: [{ kind: 'block', amount: 5 }],
+    base: [{ kind: 'block', amount: 4 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
     upgrade: { name: '철벽 가드', description: '기본 방어 +2', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
   },
@@ -499,16 +529,43 @@ export const skills = {
     ],
     upgrade: { name: '대폭렬권', description: '기본 피해 +4', patch: { kind: 'baseAmount', index: 0, delta: 4 } }
   },
-  // 보조 아키타입: 과열 (P6 D5 — 손의 화염 코인 수 참조, 지속 상태 없음)
+  // 보조 아키타입: 진짜 과열 (P7 D5 — 화염 소비로 진입, 과열 강화 스킬 해결 후 소비)
+  'inner-passion': {
+    id: skill('inner-passion'),
+    name: '내면의 발화',
+    type: 'consume', rarity: 'common', tags: ['utility'], targetType: 'none', cooldown: 3,
+    exclusiveTo: character('warrior'),
+    consume: { element: 'fire', count: 1 },
+    // 모호성(P7 D5): 원 대화의 앞/뒤 보너스는 소비=무플립 전역 규칙과 충돌 — 폐기, draw 1로 즉시 리턴 보장
+    effects: [
+      { kind: 'enterOverheat' },
+      { kind: 'draw', count: 1 }
+    ],
+    upgrade: { name: '깊은 발화', description: '사용 시 임시 화염 코인 1개를 뽑기 더미에 만든다', patch: { kind: 'addCoinOnUse', coin: coin('fire'), zone: 'draw', count: 1 } }
+  },
+  'fire-fist': {
+    id: skill('fire-fist'),
+    name: '화염 정권',
+    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 2,
+    exclusiveTo: character('warrior'),
+    base: [
+      { kind: 'addCoin', coin: coin('fire'), zone: 'draw', count: 1 },
+      { kind: 'damage', amount: 10 }
+    ],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 1 }] },
+    // 화염 코인 앞면은 일반 앞면 +1과 합산해 +2 (v1.3 표기 그대로)
+    elementFaces: [{ element: 'fire', face: 'heads', effects: [{ kind: 'damage', amount: 1 }] }],
+    overheatBonus: [{ kind: 'damage', amount: 4 }],
+    upgrade: { name: '단조 정권', description: '기본 피해 +2', patch: { kind: 'baseAmount', index: 1, delta: 2 } }
+  },
   'overheat-strike': {
     id: skill('overheat-strike'),
     name: '과열권',
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cost: 1,
+    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
     exclusiveTo: character('warrior'),
-    base: [
-      { kind: 'damage', amount: 3 },
-      { kind: 'damagePerFireInHand', amountPerCoin: 2 }
-    ],
+    base: [{ kind: 'damage', amount: 4 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
+    overheatBonus: [{ kind: 'damage', amount: 4 }],
     upgrade: { name: '초과열권', description: '기본 피해 +3', patch: { kind: 'baseAmount', index: 0, delta: 3 } }
   },
   'overheat-vent': {
@@ -517,10 +574,25 @@ export const skills = {
     type: 'flip', rarity: 'rare', tags: ['attack'], targetType: 'single-enemy', oncePerCombat: true, cost: 2,
     exclusiveTo: character('warrior'),
     base: [
-      { kind: 'damagePerFireInHand', amountPerCoin: 3 },
+      { kind: 'damage', amount: 8 },
       { kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }
     ],
+    overheatBonus: [{ kind: 'damage', amount: 10 }],
     upgrade: { name: '전개 배기', description: '전투당 1회 제한 해제', patch: { kind: 'removeOncePerCombat' } }
+  },
+  // P7 D3 — 4비용 대표: 강한 기본치 + 임시 코인/상태 라이더 (고비용 턴의 실구성 표적)
+  'comet-blow': {
+    id: skill('comet-blow'),
+    name: '낙성권',
+    type: 'flip', rarity: 'rare', tags: ['attack'], targetType: 'single-enemy', cooldown: 2, cost: 4,
+    exclusiveTo: character('warrior'),
+    base: [
+      { kind: 'damage', amount: 16 },
+      { kind: 'applyStatus', status: 'burn', stacks: 3, to: 'target' },
+      { kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 1 }
+    ],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
+    upgrade: { name: '대낙성권', description: '기본 피해 +4', patch: { kind: 'baseAmount', index: 0, delta: 4 } }
   },
   // ── P6 D6 — 마도기사 스킬 (exclusiveTo arcanist, balance-provisional) ──
   'arcane-charge': {
@@ -592,7 +664,10 @@ export const skills = {
     name: '병기 조율',
     type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cost: 1,
     exclusiveTo: character('arcanist'),
-    base: [{ kind: 'empowerSummons', amount: 1 }],
+    base: [
+      { kind: 'empowerSummons', amount: 1 },
+      { kind: 'draw', count: 1 }
+    ],
     heads: { mode: 'any', effects: [{ kind: 'empowerSummons', amount: 1 }] },
     upgrade: { name: '정밀 조율', description: '기본 강화 +1', patch: { kind: 'baseAmount', index: 0, delta: 1 } }
   },
@@ -606,6 +681,40 @@ export const skills = {
       { kind: 'summonEquipment', equipment: equip('mana-shield'), duration: 2 }
     ],
     upgrade: { name: '상비 병기고', description: '전투당 1회 제한 해제', patch: { kind: 'removeOncePerCombat' } }
+  },
+  'arsenal-barrage': {
+    id: skill('arsenal-barrage'),
+    name: '병기 일제 전개',
+    type: 'flip', rarity: 'rare', tags: ['utility'], targetType: 'self', cooldown: 2, cost: 4,
+    exclusiveTo: character('arcanist'),
+    // P7 D3 — 4비용 대표: 병기 2 전개 + 즉시 드로우 (고비용 턴 실구성 표적)
+    base: [
+      { kind: 'summonEquipment', equipment: equip('mana-sword'), duration: 2 },
+      { kind: 'summonEquipment', equipment: equip('mana-shield'), duration: 2 },
+      { kind: 'draw', count: 2 }
+    ],
+    tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] },
+    upgrade: { name: '총력 전개', description: '뒷면 방어 +2 효과 추가', patch: { kind: 'addFaceEffect', face: 'tails', effect: { kind: 'block', amount: 2 } } }
+  },
+  // ── P7 D3 — 공용 드로우/쿨다운 유틸리티 (고비용 턴 셋업 지원) ──
+  'battle-focus': {
+    id: skill('battle-focus'),
+    name: '전투 집중',
+    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 2, cost: 1,
+    base: [{ kind: 'draw', count: 2 }],
+    heads: { mode: 'any', effects: [{ kind: 'nextTurnDraw', count: 1 }] },
+    upgrade: { name: '보급 집중', description: '사용 시 임시 기본 코인 1개를 손에 만든다', patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'hand', count: 1 } }
+  },
+  'regroup': {
+    id: skill('regroup'),
+    name: '재정비',
+    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 3, cost: 1,
+    // 쿨다운 감소는 자기 슬롯 제외(P7 D1) — 반복·전투당 1회 스킬은 구조적으로 비대상
+    base: [
+      { kind: 'reduceCooldown', amount: 1 },
+      { kind: 'draw', count: 1 }
+    ],
+    upgrade: { name: '신속 재정비', description: '사용 시 임시 기본 코인 1개를 뽑기 더미에 만든다', patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'draw', count: 1 } }
   }
 } satisfies Record<string, SkillDef>;
 
@@ -810,13 +919,12 @@ export const characters = {
     name: '화염 격투가',
     maxHp: 70,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('fire'), coin('fire')],
+    // P7 D2 — 시작 4스킬: 반복 기본기 2 + 캐릭터 스킬 2 (버닝 스트라이크 + 과열 인에이블러)
     startingSkills: [
       skill('jab'),
       skill('fist-guard'),
       skill('burning-fist'),
-      skill('ignite'),
-      skill('ignite-sword'),
-      skill('flame-rampage')
+      skill('inner-passion')
     ],
     trait: {
       id: 'ember-pouch',
@@ -834,9 +942,7 @@ export const characters = {
       skill('slash'),
       skill('guard'),
       skill('warding-strike'),
-      skill('mana-bulwark'),
-      skill('shield-reprisal'),
-      skill('mana-well')
+      skill('mana-bulwark')
     ],
     trait: {
       id: 'quiet-spring',
@@ -856,9 +962,7 @@ export const characters = {
       skill('slash'),
       skill('guard'),
       skill('spark-strike'),
-      skill('chain-surge'),
-      skill('static-field'),
-      skill('volt-lash')
+      skill('chain-surge')
     ],
     trait: {
       id: 'charged-focus',
@@ -876,9 +980,7 @@ export const characters = {
       skill('slash'),
       skill('guard'),
       skill('frost-slash'),
-      skill('glacial-wall'),
-      skill('chilling-field'),
-      skill('glacier-strike')
+      skill('glacial-wall')
     ],
     trait: {
       id: 'winter-mantle',
@@ -894,13 +996,12 @@ export const characters = {
     name: '마도기사',
     maxHp: 65,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('mana'), coin('mana')],
+    // P7 D2 — 시작 4스킬: 기본기 2 + 마력 충전 + 명령
     startingSkills: [
       skill('slash'),
       skill('guard'),
       skill('arcane-charge'),
-      skill('arcane-command'),
-      skill('aegis-pulse'),
-      skill('shield-summon')
+      skill('arcane-command')
     ],
     trait: {
       id: 'arcane-atelier',

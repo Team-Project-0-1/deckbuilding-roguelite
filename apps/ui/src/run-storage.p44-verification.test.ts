@@ -6,9 +6,15 @@ import { describe, expect, it } from "vitest";
 import { parseRunSave, serializeRunSave } from "./run-storage";
 
 const WARRIOR_BAG = [...(contentDb.characters.warrior?.startingBag ?? [])];
+// P7 D2 — 세이브 v7: 장착 슬롯 8 고정 (시작 4스킬 + 빈 슬롯 null 4), 강화 플래그 8칸
 const WARRIOR_SKILLS = [
-  ...(contentDb.characters.warrior?.startingSkills ?? []),
+  ...(contentDb.characters.warrior?.startingSkills ?? []).map(String),
+  null,
+  null,
+  null,
+  null,
 ];
+const NO_UPGRADES = Array.from({ length: 8 }, () => false);
 
 const graph = () => generateRunGraph("P44-STORAGE", contentDb);
 
@@ -46,7 +52,7 @@ const eventSave = (): RunSave => {
     eventCombats: 0,
     eventCoinGains: 0,
     eventCoinLosses: 0,
-    upgradedSlots: [false, false, false, false, false, false] as never,
+    upgradedSlots: [...NO_UPGRADES] as never,
     acquiredPassives: [] as never,
     shopPurchasedPassives: 0,
     treasureOpened: 0,
@@ -119,7 +125,7 @@ describe("P4.4 저장 v5 적대 검증", () => {
     // 저장은 losses 위조 없이는 거부되어야 한다.
     const shrunk = {
       ...save,
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -145,7 +151,7 @@ describe("P4.4 저장 v5 적대 검증", () => {
       phase: "ready",
       pendingEvent: undefined,
       pendingEventCombat: { eventId: "ambush-bounty" },
-      upgradedSlots: [false, false, false, false, false, false] as never,
+      upgradedSlots: [...NO_UPGRADES] as never,
       acquiredPassives: [] as never,
       shopPurchasedPassives: 0,
       treasureOpened: 0,
@@ -159,7 +165,7 @@ describe("P4.4 저장 v5 적대 검증", () => {
     expect(
       parse({
         ...withEventCombat,
-        upgradedSlots: [false, false, false, false, false, false] as never,
+        upgradedSlots: [...NO_UPGRADES] as never,
         acquiredPassives: [] as never,
         shopPurchasedPassives: 0,
         treasureOpened: 0,

@@ -36,7 +36,11 @@ const testDb = (): ContentDb => ({
     fire: {
       id: id<CoinDefId>('fire'),
       element: 'fire',
-      proc: { face: 'heads', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] }
+      // P7 D4 — 양면 속성 코인: 앞 화상 1 / 뒤 피해 1 (v1.3 표)
+      procs: {
+        heads: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }],
+        tails: [{ kind: 'damage', amount: 1 }]
+      }
     }
   },
   skills: {
@@ -207,7 +211,7 @@ describe('combat golden traces', () => {
     expect(useFirstCoin(tailsState, 0).state.enemies[0]?.hp).toBe(69);
   });
 
-  it('slash with a fire coin applies burn only on heads', () => {
+  it('slash with a fire coin applies burn on heads and 1 proc damage on tails', () => {
     const db = testDb();
     const headsState = withHandDefs(
       replaceFlipRng(createCombat({ character: id('warrior'), enemies: [id('raider')] }, db, 'slash-fire'), ['heads']),
@@ -217,12 +221,13 @@ describe('combat golden traces', () => {
     expect(heads.state.enemies[0]?.hp).toBe(65);
     expect(statusStacks(heads.state.enemies[0]?.statuses ?? {}, 'burn')).toBe(1);
 
+    // P7 D4: 화염 뒷면 proc = 피해 1 — slash 6 + proc 1 = 7
     const tailsState = withHandDefs(
       replaceFlipRng(createCombat({ character: id('warrior'), enemies: [id('raider')] }, db, 'slash-fire'), ['tails']),
       ['fire']
     );
     const tails = useFirstCoin(tailsState, 0);
-    expect(tails.state.enemies[0]?.hp).toBe(69);
+    expect(tails.state.enemies[0]?.hp).toBe(68);
     expect(statusStacks(tails.state.enemies[0]?.statuses ?? {}, 'burn')).toBe(0);
   });
 
@@ -289,7 +294,8 @@ describe('combat golden traces', () => {
     );
     const tails = useFirstCoin(tailsState, 3);
     expect(statusStacks(tails.state.enemies[0]?.statuses ?? {}, 'burn')).toBe(1);
-    expect(tails.state.enemies[0]?.hp).toBe(72);
+    // 뒷면 효과 3 + 화염 뒷면 proc 1 (P7 D4) = 4
+    expect(tails.state.enemies[0]?.hp).toBe(71);
   });
 });
 
@@ -443,28 +449,35 @@ describe('M4 consume skills, grants, and once per combat', () => {
     expect(ended.state.zones.hand).not.toContain(fuel);
   });
 
-  it('counts consume skills toward the three-use cap', () => {
+  // P7 D1: 턴당 3회 캡 폐지 — 소비 포함 4번째 스킬 사용도 합법이다
+  it('allows a fourth skill use in the same turn, consume included (cap removed)', () => {
     const db = testDb();
     let state = withHandDefs(
       replaceFlipRng(createCombat({ character: id('warrior'), enemies: [id('raider')] }, db, 'consume-cap'), [
+        'heads',
         'heads',
         'heads',
         'heads'
       ]),
       ['basic', 'basic', 'fire', 'basic']
     );
-    state = useFirstCoin(state, 0, 0, db).state;
-    state = useFirstCoin(state, 1, 0, db).state;
+    state = useFirstCoin(state, 0, 0, db).state; // slash: 75 → 65
+    state = useFirstCoin(state, 1, 0, db).state; // guard
     const fire = state.zones.hand.find((coin) => state.coins[Number(coin)]?.defId === 'fire');
     expect(fire).toBeDefined();
     if (fire === undefined) return;
     const consume = step(state, { type: 'useConsumeSkill', slot: slot(4), coins: [fire], target: 0 }, db);
     expect(consume.ok).toBe(true);
-    if (!consume.ok) return;
+    if (!consume.ok) return; // ignite-sword: 65 → 55, 화상 2
     const fourthPlaced = step(consume.state, { type: 'placeCoin', coin: firstHandCoin(consume.state), slot: slot(3) }, db);
     expect(fourthPlaced.ok).toBe(true);
     if (!fourthPlaced.ok) return;
-    expect(step(fourthPlaced.state, { type: 'useFlipSkill', slot: slot(3), target: 0 }, db).ok).toBe(false);
+    const fourth = step(fourthPlaced.state, { type: 'useFlipSkill', slot: slot(3), target: 0 }, db);
+    expect(fourth.ok).toBe(true);
+    if (!fourth.ok) return;
+    // ignite 앞면: 기본 화상 1 + 앞면 화상 1 → 총 4
+    expect(statusStacks(fourth.state.enemies[0]?.statuses ?? {}, 'burn')).toBe(4);
+    expect(fourth.state.enemies[0]?.hp).toBe(55);
   });
 
   it('omits consume legal commands when hand has no fire or fire grant', () => {
@@ -503,37 +516,44 @@ describe('combat determinism and D0', () => {
     expect(run()).toEqual(run());
   });
 
-  it('rejects same skill twice and fourth skill use, then resets next turn', () => {
+  // P7 D1: 같은 턴 재사용은 쿨다운(기본 1)이 거부하고, 4번째 스킬 사용은 합법이며,
+  // 쿨다운은 다음 플레이어 턴 시작에 감소해 재사용이 가능해진다.
+  it('rejects a same-turn reuse via cooldown, allows a fourth use, then frees the skill next turn', () => {
     const db = testDb();
     let state = replaceFlipRng(createCombat({ character: id('warrior'), enemies: [id('raider')] }, db, 'd0'), [
+      'heads',
+      'heads',
+      'heads',
       'heads',
       'heads',
       'heads'
     ]);
     const first = useFirstCoin(state, 0);
     state = first.state;
+    expect(state.slots[0]?.cooldownRemaining).toBe(1);
 
     const sameSkill = step(state, { type: 'placeCoin', coin: firstHandCoin(state), slot: slot(0) }, db);
-    expect(sameSkill.ok && step(sameSkill.state, { type: 'useFlipSkill', slot: slot(0), target: 0 }, db).ok).toBe(
-      false
-    );
+    expect(sameSkill.ok).toBe(true);
+    if (!sameSkill.ok) return;
+    const reuse = step(sameSkill.state, { type: 'useFlipSkill', slot: slot(0), target: 0 }, db);
+    expect(reuse).toEqual({ ok: false, error: 'skill is cooling down' });
 
     const second = useFirstCoin(state, 1);
     state = second.state;
-    state.slots[2] = { skillId: id<SkillId>('slash'), usedThisTurn: false, usedThisCombat: false };
-    state.slots[3] = { skillId: id<SkillId>('guard'), usedThisTurn: false, usedThisCombat: false };
+    state.slots[2] = { skillId: id<SkillId>('slash'), cooldownRemaining: 0, usedThisCombat: false };
+    state.slots[3] = { skillId: id<SkillId>('guard'), cooldownRemaining: 0, usedThisCombat: false };
     state = useFirstCoin(state, 2).state;
-    const fourthPlaced = step(state, { type: 'placeCoin', coin: firstHandCoin(state), slot: slot(3) }, db);
-    expect(fourthPlaced.ok).toBe(true);
-    if (fourthPlaced.ok) {
-      expect(step(fourthPlaced.state, { type: 'useFlipSkill', slot: slot(3), target: 0 }, db).ok).toBe(false);
-    }
+    // 4번째 스킬 사용 — 구 3회 캡이 사라져 합법이다
+    const fourth = useFirstCoin(state, 3);
+    expect(fourth.state.slots[3]?.cooldownRemaining).toBe(1);
 
-    const ended = step(state, { type: 'endTurn' }, db);
+    const ended = step(fourth.state, { type: 'endTurn' }, db);
     expect(ended.ok).toBe(true);
     if (ended.ok) {
-      expect(ended.state.skillUsesThisTurn).toBe(0);
-      expect(ended.state.slots.every((s) => !s.usedThisTurn)).toBe(true);
+      // 턴 시작 감소: 쿨1 스킬 전부 다시 가용
+      expect(ended.state.slots.every((s) => s.cooldownRemaining === 0)).toBe(true);
+      const reloaded = step(ended.state, { type: 'placeCoin', coin: firstHandCoin(ended.state), slot: slot(0) }, db);
+      expect(reloaded.ok && step(reloaded.state, { type: 'useFlipSkill', slot: slot(0), target: 0 }, db).ok).toBe(true);
     }
   });
 });
@@ -630,6 +650,28 @@ describe('draw and win loss', () => {
     expect(fireCoins).toHaveLength(3);
     expect(temporaryFire).toHaveLength(1);
     expect(state.events.some((event) => event.type === 'traitTriggered' && event.trait === 'ember-pouch')).toBe(true);
+  });
+
+  it('preserves block granted by a combat-start hook through the opening turn', () => {
+    const db = testDb();
+    db.characters.warrior = {
+      ...db.characters.warrior!,
+      trait: {
+        id: 'opening-guard',
+        name: '선제 방어',
+        hook: 'combatStart',
+        effects: [{ kind: 'block', amount: 6 }]
+      }
+    };
+
+    const state = createCombat({ character: id('warrior'), enemies: [id('raider')] }, db, 'opening-guard');
+
+    expect(state.player.block).toBe(6);
+    expect(state.events).not.toContainEqual({
+      type: 'blockCleared',
+      target: { type: 'player' },
+      amount: 6
+    });
   });
 
   it('addCoin to hand over the cap sends overflow to discard', () => {

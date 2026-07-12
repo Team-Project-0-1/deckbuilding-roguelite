@@ -19,7 +19,17 @@ const slot = (value: number) => value as SlotId;
 const testDb = (): ContentDb => ({
   coins: {
     basic: { id: id<CoinDefId>("basic"), element: null },
-    fire: { id: id<CoinDefId>("fire"), element: "fire" },
+    fire: {
+      id: id<CoinDefId>("fire"),
+      element: "fire",
+      // P7 D4 — 속성 코인은 양면 proc 필수
+      procs: {
+        heads: [
+          { kind: "applyStatus", status: "burn", stacks: 1, to: "target" },
+        ],
+        tails: [{ kind: "damage", amount: 1 }],
+      },
+    },
   },
   skills: {
     slash: {
@@ -194,18 +204,34 @@ describe("previewFlip", () => {
     ).toBe(false);
   });
 
-  // 회귀 (다중 스킬 장전 화면 소멸): 완충 장전이어도 턴 3회 캡에 걸리면 코어가 해결을 거부한다.
+  // 회귀 (다중 스킬 장전 화면 소멸): 완충 장전이어도 쿨다운 중이면 코어가 해결을 거부한다.
+  // (P7 D1: 턴 3회 캡 폐지 — 사용 불가 사유는 이제 슬롯별 쿨다운뿐이다)
   // UI는 placed==cost만이 아니라 "useFlipSkill이 legalCommands에 있는가"로 프리뷰를 가드해야 한다.
-  it("throws at the 3-per-turn cap even when fully loaded — legality gate contract", () => {
+  it("throws while the slot is cooling down even when fully loaded — legality gate contract", () => {
     const db = testDb();
-    const state = { ...combatWithPlacedCoin(0), skillUsesThisTurn: 3 };
+    const loaded = combatWithPlacedCoin(0);
+    const used = step(
+      loaded,
+      { type: "useFlipSkill", slot: slot(0), target: 0 },
+      db,
+    );
+    if (!used.ok) throw new Error(used.error);
+    const coin = used.state.zones.hand[0];
+    if (coin === undefined) throw new Error("missing hand coin");
+    const reloaded = step(
+      used.state,
+      { type: "placeCoin", coin, slot: slot(0) },
+      db,
+    );
+    if (!reloaded.ok) throw new Error(reloaded.error);
 
-    expect(() => previewFlip(state, slot(0), db)).toThrow(
-      "skill use cap reached",
+    expect(() => previewFlip(reloaded.state, slot(0), db)).toThrow(
+      "skill is cooling down",
     );
     expect(
-      legalCommands(state, db).some(
-        (command) => command.type === "useFlipSkill",
+      legalCommands(reloaded.state, db).some(
+        (command) =>
+          command.type === "useFlipSkill" && Number(command.slot) === 0,
       ),
     ).toBe(false);
   });

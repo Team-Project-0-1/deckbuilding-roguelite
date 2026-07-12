@@ -5,7 +5,7 @@ import type { Rng } from "../rng";
 import { createCombat } from "../combat/reducer";
 import type { CombatState } from "../combat/state";
 import { actOfLayer, enemyScaleForAct, generateRunGraph, nodeGoldReward } from "./graph";
-import { RUN_SAVE_VERSION } from "./types";
+import { MAX_EQUIPPED_SKILLS, RUN_SAVE_VERSION } from "./types";
 import type {
   CreateRunConfig,
   EquippedSkills,
@@ -121,10 +121,33 @@ const fallbackCoinOptionsFor = (
     : weightedCoinOptions(db, run.character, run.bag, rng);
 };
 
-const equippedSkills = (skills: readonly SkillId[]): EquippedSkills => {
-  if (skills.length !== 6)
-    throw new Error("a run requires exactly six equipped skills");
-  return [...skills] as EquippedSkills;
+// P7 D2 — 슬롯 8 일반화: 1~8개 입력을 null 패딩으로 8칸 고정, 빈 슬롯 = null
+const equippedSkills = (skills: readonly (SkillId | null)[]): EquippedSkills => {
+  if (skills.length < 1 || skills.length > MAX_EQUIPPED_SKILLS)
+    throw new Error(`a run requires between 1 and ${MAX_EQUIPPED_SKILLS} skill slots`);
+  const padded: (SkillId | null)[] = [...skills];
+  while (padded.length < MAX_EQUIPPED_SKILLS) padded.push(null);
+  if (!padded.some((skill) => skill !== null))
+    throw new Error("a run requires at least one equipped skill");
+  return padded;
+};
+
+// 빈 슬롯이 있으면 빈 슬롯 장착이 기본, 만석이면 replaceSlot 필수 (P7 D2)
+const resolveEquipSlot = (run: RunState, replaceSlot: number | undefined): number => {
+  if (replaceSlot === undefined) {
+    const empty = run.equippedSkills.findIndex((skill) => skill === null);
+    if (empty === -1)
+      throw new Error("replaceSlot is required when all slots are filled");
+    return empty;
+  }
+  if (
+    !Number.isInteger(replaceSlot) ||
+    replaceSlot < 0 ||
+    replaceSlot >= run.equippedSkills.length
+  ) {
+    throw new Error("replacement slot is out of range");
+  }
+  return replaceSlot;
 };
 
 const requirePendingRewards = (run: RunState): PendingRewards => {
@@ -173,8 +196,12 @@ const assertRunGraphInvariants = (run: RunState): void => {
     throw new Error("rest heals must be a non-negative integer");
   if (!Number.isInteger(run.restUpgrades) || run.restUpgrades < 0)
     throw new Error("rest upgrades must be a non-negative integer");
+  if (run.equippedSkills.length !== MAX_EQUIPPED_SKILLS)
+    throw new Error("equipped skills must span the fixed slot count");
   if (run.upgradedSlots.length !== run.equippedSkills.length)
     throw new Error("upgraded slots must cover every skill slot");
+  if (run.equippedSkills.some((skillId, index) => skillId === null && run.upgradedSlots[index]))
+    throw new Error("empty skill slots cannot be upgraded");
   if (new Set(run.acquiredPassives.map(String)).size !== run.acquiredPassives.length)
     throw new Error("acquired passives must be unique");
   if (run.phase === "shop" && run.pendingShop === undefined)
@@ -528,9 +555,9 @@ const finishRewardsIfComplete = (
 export const rewardEligibleSkillIds = (
   skills: ContentDb["skills"],
   character: RunState["character"],
-  owned: readonly SkillId[],
+  owned: readonly (SkillId | null)[],
 ): SkillId[] => {
-  const ownedSet = new Set(owned.map(String));
+  const ownedSet = new Set(owned.filter((skill) => skill !== null).map(String));
   return Object.values(skills)
     .filter(
       (skill) =>
@@ -610,7 +637,7 @@ export const createRun = (config: CreateRunConfig, db: ContentDb): RunState => {
     maxHp: character.maxHp,
     bag: [...character.startingBag],
     equippedSkills: equippedSkills(character.startingSkills),
-    upgradedSlots: [false, false, false, false, false, false] as UpgradedSlots,
+    upgradedSlots: Array.from({ length: MAX_EQUIPPED_SKILLS }, () => false) as UpgradedSlots,
     acquiredPassives: [],
     gold: 0,
     graph,
@@ -940,19 +967,14 @@ export const chooseSkillReward = (
     throw new Error("skill reward is already resolved");
   if (!pending.skillOptions.includes(skill))
     throw new Error("skill is not an offered reward");
-  if (replaceSlot === undefined)
-    throw new Error("replaceSlot is required when six slots are equipped");
-  if (
-    !Number.isInteger(replaceSlot) ||
-    replaceSlot < 0 ||
-    replaceSlot >= run.equippedSkills.length
-  ) {
-    throw new Error("replacement slot is out of range");
-  }
+  const targetSlot = resolveEquipSlot(run, replaceSlot);
   const nextSkills = [...run.equippedSkills];
-  nextSkills[replaceSlot] = skill;
+  nextSkills[targetSlot] = skill;
+  // 교체 슬롯 강화 리셋 (P6 D3 계약 — 종전 미구현으로 새 스킬이 강화를 상속하던 결함 수정)
+  const nextUpgraded = [...run.upgradedSlots] as UpgradedSlots;
+  nextUpgraded[targetSlot] = false;
   return finishRewardsIfComplete(
-    { ...run, equippedSkills: equippedSkills(nextSkills) },
+    { ...run, equippedSkills: equippedSkills(nextSkills), upgradedSlots: nextUpgraded },
     { ...pending, skillChoiceResolved: true },
     db,
   );
@@ -1185,15 +1207,7 @@ export const buyShopSkill = (
   ) {
     throw new Error("shop skill option is out of range");
   }
-  if (replaceSlot === undefined)
-    throw new Error("replaceSlot is required when six slots are equipped");
-  if (
-    !Number.isInteger(replaceSlot) ||
-    replaceSlot < 0 ||
-    replaceSlot >= run.equippedSkills.length
-  ) {
-    throw new Error("replacement slot is out of range");
-  }
+  const targetSlot = resolveEquipSlot(run, replaceSlot);
   const skill = pending.skillOptions[optionIndex]!;
   const price = pending.skillPrices[optionIndex]!;
   if (price !== skillShopPrice(db, skill))
@@ -1203,11 +1217,15 @@ export const buyShopSkill = (
     throw new Error("shop skill is already owned");
   }
   const equipped = [...run.equippedSkills];
-  equipped[replaceSlot] = skill;
+  equipped[targetSlot] = skill;
+  // 교체 슬롯 강화 리셋 (P6 D3 계약 — 상속 결함 수정, 보상 흐름과 동일 규칙)
+  const purchasedUpgraded = [...run.upgradedSlots] as UpgradedSlots;
+  purchasedUpgraded[targetSlot] = false;
   return {
     ...run,
     gold: run.gold - price,
     equippedSkills: equippedSkills(equipped),
+    upgradedSlots: purchasedUpgraded,
     shopPurchasedSkills: run.shopPurchasedSkills + 1,
     pendingShop: {
       ...pending,

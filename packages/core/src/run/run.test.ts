@@ -84,8 +84,25 @@ const testDb = (): ContentDb => {
   return {
     coins: {
       basic: { id: id<CoinDefId>("basic"), element: null },
-      fire: { id: id<CoinDefId>("fire"), element: "fire" },
-      mana: { id: id<CoinDefId>("mana"), element: "mana" },
+      // P7 D4 — 속성 코인은 양면 proc 스키마 (런 계층 테스트에서는 플립되지 않는다)
+      fire: {
+        id: id<CoinDefId>("fire"),
+        element: "fire",
+        procs: {
+          heads: [
+            { kind: "applyStatus", status: "burn", stacks: 1, to: "target" },
+          ],
+          tails: [{ kind: "damage", amount: 1 }],
+        },
+      },
+      mana: {
+        id: id<CoinDefId>("mana"),
+        element: "mana",
+        procs: {
+          heads: [{ kind: "block", amount: 1 }],
+          tails: [{ kind: "block", amount: 2 }],
+        },
+      },
       // 경계 회귀 고정: 기본 testDb의 보상 풀은 3종을 유지한다 — 풀이 3을 넘으면
       // §825 가중 경로가 켜져 레거시 골든이 전부 흔들린다. 임시 코인 sentinel 'ash'는
       // db 멤버십이 필요 없으므로(전투 상태 직접 주입·미제공 보상 거부용) 여기 넣지 않는다.
@@ -744,7 +761,8 @@ describe("run progression", () => {
     expect(chosen.bag).toHaveLength(rewards.bag.length + 1);
   });
 
-  it("offers one elite skill, requires an explicit replacement slot, and has no removal stage", () => {
+  // P7 D2: 빈 슬롯이 있으면 replaceSlot 생략 시 첫 빈 슬롯에 자동 장착, 만석일 때만 필수
+  it("offers one elite skill, auto-fills the first empty slot, and requires replaceSlot only when full", () => {
     const rewards = eliteRewardState();
     expect(rewards.gold).toBe(70);
     expect(rewards.pendingRewards).toMatchObject({
@@ -753,6 +771,9 @@ describe("run progression", () => {
       skillChoiceResolved: false,
     });
     expect(rewards.pendingRewards?.skillOptions).toHaveLength(1);
+    // 시작 6스킬 → 8칸 패딩: 슬롯 6·7이 빈 슬롯(null)
+    expect(rewards.equippedSkills).toHaveLength(8);
+    expect(rewards.equippedSkills.slice(6)).toEqual([null, null]);
 
     const afterCoin = chooseCoinReward(rewards, null);
     // 신스펙 보상에 제거 단계는 존재하지 않는다 (저장 호환 필드만 true 고정)
@@ -762,18 +783,39 @@ describe("run progression", () => {
 
     const skill = afterCoin.pendingRewards?.skillOptions[0];
     if (skill === undefined) throw new Error("missing skill reward");
-    expect(() => chooseSkillReward(afterCoin, skill)).toThrow(
-      "replaceSlot is required",
+    expect(() => chooseSkillReward(afterCoin, skill, 8)).toThrow(
+      "replacement slot is out of range",
     );
-    expect(() => chooseSkillReward(afterCoin, skill, 6)).toThrow(
+    expect(() => chooseSkillReward(afterCoin, skill, -1)).toThrow(
       "replacement slot is out of range",
     );
 
-    const replaced = chooseSkillReward(afterCoin, skill, 2);
-    // 보상 완주 → 다음 레이어(단일 전투) 진입: db 없이도 ready가 정확한 상태다
+    // replaceSlot 생략 → 첫 빈 슬롯(6)에 자동 장착
+    const autoFilled = chooseSkillReward(afterCoin, skill);
+    expect(autoFilled.phase).toBe("ready");
+    expect(autoFilled.equippedSkills[6]).toBe(skill);
+    expect(autoFilled.equippedSkills).toHaveLength(8);
+
+    // 명시 교체도 여전히 동작하고, 교체 슬롯의 강화 플래그는 리셋된다 (버그 수정 계약)
+    const upgradedAtTwo = {
+      ...afterCoin,
+      upgradedSlots: afterCoin.upgradedSlots.map((_, index) => index === 2),
+    };
+    const replaced = chooseSkillReward(upgradedAtTwo, skill, 2);
     expect(replaced.phase).toBe("ready");
     expect(replaced.equippedSkills[2]).toBe(skill);
-    expect(replaced.equippedSkills).toHaveLength(6);
+    expect(replaced.upgradedSlots[2]).toBe(false);
+
+    // 만석이면 replaceSlot 필수
+    const full = {
+      ...afterCoin,
+      equippedSkills: afterCoin.equippedSkills.map(
+        (slotSkill, index) => slotSkill ?? id<SkillId>(`filler-${index}`),
+      ),
+    };
+    expect(() => chooseSkillReward(full, skill)).toThrow(
+      "replaceSlot is required when all slots are filled",
+    );
   });
 
   it("supports skipping both coin and skill rewards", () => {
@@ -954,11 +996,12 @@ describe("run progression", () => {
       },
       nodeChoices: [0, 0],
       phase: "rest",
-      upgradedSlots: [upgraded, false, false, false, false, false] as UpgradedSlots,
+      // P7 D2 — 슬롯 8 고정 (equippedSkills와 길이 일치 불변식)
+      upgradedSlots: [upgraded, false, false, false, false, false, false, false] as UpgradedSlots,
     });
 
     const upgraded = restUpgrade(restState(), 0, db);
-    expect(upgraded.upgradedSlots).toEqual([true, false, false, false, false, false]);
+    expect(upgraded.upgradedSlots).toEqual([true, false, false, false, false, false, false, false]);
     expect(upgraded.restUpgrades).toBe(1);
     expect(upgraded.phase).toBe("ready");
     // 강화 미정의(s2)·이미 강화된 슬롯·범위 밖 슬롯 거부
@@ -1146,7 +1189,7 @@ describe("run progression", () => {
       gold: 35,
       graph: generateRunGraph("SAVE-ROUND-TRIP", db),
       nodeChoices: Array.from({ length: 30 }, () => 0),
-      upgradedSlots: [false, false, false, false, false, false],
+      upgradedSlots: [false, false, false, false, false, false, false, false],
       acquiredPassives: [],
       shopRemovals: 0,
       shopPurchasedCoins: 0,
