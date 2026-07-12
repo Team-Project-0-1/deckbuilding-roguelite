@@ -21,6 +21,22 @@ import {
 } from "@game/core";
 
 export const RUN_SAVE_KEY = "deckbuilding-roguelite.run-save";
+// P5.4 저장 계약: 이중 쓰기(주+백업)·손상 시 백업 복구·원문 격리(조용한 삭제 금지)
+export const RUN_SAVE_BACKUP_KEY = `${RUN_SAVE_KEY}.backup`;
+export const RUN_SAVE_QUARANTINE_KEY = `${RUN_SAVE_KEY}.quarantine`;
+
+export type LoadRunStatus =
+  | "missing"      // 저장 없음
+  | "loaded"       // 주 저장 정상
+  | "recovered"    // 주 손상 → 백업으로 복구 (주 원문은 격리)
+  | "corrupt"      // 주·백업 모두 파싱 불가 (원문 격리, 사용자 결정 대기)
+  | "unsupported"  // 형식은 유효하나 미지 버전/콘텐츠 (원문 격리, 사용자 결정 대기)
+  | "unavailable"; // 저장소 접근 자체가 불가
+
+export interface LoadRunResult {
+  status: LoadRunStatus;
+  save: RunSave | null;
+}
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -664,25 +680,111 @@ export const saveRun = (
   storage: StorageLike,
   save: RunSave,
   context: RunValidationContext,
-): void => {
-  storage.setItem(RUN_SAVE_KEY, serializeRunSave(save, context));
+): boolean => {
+  const raw = serializeRunSave(save, context);
+  let primaryOk = false;
+  try {
+    storage.setItem(RUN_SAVE_KEY, raw);
+    primaryOk = true;
+  } catch {
+    primaryOk = false;
+  }
+  try {
+    storage.setItem(RUN_SAVE_BACKUP_KEY, raw);
+  } catch {
+    // 백업 실패는 경고 대상이지만 주 성공이면 저장은 유효
+  }
+  return primaryOk;
+};
+
+// 손상 vs 미지원 판별: JSON 파싱 불가/형식 파손 = corrupt. 파싱은 되는데
+// (a) 미래 스키마 버전 또는 (b) 알 수 없는 콘텐츠 버전이면 = unsupported
+// (다른 세대의 정상 저장 — 데이터 파손이 아니다).
+const classifyInvalidRaw = (
+  raw: string,
+  expectedContentVersion: string,
+): "corrupt" | "unsupported" => {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof value !== "object" || value === null) return "corrupt";
+    const version = value.version;
+    if (typeof version === "number" && version > RUN_SAVE_VERSION)
+      return "unsupported";
+    if (typeof value.contentVersion === "string") {
+      const knownContentVersions = new Set<string>([
+        expectedContentVersion,
+        ...LEGACY_CONTENT_VERSIONS,
+      ]);
+      if (!knownContentVersions.has(value.contentVersion)) return "unsupported";
+    }
+    return "corrupt";
+  } catch {
+    return "corrupt";
+  }
+};
+
+const quarantineRaw = (storage: StorageLike, raw: string): void => {
+  try {
+    storage.setItem(RUN_SAVE_QUARANTINE_KEY, raw);
+  } catch {
+    // 격리 실패해도 로드 흐름은 계속 — 원문은 주 키에 그대로 남는다
+  }
+};
+
+export const loadRunDetailed = (
+  storage: StorageLike,
+  expectedContentVersion: string,
+  context: RunValidationContext,
+): LoadRunResult => {
+  let primaryRaw: string | null;
+  let backupRaw: string | null;
+  try {
+    primaryRaw = storage.getItem(RUN_SAVE_KEY);
+    backupRaw = storage.getItem(RUN_SAVE_BACKUP_KEY);
+  } catch {
+    return { status: "unavailable", save: null };
+  }
+  if (primaryRaw === null && backupRaw === null)
+    return { status: "missing", save: null };
+
+  if (primaryRaw !== null) {
+    const primary = parseRunSave(primaryRaw, expectedContentVersion, context);
+    if (primary !== null) return { status: "loaded", save: primary };
+  }
+  // 주 저장 손상/부재 — 백업 시도
+  if (backupRaw !== null) {
+    const backup = parseRunSave(backupRaw, expectedContentVersion, context);
+    if (backup !== null) {
+      if (primaryRaw !== null) quarantineRaw(storage, primaryRaw);
+      try {
+        storage.setItem(RUN_SAVE_KEY, backupRaw);
+      } catch {
+        // 주 키 복원 실패해도 이번 세션은 백업 값으로 진행
+      }
+      return { status: "recovered", save: backup };
+    }
+  }
+  // 둘 다 무효 — 원문 격리 후 사용자 결정 대기 (주 키는 지우지 않는다)
+  const worst = primaryRaw ?? backupRaw;
+  if (worst !== null) quarantineRaw(storage, worst);
+  return {
+    status: classifyInvalidRaw(worst ?? "", expectedContentVersion),
+    save: null,
+  };
 };
 
 export const loadRun = (
   storage: StorageLike,
   expectedContentVersion: string,
   context: RunValidationContext,
-): RunSave | null => {
-  try {
-    const raw = storage.getItem(RUN_SAVE_KEY);
-    return raw === null
-      ? null
-      : parseRunSave(raw, expectedContentVersion, context);
-  } catch {
-    return null;
-  }
-};
+): RunSave | null =>
+  loadRunDetailed(storage, expectedContentVersion, context).save;
 
 export const clearRun = (storage: StorageLike): void => {
+  try {
+    storage.removeItem(RUN_SAVE_BACKUP_KEY);
+  } catch {
+    // 백업 정리 실패는 무시
+  }
   storage.removeItem(RUN_SAVE_KEY);
 };

@@ -152,7 +152,7 @@ import type {
   CoinPileZone,
   DragSource,
 } from "./interaction";
-import { RUN_SAVE_KEY, clearRun, loadRun, saveRun } from "./run-storage";
+import { clearRun, loadRunDetailed, saveRun } from "./run-storage";
 import {
   beginHumanCombat,
   createHumanRunTrace,
@@ -649,11 +649,16 @@ const testSkillsFromUrl = (
 };
 
 const persistRun = (run: RunState): void => {
+  let ok = false;
   try {
-    saveRun(window.localStorage, run, contentDb);
+    ok = saveRun(window.localStorage, run, contentDb);
   } catch {
-    // 저장소가 차단된 브라우저에서도 현재 탭의 런은 계속 플레이할 수 있다.
+    ok = false;
   }
+  // 저장 실패는 조용히 넘기지 않는다 — RunMeta 경고 배지가 구독 (P5.4)
+  window.dispatchEvent(
+    new CustomEvent("run-save-status", { detail: { ok } }),
+  );
 };
 
 const freshSession = (
@@ -712,18 +717,20 @@ const bootState = (): BootState => {
       mode: "run",
       session: freshSession(seedFromUrl(), testCharacter ?? ("warrior" as CharacterId)),
     };
-  const saved = loadRun(window.localStorage, CONTENT_VERSION, contentDb);
-  // P5.4 복구: 저장이 존재하는데 검증을 통과하지 못하면 조용히 버리지 않고
-  // 명시적으로 알린 뒤 사용자가 새 런을 선택하게 한다.
-  let corruptSave = false;
-  if (saved === null) {
-    try {
-      corruptSave = window.localStorage.getItem(RUN_SAVE_KEY) !== null;
-    } catch {
-      corruptSave = false;
-    }
+  // P5.4 복구 계약: 상태 판별(missing/loaded/recovered/corrupt/unsupported/
+  // unavailable) — 주 손상 시 백업 복구, 둘 다 무효면 원문 격리 후 명시 화면.
+  const detailed = loadRunDetailed(window.localStorage, CONTENT_VERSION, contentDb);
+  if (detailed.status === "unavailable") {
+    // 저장소 접근 불가 — 진행은 가능하되 경고 배지를 세운다 (마운트 후 1회)
+    window.setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("run-save-status", { detail: { ok: false } }),
+      );
+    }, 0);
   }
-  if (corruptSave) return { mode: "corrupt-save" };
+  if (detailed.status === "corrupt" || detailed.status === "unsupported")
+    return { mode: "corrupt-save" };
+  const saved = detailed.save;
   if (saved === null) {
     // URL contract: existing playtests boot with ?seed= and must keep the legacy
     // warrior fast path. Character selection appears only on pure new entry or
@@ -763,6 +770,24 @@ const SkillRewardMark = ({
   if (tags.includes("defense")) return <ShieldIcon scale={scale} />;
   if (tags.includes("attack")) return <SwordIcon scale={scale} />;
   return <EmberIcon scale={scale} />;
+};
+
+const SaveWarningBadge = () => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const onStatus = (event: Event) => {
+      const ok = (event as CustomEvent<{ ok: boolean }>).detail.ok;
+      setFailed(!ok);
+    };
+    window.addEventListener("run-save-status", onStatus);
+    return () => window.removeEventListener("run-save-status", onStatus);
+  }, []);
+  if (!failed) return null;
+  return (
+    <span className="save-warning" data-testid="save-warning" role="status">
+      저장 실패 — 진행이 보존되지 않을 수 있음
+    </span>
+  );
 };
 
 const MuteToggle = () => {
@@ -845,6 +870,7 @@ const RunMeta = ({ run }: { run: RunState }) => {
         골드 {run.gold}
       </span>
       <span>시도 {run.attempt + 1}</span>
+      <SaveWarningBadge />
       <MuteToggle />
       <small>SEED {run.runSeed}</small>
     </header>
@@ -2573,7 +2599,12 @@ const CombatBoard = ({
       data-run-phase={run.phase}
     >
       <div className="backdrop" aria-hidden="true">
-        <img alt="" className="backdrop-img" src={bgForest} />
+        <img
+          alt=""
+          className="backdrop-img"
+          src={bgForest}
+          onError={(event) => event.currentTarget.remove()}
+        />
       </div>
       <RunMeta run={run} />
       {isTestEncounter ? (
@@ -2886,6 +2917,7 @@ const CombatBoard = ({
                 {skill !== undefined &&
                 CARD_ART[String(skill.id)] !== undefined ? (
                   <img
+                    onError={(event) => event.currentTarget.remove()}
                     alt=""
                     className="card-art-img"
                     src={CARD_ART[String(skill.id)]}

@@ -92,6 +92,11 @@ export const AtlasSprite = ({ atlasUrl, manifest, motion, playKey, side }: Atlas
         href={atlasUrl}
         imageRendering="pixelated"
         width={manifest.frame_layout.sheetWidth}
+        onError={(event) => {
+          // P5.4 자산 폴백: 아틀라스 로드 실패 시 깨진 사각형 대신 조용히 제거
+          // (유닛 플레이트·전투 진행은 그대로 — 백지/차단 금지)
+          event.currentTarget.closest("svg")?.remove();
+        }}
       />
     </svg>
   );

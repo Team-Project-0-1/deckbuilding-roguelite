@@ -3776,6 +3776,139 @@ const winCurrentCombat = async (page) => {
   await context.close();
 }
 
+// ---------- 시나리오 31: P5.4 리로드 영속 — 8페이즈 전부 저장/복원 ----------
+{
+  const phaseSave = (phase, extra = {}) => ({
+    version: 5,
+    contentVersion: "0.10.0-p4.4",
+    runSeed: "S31",
+    character: "warrior",
+    currentHp: 63,
+    maxHp: 70,
+    bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
+    equippedSkills: [
+      "slash",
+      "guard",
+      "burning-strike",
+      "ignite",
+      "ignite-sword",
+      "flame-rampage",
+    ],
+    gold: 60,
+    graph: {
+      layers: [
+        [{ id: "p0", kind: "elite", encounter: ["raider-plus"] }],
+        [{ id: "p1", kind: "combat", encounter: ["raider"] }],
+        [{ id: "p2", kind: "shop" }],
+        [
+          { id: "p3a", kind: "shop" },
+          { id: "p3b", kind: "combat", encounter: ["goblin", "ghoul"] },
+        ],
+        [{ id: "p4", kind: "event" }],
+        [{ id: "p5", kind: "boss", encounter: ["ember-archmage"] }],
+      ],
+    },
+    nodeChoices: [0, 0, 0, 0, 0, 0],
+    shopRemovals: 0,
+    shopPurchasedCoins: 0,
+    shopPurchasedSkills: 0,
+    eventCombats: 0,
+    eventCoinGains: 0,
+    eventCoinLosses: 0,
+    combatIndex: 1,
+    attempt: 0,
+    phase,
+    ...extra,
+  });
+  const cases = [
+    ["ready", phaseSave("ready"), "ready"],
+    ["combat", phaseSave("combat"), "combat"],
+    [
+      "rewards",
+      phaseSave("rewards", {
+        pendingRewards: {
+          coinOptions: ["basic", "fire", "mana"],
+          coinChoiceResolved: false,
+          coinRemovalResolved: false,
+          skillOptions: [],
+          skillChoiceResolved: true,
+        },
+      }),
+      "rewards",
+    ],
+    [
+      "shop",
+      phaseSave("shop", {
+        combatIndex: 2,
+        pendingShop: {
+          coinOptions: ["basic", "fire", "mana"],
+          coinPrices: [25, 50, 70],
+          skillOptions: ["smash", "fire-infusion"],
+          skillPrices: [50, 80],
+        },
+      }),
+      "shop",
+    ],
+    [
+      "event",
+      phaseSave("event", {
+        combatIndex: 4,
+        pendingEvent: { eventId: "blood-offering" },
+      }),
+      "event",
+    ],
+    ["choose-node", phaseSave("choose-node", { combatIndex: 3 }), "choose-node"],
+    ["victory", phaseSave("victory", { combatIndex: 5 }), "victory"],
+    ["defeat", phaseSave("defeat", { currentHp: 0 }), "defeat"],
+  ];
+  for (const [label, save, expectPhase] of cases) {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error.message)));
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate(
+      ([k, v]) => window.localStorage.setItem(k, v),
+      ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
+    );
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(
+      '[data-testid="run-phase"], main.combat-shell',
+      { timeout: 15000 },
+    );
+    const phase1 = await page
+      .locator('[data-testid="run-phase"], main.combat-shell')
+      .first()
+      .getAttribute("data-run-phase");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(
+      '[data-testid="run-phase"], main.combat-shell',
+      { timeout: 15000 },
+    );
+    const phase2 = await page
+      .locator('[data-testid="run-phase"], main.combat-shell')
+      .first()
+      .getAttribute("data-run-phase");
+    check(
+      `S31 ${label} 리로드 영속`,
+      phase1 === expectPhase && phase2 === expectPhase,
+      `1차 ${phase1} / 2차 ${phase2}`,
+    );
+    if (label === "combat") {
+      // 전투 중 리로드는 시도 증가 재개 의미론
+      const attempt = await page
+        .locator("main.combat-shell")
+        .getAttribute("data-attempt");
+      check("S31 combat 리로드 시도 증가", Number(attempt) >= 1, `attempt=${attempt}`);
+    }
+    check(`S31 ${label} 에러 0`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 await browser.close();
 if (server !== null)
   await new Promise((resolveClose) => server.httpServer.close(resolveClose));
