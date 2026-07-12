@@ -113,6 +113,12 @@ const waitForKeywordTooltip = (page, description, visible) =>
     { expected: description, shouldBeVisible: visible },
   );
 
+const continueFromTitleIfShown = async (page) => {
+  const continueButton = page.locator('[data-testid="title-continue"]');
+  if ((await continueButton.count()) === 0) return;
+  await continueButton.click();
+};
+
 const turnBuffTooltipVisible = (page, expected) =>
   page.evaluate((text) => {
     const tip = [...document.querySelectorAll(".turn-buff-tip")].find(
@@ -274,6 +280,7 @@ const winCurrentCombat = async (page) => {
     (await page.locator('[data-testid="mute-toggle"]').first().getAttribute("aria-pressed")) === "true",
   );
   await page.reload({ waitUntil: "networkidle" });
+  await continueFromTitleIfShown(page);
   await page.waitForFunction(
     () => document.querySelector(".end-turn:not(:disabled)") !== null,
     undefined,
@@ -1413,6 +1420,7 @@ const winCurrentCombat = async (page) => {
 
   const attemptBeforeReload = Number(await main().getAttribute("data-attempt"));
   await page.reload({ waitUntil: "networkidle" });
+  await continueFromTitleIfShown(page);
   await waitForCombatOrBoundary(page);
   const attemptAfterReload = Number(await main().getAttribute("data-attempt"));
   check(
@@ -1476,6 +1484,7 @@ const winCurrentCombat = async (page) => {
       ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
     );
     await page2.goto(baseUrl, { waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page2);
     return { page: page2, errors: errors2, context };
   };
   // v7 저장 픽스처 — acts 메타 포함 = P6+P7 규칙 적용 (스킬 제안 원천 = 엘리트 정산).
@@ -3063,6 +3072,7 @@ const winCurrentCombat = async (page) => {
         errors.push(`console: ${message.text()}`);
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page);
     return { page, errors, context };
   };
 
@@ -3318,6 +3328,7 @@ const winCurrentCombat = async (page) => {
       ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
     );
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page);
     await page.waitForSelector('[data-testid="event-screen"]', {
       timeout: 15000,
     });
@@ -3458,6 +3469,7 @@ const winCurrentCombat = async (page) => {
         ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
       );
     await page.goto(url ?? baseUrl, { waitUntil: "networkidle" });
+    if (save) await continueFromTitleIfShown(page);
     if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
     await page.waitForTimeout(400);
     return { page, errors, context };
@@ -3669,6 +3681,7 @@ const winCurrentCombat = async (page) => {
         ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
       );
     await page.goto(url ?? baseUrl, { waitUntil: "networkidle" });
+    if (save) await continueFromTitleIfShown(page);
     if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
     return { page, errors, context };
   };
@@ -4020,6 +4033,7 @@ const winCurrentCombat = async (page) => {
       ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
     );
     await page.reload({ waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page);
     await page.waitForSelector(
       '[data-testid="run-phase"], main.combat-shell',
       { timeout: 15000 },
@@ -4029,6 +4043,7 @@ const winCurrentCombat = async (page) => {
       .first()
       .getAttribute("data-run-phase");
     await page.reload({ waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page);
     await page.waitForSelector(
       '[data-testid="run-phase"], main.combat-shell',
       { timeout: 15000 },
@@ -4169,6 +4184,7 @@ const bootV6 = async (save, waitSel) => {
     ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
   );
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await continueFromTitleIfShown(page);
   if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
   return { page, errors, context };
 };
