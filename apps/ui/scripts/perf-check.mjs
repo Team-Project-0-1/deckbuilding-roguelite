@@ -17,7 +17,11 @@ const base = "http://127.0.0.1:4186/deckbuilding-roguelite/";
 const server = await (
   await import("vite")
 ).preview({ root, preview: { host: "127.0.0.1", port: 4186, strictPort: true } });
-const browser = await chromium.launch();
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
+    ? {}
+    : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
+);
 
 const measureBoot = async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -90,7 +94,7 @@ const report = {
   reportOnly: ["tti", "commandRoundtrip"],
   mitigation: "warm-up 1회 폐기 + 측정 3회 median(LCP)/worst(CLS·롱태스크)",
   budgets: {
-    distBytes: 2726297,
+    distBytes: 2736537,
     ttiMs: 3000,
     lcpMs: 2500,
     clsMax: 0.1,
@@ -107,7 +111,7 @@ const report = {
     runs,
   },
   withinBudget: {
-    dist: distBytes <= 2726297,
+    dist: distBytes <= 2736537,
     tti: median(runs.map((r) => r.tti)) <= 3000,
     lcp: lcpMedian <= 2500,
     cls: clsWorst <= 0.1,

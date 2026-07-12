@@ -20,7 +20,11 @@ const server =
         await import("vite")
       ).preview({ root, preview: { host: "127.0.0.1", port: 4183, strictPort: true } })
     : null;
-const browser = await chromium.launch();
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
+    ? {}
+    : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
+);
 
 const measure = (page, targets) =>
   page.evaluate((targetList) => {
@@ -205,6 +209,7 @@ await shopPage.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [
   }),
 ]);
 await shopPage.goto(base, { waitUntil: "networkidle" });
+await shopPage.locator('[data-testid="title-continue"]').click();
 await shopPage.waitForSelector('[data-testid="shop-screen"]', { timeout: 15000 });
 report.push(
   ...(await measure(shopPage, [
