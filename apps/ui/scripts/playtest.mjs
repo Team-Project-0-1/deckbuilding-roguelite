@@ -3556,6 +3556,182 @@ const winCurrentCombat = async (page) => {
   }
 }
 
+// ---------- 시나리오 29: P5.3 접근성 — 키보드 완주 (Tab/Enter/Escape) ----------
+{
+  const kbBoot = async ({ url, save, waitSel }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error.message)));
+    page.on("console", (message) => {
+      if (
+        message.type() === "error" &&
+        !message.location().url.endsWith("/favicon.ico")
+      )
+        errors.push(message.text());
+    });
+    if (save)
+      await page.addInitScript(
+        ([k, v]) => window.localStorage.setItem(k, v),
+        ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
+      );
+    await page.goto(url ?? baseUrl, { waitUntil: "networkidle" });
+    if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
+    return { page, errors, context };
+  };
+  const pressOn = async (page, locator) => {
+    await locator.focus();
+    await page.keyboard.press("Enter");
+  };
+  const kbSave = (phase, extra = {}) => ({
+    version: 5,
+    contentVersion: "0.10.0-p4.4",
+    runSeed: "S29",
+    character: "warrior",
+    currentHp: 63,
+    maxHp: 70,
+    bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
+    equippedSkills: [
+      "slash",
+      "guard",
+      "burning-strike",
+      "ignite",
+      "ignite-sword",
+      "flame-rampage",
+    ],
+    gold: 135,
+    graph: {
+      layers: [
+        [{ id: "k0", kind: "elite", encounter: ["raider-plus"] }],
+        [{ id: "k1", kind: "elite", encounter: ["gatekeeper-plus"] }],
+        [{ id: "k2", kind: "shop" }],
+        [
+          { id: "k3a", kind: "shop" },
+          { id: "k3b", kind: "combat", encounter: ["goblin", "ghoul"] },
+        ],
+        [{ id: "k4", kind: "event" }],
+        [{ id: "k5", kind: "boss", encounter: ["ember-archmage"] }],
+      ],
+    },
+    nodeChoices: [0, 0, 0, 0, 0, 0],
+    shopRemovals: 0,
+    shopPurchasedCoins: 0,
+    shopPurchasedSkills: 0,
+    eventCombats: 0,
+    eventCoinGains: 0,
+    eventCoinLosses: 0,
+    combatIndex: 2,
+    attempt: 0,
+    phase,
+    ...extra,
+  });
+
+  // ① 전투: 코인 선택 → 소켓 장전 → 카드 사용 → 턴 종료 전부 focus+Enter
+  {
+    const { page, errors, context } = await kbBoot({
+      url: `${baseUrl}?seed=${SEED}&encounter=raider`,
+      waitSel: ".end-turn",
+    });
+    // 초기 이벤트 큐 소진(locked 해제)까지 대기 — boot()와 동일 조건
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".end-turn:not(:disabled)") !== null &&
+        document.querySelector(".float-text") === null,
+      undefined,
+      { timeout: 20000 },
+    );
+    await pressOn(page, page.locator(".hand-tray .coin").first());
+    const card = page.locator(".skill-card", { hasText: "베기" }).first();
+    await pressOn(page, card.locator(".socket").first());
+    check(
+      "S29 키보드 장전",
+      (await card.locator(".socket-coin").count()) >= 1,
+    );
+    await pressOn(page, card.locator(".card-title"));
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 15000 },
+    );
+    check("S29 키보드 스킬 사용 생존", await shellAlive(page));
+    await pressOn(page, page.locator(".end-turn"));
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 30000 },
+    );
+    check("S29 키보드 턴 종료", true);
+    // 키워드 툴팁 Escape 해제 (WCAG 1.4.13)
+    const chip = page.locator(".chip-keyword").first();
+    if ((await chip.count()) > 0) {
+      await chip.locator("em").first().focus();
+      await page.keyboard.press("Escape");
+    }
+    check("S29 전투 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // ② 상점: 구매·나가기 키보드
+  {
+    const { page, errors, context } = await kbBoot({
+      save: kbSave("shop", {
+        pendingShop: {
+          coinOptions: ["basic", "fire", "mana"],
+          coinPrices: [25, 50, 70],
+          skillOptions: ["smash", "fire-infusion"],
+          skillPrices: [50, 80],
+        },
+      }),
+      waitSel: '[data-testid="shop-screen"]',
+    });
+    await pressOn(page, page.locator('[data-testid="shop-coin-basic"]'));
+    check(
+      "S29 상점 키보드 구매 (골드 110)",
+      (
+        await page.locator('[data-testid="run-gold"]').innerText()
+      ).includes("110"),
+    );
+    await pressOn(page, page.locator(".shop-leave"));
+    check(
+      "S29 상점 키보드 나가기 → 갈림길",
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-run-phase")) === "choose-node",
+    );
+    // ③ 갈림길: 노드 선택 키보드
+    await pressOn(page, page.locator('[data-testid="node-option-1"]'));
+    check(
+      "S29 갈림길 키보드 선택 → 전투 준비",
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-run-phase")) === "ready",
+    );
+    check("S29 상점/갈림길 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // ④ 이벤트: 거절 키보드
+  {
+    const { page, errors, context } = await kbBoot({
+      save: kbSave("event", {
+        combatIndex: 4,
+        pendingEvent: { eventId: "coin-sacrifice" },
+      }),
+      waitSel: '[data-testid="event-screen"]',
+    });
+    await pressOn(page, page.locator('[data-testid="event-decline"]'));
+    check(
+      "S29 이벤트 키보드 거절 → 진행",
+      (await page
+        .locator('[data-testid="run-phase"]')
+        .getAttribute("data-run-phase")) !== "event",
+    );
+    check("S29 이벤트 에러 0", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 await browser.close();
 if (server !== null)
   await new Promise((resolveClose) => server.httpServer.close(resolveClose));

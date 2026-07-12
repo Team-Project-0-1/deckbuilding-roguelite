@@ -2202,6 +2202,9 @@ const CombatBoard = ({
       );
     };
 
+    const reducedMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let delay = 180;
     if (event?.type === "coinFlipped") {
       setFlipping((items) => ({ ...items, [Number(event.coin)]: true }));
@@ -2302,7 +2305,11 @@ const CombatBoard = ({
       delay = 260;
     }
 
-    const timer = window.setTimeout(() => setQueue(rest), delay + 150);
+    // reduced-motion: 연출 대기 시간을 최소화 (JS 딜레이도 모션의 일부 — P5.3 감사)
+    const timer = window.setTimeout(
+      () => setQueue(rest),
+      reducedMotion ? Math.min(delay, 120) : delay + 150,
+    );
     return () => window.clearTimeout(timer);
   }, [locked, queue, resolving, state.turnTriggers]);
 
@@ -3127,15 +3134,24 @@ const UnitPanel = ({
           </Keyword>
         ) : null}
         {attackBuff > 0 ? (
-          <em
-            aria-label={`버프: 다음 공격 +${attackBuff}`}
-            className="attack-buff-chip"
-          >
-            ↑ 공격 +{attackBuff}
-          </em>
+          <Keyword className="chip-keyword" term="attack-buff">
+            <em
+              aria-label={`버프: 다음 공격 +${attackBuff}`}
+              className="attack-buff-chip"
+            >
+              ↑ 공격 +{attackBuff}
+            </em>
+          </Keyword>
         ) : null}
       </div>
-      <div aria-label={`체력 ${hp}/${maxHp}`} className="hp-bar">
+      <div
+        aria-label={`체력 ${hp}/${maxHp}`}
+        aria-valuemax={maxHp}
+        aria-valuemin={0}
+        aria-valuenow={hp}
+        className="hp-bar"
+        role="progressbar"
+      >
         <HeartIcon scale={1.4} />
         <div className="hp-track">
           <div

@@ -546,7 +546,8 @@ button:focus-visible {
   font-size: 13px;
   letter-spacing: 0.5px;
   background: linear-gradient(#f1c85d, var(--gold) 60%, #a87524);
-  color: var(--ink);
+  /* P5.3 대비: 최암 스톱 #a87524 대비 AA(4.5:1) — --ink(3.73:1)에서 강화 */
+  color: #12101a;
   border: none;
   border-bottom: 3px solid var(--out);
   text-shadow: 1px 1px 0 rgba(255, 238, 175, 0.45);
@@ -2680,4 +2681,27 @@ button:focus-visible {
 .mute-toggle[aria-pressed="true"] {
   background: #3c5a35;
   color: #d6f5c9;
+}
+
+/* P5.3 forced-colors (Windows 고대비) — 시스템 팔레트 존중, 경계 유지 */
+@media (forced-colors: active) {
+  .skill-card,
+  .unit-plate,
+  .shop-item,
+  .node-card,
+  .event-pick,
+  .mute-toggle,
+  .end-turn,
+  .coin,
+  .socket {
+    border: 1px solid ButtonText;
+    forced-color-adjust: auto;
+  }
+  .hp-fill {
+    background: Highlight;
+  }
+  .card-title,
+  .intent {
+    forced-color-adjust: auto;
+  }
 }

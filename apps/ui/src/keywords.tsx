@@ -12,6 +12,7 @@ export type KeywordTerm =
   | "frostbite"
   | "shock"
   | "trigger"
+  | "attack-buff"
   | "temporary"
   | "elementCoin";
 
@@ -54,6 +55,11 @@ export const KEYWORD_GLOSSARY: Record<
   trigger: {
     label: "턴 버프",
     description: "이번 턴 동안만 유지되는 발동 효과. 턴이 끝나면 사라진다.",
+  },
+  "attack-buff": {
+    label: "공격 버프",
+    description:
+      "다음 공격 행동 1회의 피해가 표시만큼 늘어난다. 사용하면 사라지고, 사용 전에는 유지되며 중첩 시 더해진다.",
   },
   temporary: {
     label: "임시 코인",
