@@ -1,0 +1,235 @@
+{
+  "ok": true,
+  "engine": "component-row",
+  "run_dir": "/mnt/d/Documents/GitHub/deckbuilding-roguelite/apps/ui/src/assets/generated/sprites/ember-archmage",
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "explicit",
+    "note": "auto(cyan)는 base 기준 선택 — 행 배경은 마젠타로 생성되어 명시 고정 (P4.6 추출 실패 원인 수정)"
+  },
+  "rows": [
+    {
+      "state": "idle",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/idle/frame-0.png",
+        "frames/idle/frame-1.png",
+        "frames/idle/frame-2.png",
+        "frames/idle/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 16992,
+          "bbox": [
+            46,
+            26,
+            196,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 17040,
+          "bbox": [
+            46,
+            26,
+            198,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 16888,
+          "bbox": [
+            46,
+            26,
+            196,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 16840,
+          "bbox": [
+            46,
+            26,
+            196,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/idle/frame-0.plain.png",
+        "frames/idle/frame-1.plain.png",
+        "frames/idle/frame-2.plain.png",
+        "frames/idle/frame-3.plain.png"
+      ]
+    },
+    {
+      "state": "attack",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/attack/frame-0.png",
+        "frames/attack/frame-1.png",
+        "frames/attack/frame-2.png",
+        "frames/attack/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 11320,
+          "bbox": [
+            38,
+            24,
+            190,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 13656,
+          "bbox": [
+            40,
+            64,
+            190,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 11304,
+          "bbox": [
+            30,
+            96,
+            226,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 11392,
+          "bbox": [
+            66,
+            64,
+            194,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/attack/frame-0.plain.png",
+        "frames/attack/frame-1.plain.png",
+        "frames/attack/frame-2.plain.png",
+        "frames/attack/frame-3.plain.png"
+      ]
+    },
+    {
+      "state": "hurt",
+      "frames": 4,
+      "method": "components",
+      "files": [
+        "frames/hurt/frame-0.png",
+        "frames/hurt/frame-1.png",
+        "frames/hurt/frame-2.png",
+        "frames/hurt/frame-3.png"
+      ],
+      "frame_records": [
+        {
+          "index": 0,
+          "nontransparent_pixels": 15944,
+          "bbox": [
+            54,
+            26,
+            198,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 1,
+          "nontransparent_pixels": 15244,
+          "bbox": [
+            48,
+            28,
+            182,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 2,
+          "nontransparent_pixels": 14524,
+          "bbox": [
+            54,
+            42,
+            218,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        },
+        {
+          "index": 3,
+          "nontransparent_pixels": 16080,
+          "bbox": [
+            54,
+            26,
+            198,
+            232
+          ],
+          "edge_pixels": 0,
+          "chroma_adjacent_pixels": 0
+        }
+      ],
+      "ok": true,
+      "plain_files": [
+        "frames/hurt/frame-0.plain.png",
+        "frames/hurt/frame-1.plain.png",
+        "frames/hurt/frame-2.plain.png",
+        "frames/hurt/frame-3.plain.png"
+      ]
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "pixel-perfect: pitch=1,1,1 scale=2x logical<=128x104 palette=48"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "mage",
+    "description": "P4.6 적 스프라이트 — content-design-guide §5.2/D2",
+    "base_image": "base-source.png"
+  },
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "explicit",
+    "note": "auto(cyan)는 base 기준 선택 — 행 배경은 마젠타로 생성되어 명시 고정 (P4.6 추출 실패 원인 수정)"
+  },
+  "states": {
+    "idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "subtle breathing and blinking combat-ready loop"
+    },
+    "attack": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "simple windup, strike, recovery attack pose sequence with no detached effects"
+    },
+    "hurt": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "flinch back from a hit and recover, body-only reaction"
+    }
+  },
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
+  "motion_phase_guides": false,
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005
+  },
+  "fit": {
+    "align_x": "foot-centroid",
+    "align_y": "bottom",
+    "pixel_perfect": true,
+    "logical_height": 86,
+    "palette_size": 32
+  }
+}

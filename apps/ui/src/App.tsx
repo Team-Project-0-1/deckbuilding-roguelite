@@ -112,6 +112,16 @@ import cardWintersGrasp from "./assets/card-winters-grasp.webp";
 import cardAegisSurge from "./assets/card-aegis-surge.webp";
 import goblinAtlas from "./assets/generated/sprites/goblin/sprite-sheet-alpha.png";
 import goblinManifestJson from "./assets/generated/sprites/goblin/manifest.json";
+import thiefAtlas from "./assets/generated/sprites/thief/sprite-sheet-alpha.png";
+import thiefManifestJson from "./assets/generated/sprites/thief/manifest.json";
+import ghoulAtlas from "./assets/generated/sprites/ghoul/sprite-sheet-alpha.png";
+import ghoulManifestJson from "./assets/generated/sprites/ghoul/manifest.json";
+import mageAtlas from "./assets/generated/sprites/mage/sprite-sheet-alpha.png";
+import mageManifestJson from "./assets/generated/sprites/mage/manifest.json";
+import slimeAtlas from "./assets/generated/sprites/slime/sprite-sheet-alpha.png";
+import slimeManifestJson from "./assets/generated/sprites/slime/manifest.json";
+import emberArchmageAtlas from "./assets/generated/sprites/ember-archmage/sprite-sheet-alpha.png";
+import emberArchmageManifestJson from "./assets/generated/sprites/ember-archmage/manifest.json";
 import gatekeeperAtlas from "./assets/generated/sprites/gatekeeper/sprite-sheet-alpha.png";
 import gatekeeperManifestJson from "./assets/generated/sprites/gatekeeper/manifest.json";
 import shamanAtlas from "./assets/generated/sprites/shaman/sprite-sheet-alpha.png";
@@ -210,7 +220,18 @@ interface SpriteAsset {
 }
 
 const SPRITES: Record<
-  "player" | "guardian" | "sorcerer" | "frost-knight" | "raider" | "shaman" | "gatekeeper",
+  | "player"
+  | "guardian"
+  | "sorcerer"
+  | "frost-knight"
+  | "raider"
+  | "shaman"
+  | "gatekeeper"
+  | "thief"
+  | "ghoul"
+  | "mage"
+  | "slime"
+  | "ember-archmage",
   SpriteAsset
 > = {
   player: {
@@ -233,6 +254,26 @@ const SPRITES: Record<
     atlasUrl: goblinAtlas,
     manifest: goblinManifestJson as SpriteManifest,
   },
+  thief: {
+    atlasUrl: thiefAtlas,
+    manifest: thiefManifestJson as SpriteManifest,
+  },
+  ghoul: {
+    atlasUrl: ghoulAtlas,
+    manifest: ghoulManifestJson as SpriteManifest,
+  },
+  mage: {
+    atlasUrl: mageAtlas,
+    manifest: mageManifestJson as SpriteManifest,
+  },
+  slime: {
+    atlasUrl: slimeAtlas,
+    manifest: slimeManifestJson as SpriteManifest,
+  },
+  "ember-archmage": {
+    atlasUrl: emberArchmageAtlas,
+    manifest: emberArchmageManifestJson as SpriteManifest,
+  },
   shaman: {
     atlasUrl: shamanAtlas,
     manifest: shamanManifestJson as SpriteManifest,
@@ -246,6 +287,12 @@ const SPRITES: Record<
 const enemySprite = (enemyId: string): SpriteAsset => {
   if (enemyId.startsWith("shaman")) return SPRITES.shaman;
   if (enemyId.startsWith("gatekeeper")) return SPRITES.gatekeeper;
+  if (enemyId === "goblin") return SPRITES.raider; // goblin 아트 = 기존 raider 시각 정본
+  if (enemyId === "thief") return SPRITES.thief;
+  if (enemyId === "ghoul") return SPRITES.ghoul;
+  if (enemyId === "mage") return SPRITES.mage;
+  if (enemyId === "slime") return SPRITES.slime;
+  if (enemyId === "ember-archmage") return SPRITES["ember-archmage"];
   return SPRITES.raider;
 };
 
@@ -1409,6 +1456,17 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
             })()
           ) : run.phase === "choose-node" ? (
             <NodeChoice
+              iconFor={(kind) =>
+                kind === "shop" ? (
+                  <EmberIcon scale={2.4} />
+                ) : kind === "elite" || kind === "boss" ? (
+                  <SkullIcon scale={2.4} />
+                ) : kind === "event" ? (
+                  <HeartIcon scale={2.4} />
+                ) : (
+                  <SwordIcon scale={2.4} />
+                )
+              }
               layerLabel={`노드 ${run.combatIndex + 1}/${run.graph.layers.length}`}
               options={(run.graph.layers[run.combatIndex] ?? []).map(
                 (node, index) => ({

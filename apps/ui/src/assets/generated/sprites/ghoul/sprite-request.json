@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "kind": "sprite-gen-request",
+  "engine": "component-row",
+  "character": {
+    "id": "ghoul",
+    "description": "P4.6 적 스프라이트 — content-design-guide §5.2/D2",
+    "base_image": "base-source.png"
+  },
+  "cell": {
+    "shape": "square",
+    "width": 256,
+    "height": 256,
+    "safe_margin_x": 24,
+    "safe_margin_y": 24,
+    "size": 256,
+    "safe_margin": 24
+  },
+  "chroma_key": {
+    "name": "magenta",
+    "hex": "#FF00FF",
+    "rgb": [
+      255,
+      0,
+      255
+    ],
+    "selection": "auto",
+    "score": 224.81,
+    "min_subject_distance": 216.63,
+    "background": {
+      "mode": "flat",
+      "hex": "#FB03FA",
+      "rgb": [
+        251,
+        3,
+        250
+      ],
+      "opaque_border_fraction": 1.0,
+      "border_coverage": 1.0,
+      "enclosed_background_pixels": 227,
+      "enclosed_material_pixels": 0,
+      "subject_pixels": 16369
+    },
+    "candidates": [
+      {
+        "name": "magenta",
+        "hex": "#FF00FF",
+        "score": 224.81,
+        "min_subject_distance": 216.63,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "green",
+        "hex": "#00FF00",
+        "score": 191.98,
+        "min_subject_distance": 188.24,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "cyan",
+        "hex": "#00FFFF",
+        "score": 217.66,
+        "min_subject_distance": 212.06,
+        "clears_erase_radius": true
+      },
+      {
+        "name": "blue",
+        "hex": "#004DFF",
+        "score": 198.48,
+        "min_subject_distance": 195.93,
+        "clears_erase_radius": true
+      }
+    ],
+    "selection_reason": "highest 1st-percentile subject distance among the 4 candidate(s) clearing the 96 erase radius"
+  },
+  "states": {
+    "idle": {
+      "frames": 4,
+      "fps": 4,
+      "loop": true,
+      "action": "subtle breathing and blinking combat-ready loop"
+    },
+    "attack": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "simple windup, strike, recovery attack pose sequence with no detached effects"
+    },
+    "hurt": {
+      "frames": 4,
+      "fps": 8,
+      "loop": false,
+      "action": "flinch back from a hit and recover, body-only reaction"
+    }
+  },
+  "style": "match the attached base/anchor reference image EXACTLY: same pixel density (logical pixel block size), same body proportions, same outline weight, same palette, same shading style, same level of detail. Do not restyle, do not change proportions, do not add or remove detail density. Avoid polished illustration, painterly rendering, anime key art, 3D render, vector app-icon polish, glossy lighting, soft gradients, and anti-aliased high-detail edges.",
+  "motion_phase_guides": false,
+  "chroma": {
+    "unmix_reach": 4,
+    "spill_max_fraction": 0.005
+  },
+  "fit": {
+    "align_x": "foot-centroid",
+    "align_y": "bottom",
+    "pixel_perfect": true,
+    "logical_height": 86,
+    "palette_size": 32
+  }
+}
