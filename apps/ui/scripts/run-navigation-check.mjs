@@ -83,12 +83,23 @@ try {
   await page.locator('[data-testid="title-continue"]').click();
   await page.waitForSelector('[data-testid="run-progress"]');
 
+  const attemptBeforeLoad = Number(
+    await page.locator(".combat-shell").getAttribute("data-attempt"),
+  );
   await page.locator('[data-testid="run-menu-open"]').click();
   await page.locator('[data-testid="run-menu-load"]').click();
   await page.waitForSelector('[data-testid="confirm-action"]');
   await page.locator('[data-testid="confirm-action"]').click();
   await page.waitForSelector('[data-testid="run-progress"]');
   check("saved run reload returns to run", (await page.locator('[data-testid="run-progress"]').count()) === 1);
+  const attemptAfterLoad = Number(
+    await page.locator(".combat-shell").getAttribute("data-attempt"),
+  );
+  check(
+    "saved combat reload replaces the active session",
+    attemptAfterLoad > attemptBeforeLoad,
+    `before=${attemptBeforeLoad} after=${attemptAfterLoad}`,
+  );
 
   await page.locator('[data-testid="run-menu-open"]').click();
   await page.locator('[data-testid="run-menu-new"]').click();

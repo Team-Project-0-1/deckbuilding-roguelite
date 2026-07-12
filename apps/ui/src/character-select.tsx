@@ -5,6 +5,13 @@ import type {
   ContentDb,
   EffectAtom,
 } from "@game/core";
+import { AtlasSprite } from "./AtlasSprite";
+import type { SpriteManifest } from "./AtlasSprite";
+
+export interface CharacterArt {
+  atlasUrl: string;
+  manifest: SpriteManifest;
+}
 
 const elementKo = (element: string): string => {
   if (element === "fire") return "화염";
@@ -94,6 +101,7 @@ const bagSummary = (
 };
 
 interface CharacterSelectProps {
+  artByCharacter: Readonly<Record<string, CharacterArt>>;
   characters: readonly CharacterDef[];
   contentDb: ContentDb;
   seed: string | null;
@@ -101,6 +109,7 @@ interface CharacterSelectProps {
 }
 
 export const CharacterSelect = ({
+  artByCharacter,
   characters,
   contentDb,
   seed,
@@ -135,32 +144,47 @@ export const CharacterSelect = ({
               <strong>{character.name}</strong>
               <em>HP {character.maxHp}</em>
             </span>
-            <span className="character-section">
-              <b>시작 가방</b>
-              <span className="character-coins">
-                {bagSummary(character, contentDb).map((item) => (
-                  <i
-                    className={`character-coin coin-${String(contentDb.coins[String(item.coin)]?.element ?? "basic")}`}
-                    key={String(item.coin)}
-                  >
-                    {item.name} x{item.count}
-                  </i>
-                ))}
+            <span className="character-card-body">
+              <span className="character-portrait" data-testid="character-portrait">
+                {artByCharacter[String(character.id)] !== undefined ? (
+                  <AtlasSprite
+                    atlasUrl={artByCharacter[String(character.id)]!.atlasUrl}
+                    manifest={artByCharacter[String(character.id)]!.manifest}
+                    motion="idle"
+                    playKey={0}
+                    side="player"
+                  />
+                ) : null}
               </span>
-            </span>
-            <span className="character-section">
-              <b>시작 스킬</b>
-              <span className="character-skills">
-                {character.startingSkills.map((skill) => (
-                  <i key={String(skill)}>
-                    {contentDb.skills[String(skill)]?.name ?? String(skill)}
-                  </i>
-                ))}
+              <span className="character-card-info">
+                <span className="character-section">
+                  <b>시작 가방</b>
+                  <span className="character-coins">
+                    {bagSummary(character, contentDb).map((item) => (
+                      <i
+                        className={`character-coin coin-${String(contentDb.coins[String(item.coin)]?.element ?? "basic")}`}
+                        key={String(item.coin)}
+                      >
+                        {item.name} x{item.count}
+                      </i>
+                    ))}
+                  </span>
+                </span>
+                <span className="character-section">
+                  <b>시작 스킬</b>
+                  <span className="character-skills">
+                    {character.startingSkills.map((skill) => (
+                      <i key={String(skill)}>
+                        {contentDb.skills[String(skill)]?.name ?? String(skill)}
+                      </i>
+                    ))}
+                  </span>
+                </span>
+                <span className="character-trait">
+                  <b>{character.trait.name}</b>
+                  <small>{characterTraitDescription(character, contentDb)}</small>
+                </span>
               </span>
-            </span>
-            <span className="character-trait">
-              <b>{character.trait.name}</b>
-              <small>{characterTraitDescription(character, contentDb)}</small>
             </span>
           </button>
         ))}

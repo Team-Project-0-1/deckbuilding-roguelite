@@ -54,6 +54,9 @@ import { TutorialStrip } from "./tutorial";
 import { isMuted, playSfx, setMuted } from "./audio";
 import { CardEffectRows } from "./card-effects";
 import { CharacterSelect } from "./character-select";
+import { RunMenu } from "./run-menu";
+import { TitleScreen } from "./title-screen";
+import type { TitleSaveSummary } from "./title-screen";
 import {
   autoSuggestCoinChoice,
   coinChoiceCandidates,
@@ -666,6 +669,7 @@ interface RunSession {
 }
 
 type BootState =
+  | { mode: "title"; save: TitleSaveSummary | null }
   | { mode: "select"; seed: string | null }
   | { mode: "corrupt-save" }
   | { mode: "run"; session: RunSession };
@@ -673,11 +677,24 @@ type BootState =
 const replaceUrlSeed = (seed: string, character?: CharacterId): void => {
   const url = new URL(window.location.href);
   url.searchParams.set("seed", seed);
+  url.searchParams.delete("select");
   if (character !== undefined && String(character) !== "warrior") {
     url.searchParams.set("character", String(character));
   } else {
     url.searchParams.delete("character");
   }
+  window.history.replaceState(null, "", url);
+};
+
+const replaceUrlWithTitle = (): void => {
+  window.history.replaceState(null, "", window.location.pathname);
+};
+
+const replaceUrlWithSelection = (seed: string): void => {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("seed", seed);
+  url.searchParams.set("select", "1");
   window.history.replaceState(null, "", url);
 };
 
@@ -775,6 +792,32 @@ const freshSession = (
   return { run: started.run, combat: started.combat };
 };
 
+const savedSession = (saved: RunState): RunSession => {
+  replaceUrlSeed(saved.runSeed, saved.character);
+  if (saved.phase !== "combat") return { run: saved, combat: null };
+  const resumed = resumeAbandonedCombat(saved);
+  const started = startRunCombat(resumed, contentDb);
+  return { run: started.run, combat: started.combat };
+};
+
+const titleSaveSummary = (run: RunState): TitleSaveSummary => {
+  const acts = run.graph.acts;
+  const act = actOfLayer(run.graph, run.combatIndex);
+  const actStart = acts?.[act]?.start ?? 0;
+  const actEnd = acts?.[act + 1]?.start ?? run.graph.layers.length;
+  const progress =
+    acts === undefined
+      ? `노드 ${Math.min(run.combatIndex + 1, run.graph.layers.length)}/${run.graph.layers.length}`
+      : `${act + 1}막 ${Math.min(run.combatIndex - actStart + 1, actEnd - actStart)}/${actEnd - actStart}`;
+  return {
+    characterName:
+      contentDb.characters[String(run.character)]?.name ?? String(run.character),
+    currentHp: run.currentHp,
+    maxHp: run.maxHp,
+    progress,
+  };
+};
+
 const bootState = (): BootState => {
   const url = new URL(window.location.href);
   const urlSeed = url.searchParams.get("seed");
@@ -784,6 +827,9 @@ const bootState = (): BootState => {
     testEncounterFromUrl() !== null ||
     url.searchParams.has("skills") ||
     testCharacter !== null;
+  if (url.searchParams.get("select") === "1") {
+    return { mode: "select", seed: hasSeed ? urlSeed : null };
+  }
   if (hasTestBoot)
     return {
       mode: "run",
@@ -803,21 +849,16 @@ const bootState = (): BootState => {
   if (detailed.status === "corrupt" || detailed.status === "unsupported")
     return { mode: "corrupt-save" };
   const saved = detailed.save;
-  if (saved === null) {
-    // URL contract: existing playtests boot with ?seed= and must keep the legacy
-    // warrior fast path. Character selection appears only on pure new entry or
-    // explicit ?select=1 so seed reproducibility and harness URLs stay stable.
-    if (!hasSeed || url.searchParams.get("select") === "1") {
-      return { mode: "select", seed: hasSeed ? urlSeed : null };
-    }
-    return { mode: "run", session: freshSession(urlSeed, "warrior" as CharacterId) };
+  if (saved === null && hasSeed) {
+    return {
+      mode: "run",
+      session: freshSession(seedFromUrl(), testCharacter ?? ("warrior" as CharacterId)),
+    };
   }
-  replaceUrlSeed(saved.runSeed, saved.character);
-  if (saved.phase !== "combat")
-    return { mode: "run", session: { run: saved, combat: null } };
-  const resumed = resumeAbandonedCombat(saved);
-  const started = startRunCombat(resumed, contentDb);
-  return { mode: "run", session: { run: started.run, combat: started.combat } };
+  return {
+    mode: "title",
+    save: saved === null ? null : titleSaveSummary(saved),
+  };
 };
 
 const coinName = (coin: CoinDefId): string =>
@@ -998,8 +1039,21 @@ const eventRejectionKo = (message: string): string =>
             ? "마지막 동전은 희생할 수 없습니다."
             : "지금은 수락할 수 없습니다.";
 
-const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
+interface RunGameProps {
+  initialSession: RunSession;
+  onExitToTitle: (run: RunState) => void;
+  onLoadSaved: () => void;
+  onStartNewRun: () => void;
+}
+
+const RunGame = ({
+  initialSession,
+  onExitToTitle,
+  onLoadSaved,
+  onStartNewRun,
+}: RunGameProps) => {
   const [session, setSession] = useState<RunSession>(initialSession);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [removalIndex, setRemovalIndex] = useState<number | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillId | null>(null);
   const [shopRejection, setShopRejection] = useState<string | null>(null);
@@ -1171,22 +1225,57 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
     setSession(fresh);
   };
 
+  const runMenuControls = (
+    <>
+      <button
+        aria-label="런 메뉴 열기"
+        className="run-menu-open"
+        data-testid="run-menu-open"
+        type="button"
+        onClick={() => setMenuOpen(true)}
+      >
+        메뉴
+      </button>
+      <RunMenu
+        hasSave={true}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onExitToTitle={() => {
+          setMenuOpen(false);
+          onExitToTitle(run);
+        }}
+        onLoad={() => {
+          setMenuOpen(false);
+          onLoadSaved();
+        }}
+        onNewRun={() => {
+          setMenuOpen(false);
+          onStartNewRun();
+        }}
+      />
+    </>
+  );
+
   if (run.phase === "combat" && combat !== null) {
     return (
-      <CombatBoard
-        combat={combat}
-        key={`${run.runSeed}-${run.combatIndex}-${run.attempt}`}
-        onTelemetryCombatStart={beginTelemetryCombat}
-        onTelemetryDecision={recordTelemetryDecision}
-        onComplete={completeCombat}
-        run={run}
-      />
+      <>
+        <CombatBoard
+          combat={combat}
+          key={`${run.runSeed}-${run.combatIndex}-${run.attempt}`}
+          onTelemetryCombatStart={beginTelemetryCombat}
+          onTelemetryDecision={recordTelemetryDecision}
+          onComplete={completeCombat}
+          run={run}
+        />
+        {runMenuControls}
+      </>
     );
   }
 
   const pending = run.pendingRewards;
   return (
-    <main
+    <>
+      <main
       aria-label="런 진행 화면"
       className="run-stage-shell"
       data-attempt={run.attempt}
@@ -1957,12 +2046,70 @@ const RunGame = ({ initialSession }: { initialSession: RunSession }) => {
           )}
         </section>
       </div>
-    </main>
+      </main>
+      {runMenuControls}
+    </>
   );
 };
 
 export const App = () => {
   const [boot, setBoot] = useState<BootState>(bootState);
+
+  const startNewRun = () => {
+    try {
+      clearRun(window.localStorage);
+    } catch {
+      // 저장소가 막혀도 메모리 세션으로 새 런을 시작할 수 있다.
+    }
+    const seed = randomSeed();
+    replaceUrlWithSelection(seed);
+    setBoot({ mode: "select", seed });
+  };
+
+  const loadSavedRun = () => {
+    const detailed = loadRunDetailed(
+      window.localStorage,
+      CONTENT_VERSION,
+      contentDb,
+    );
+    if (detailed.status === "corrupt" || detailed.status === "unsupported") {
+      setBoot({ mode: "corrupt-save" });
+      return;
+    }
+    if (detailed.save === null) {
+      replaceUrlWithTitle();
+      setBoot({ mode: "title", save: null });
+      return;
+    }
+    setBoot({ mode: "run", session: savedSession(detailed.save) });
+  };
+
+  const exitToTitle = (run: RunState) => {
+    persistRun(run);
+    replaceUrlWithTitle();
+    setBoot({ mode: "title", save: titleSaveSummary(run) });
+  };
+
+  if (boot.mode === "title") {
+    return (
+      <main
+        aria-label="타이틀 화면"
+        className="run-stage-shell"
+        data-run-phase="title"
+        data-testid="run-phase"
+      >
+        <div className="backdrop" aria-hidden="true">
+          <img alt="" className="backdrop-img" src={bgForest} />
+        </div>
+        <TitleScreen
+          save={boot.save}
+          onContinue={loadSavedRun}
+          onNewRun={startNewRun}
+        />
+      </main>
+    );
+  }
+
   if (boot.mode === "corrupt-save") {
     return (
       <main
@@ -2013,6 +2160,12 @@ export const App = () => {
           <img alt="" className="backdrop-img" src={bgForest} />
         </div>
         <CharacterSelect
+          artByCharacter={Object.fromEntries(
+            Object.values(contentDb.characters).map((character) => [
+              String(character.id),
+              playerSprite(character.id),
+            ]),
+          )}
           characters={Object.values(contentDb.characters)}
           contentDb={contentDb}
           seed={boot.seed}
@@ -2030,7 +2183,10 @@ export const App = () => {
   return (
     <RunGame
       initialSession={boot.session}
-      key={`${boot.session.run.runSeed}-${String(boot.session.run.character)}`}
+      key={`${boot.session.run.runSeed}-${String(boot.session.run.character)}-${boot.session.run.combatIndex}-${boot.session.run.attempt}-${boot.session.run.phase}`}
+      onExitToTitle={exitToTitle}
+      onLoadSaved={loadSavedRun}
+      onStartNewRun={startNewRun}
     />
   );
 };

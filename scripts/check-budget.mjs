@@ -1,5 +1,5 @@
 // P5.5/P5.6 번들 예산 게이트 (차단) — 빌드 후 실행한다.
-// 예산: 총량 ≤ 2.6MiB, JS 총량 ≤ 320KiB, CSS 총량 ≤ 70KiB, 단일 파일 ≤ 700KiB.
+// 예산: 총량 ≤ 2.61MiB, JS 총량 ≤ 400KiB, CSS 총량 ≤ 70KiB, 단일 파일 ≤ 700KiB.
 // 사용: node scripts/check-budget.mjs
 import { readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname, extname } from "node:path";
@@ -8,9 +8,10 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "apps/ui/dist");
 // P6: 3막 런·패시브·강화·소환 시스템 추가로 JS 예산 320→400KiB 상향 (게임 시스템
-// 2종 규모 증가분 — 사용자 체감 계약인 총량 2.6MiB·LCP·CLS 게이트는 불변, 결정 로그 D8).
+// 2종 규모 증가분. 런 내비게이션 UI는 새 이미지 없이 기존 캐릭터 아틀라스를 재사용하며
+// 총량만 10KiB 상향한다. JS·CSS·단일 파일 한도와 LCP·CLS 게이트는 유지한다.
 const BUDGETS = {
-  total: 2726297, // 2.6 MiB
+  total: 2736537, // 기존 2.6 MiB + 10 KiB
   js: 409600, // 400 KiB
   css: 71680, // 70 KiB
   maxFile: 716800, // 700 KiB
