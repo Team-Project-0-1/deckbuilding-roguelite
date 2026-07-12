@@ -63,6 +63,37 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
   for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex += 1) {
     const enemy = state.enemies[enemyIndex];
     if (enemy === undefined || enemy.hp <= 0) continue;
+    // 몬스터 패시브 — 자신 턴 시작 시 자동 발동 (자기 대상 원자만, 콘텐츠 검증이 보장).
+    const passive = db.enemies[String(enemy.defId)]?.passive;
+    if (passive !== undefined && passive.hook === 'enemyTurnStart') {
+      events.push({ type: 'enemyPassiveTriggered', enemy: enemyIndex, passive: passive.id });
+      for (const action of passive.effects) {
+        const owner = state.enemies[enemyIndex];
+        if (owner === undefined || owner.hp <= 0) break;
+        if (action.kind === 'heal') {
+          const hp = Math.min(owner.maxHp, owner.hp + action.amount);
+          state = {
+            ...state,
+            enemies: state.enemies.map((candidate, index) => (index === enemyIndex ? { ...candidate, hp } : candidate))
+          };
+          events.push({ type: 'enemyHealed', enemy: enemyIndex, amount: hp - owner.hp, hp });
+        } else if (action.kind === 'block') {
+          state = applyBlock(state, { type: 'enemy', index: enemyIndex }, action.amount, events);
+        } else if (action.kind === 'buffNextAttack') {
+          const nextAttackBonus = owner.nextAttackBonus + action.amount;
+          state = {
+            ...state,
+            enemies: state.enemies.map((candidate, index) =>
+              index === enemyIndex ? { ...candidate, nextAttackBonus } : candidate
+            )
+          };
+          events.push({ type: 'enemyAttackBuffed', enemy: enemyIndex, amount: action.amount, nextAttackBonus });
+        } else {
+          // 콘텐츠 검증(validateEnemyPassives)이 자기 대상 원자만 통과시킨다
+          throw new Error(`enemy passive ${passive.id}: unsupported action ${action.kind}`);
+        }
+      }
+    }
     for (const action of enemy.intent.actions) {
       const actingEnemy = state.enemies[enemyIndex];
       if (actingEnemy === undefined || actingEnemy.hp <= 0) break;

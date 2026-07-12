@@ -311,7 +311,7 @@ describe('P3.3 heart-of-flame interaction regressions', () => {
 describe('P3.4 shipped content goldens', () => {
   it('ships the p4 version with legacy allowlist', () => {
     // P4.2 선행: 몬스터 6종 가산 출하에 결속된 버전 승격 (감사 정책 — 콘텐츠 변경 없는 버전 유지 금지)
-    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
+    expect(CONTENT_VERSION).toBe('1.0.0-rc.1');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.9.0-p4');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.8.0-p3.4');
     expect(LEGACY_CONTENT_VERSIONS).toContain('0.7.0-p3.3');
@@ -366,8 +366,8 @@ describe('P3.4 shipped content goldens', () => {
 describe('P4.2 provisional enemy content goldens', () => {
   // D2 조우 대역 산술: goblin+ghoul=70(2마리 65~85), thief+goblin=58(감전 압박 예외),
   // ghoul+goblin+slime=86(3마리 75~95). 수치 전부 balance-provisional.
-  it('pins the six enemy definitions shipped under 0.10.0-p4.4', () => {
-    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
+  it('pins the six enemy definitions at 1.0.0-rc.1 — 0.10.0-p4.4 대비 구울 패시브(썩은 육체)가 유일한 변경', () => {
+    expect(CONTENT_VERSION).toBe('1.0.0-rc.1');
     expect(enemies.goblin).toEqual({
       id: 'goblin',
       name: '고블린',
@@ -398,6 +398,14 @@ describe('P4.2 provisional enemy content goldens', () => {
       id: 'ghoul',
       name: '구울',
       maxHp: 38,
+      // P5.6 몬스터 패시브 수직 슬라이스 — balance-provisional (포식 회복과 의도적 공존)
+      passive: {
+        id: 'rotting-flesh',
+        name: '썩은 육체',
+        description: '자신의 턴이 시작될 때 HP를 1 회복한다',
+        hook: 'enemyTurnStart',
+        effects: [{ kind: 'heal', amount: 1 }]
+      },
       intents: [
         { id: 'rotting-touch', actions: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1 }] },
         { id: 'bite', actions: [{ kind: 'attack', damage: 8 }] },
@@ -599,7 +607,7 @@ describe('P3.4 hostile coin proc rerouting regressions', () => {
 
 describe('M5 shipped content', () => {
   it('ships the M5 version, mana coin, skills, and fixed enemy definitions', () => {
-    expect(CONTENT_VERSION).toBe('0.10.0-p4.4');
+    expect(CONTENT_VERSION).toBe('1.0.0-rc.1');
     expect(coins.mana).toEqual({
       id: coinId('mana'),
       element: 'mana',

@@ -162,7 +162,7 @@ await shopPage.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [
   "deckbuilding-roguelite.run-save",
   JSON.stringify({
     version: 5,
-    contentVersion: "0.10.0-p4.4",
+    contentVersion: "1.0.0-rc.1",
     runSeed: "A11Y-SHOP",
     character: "warrior",
     currentHp: 63,

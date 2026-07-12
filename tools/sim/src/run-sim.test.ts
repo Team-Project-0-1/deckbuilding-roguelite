@@ -51,7 +51,7 @@ describe('M5 full-run simulator', () => {
       seed: '42',
       result: 'defeat',
       combatsCompleted: 6,
-      turnsPerCombat: [4, 4, 4, 9, 7, 5],
+      turnsPerCombat: [4, 4, 4, 9, 8, 2], // 1.0.0-rc.1 재고정 — 구울 패시브(썩은 육체) 도입
       carriedHp: 0,
       finalBag: ['basic', 'basic', 'fire', 'fire', 'fire', 'fire', 'basic', 'fire', 'fire', 'fire', 'mana'],
       finalEquippedSkills: ['fire-infusion', 'guard', 'burning-strike', 'flame-sword', 'ignite-sword', 'conflagration'],

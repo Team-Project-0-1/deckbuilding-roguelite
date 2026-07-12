@@ -3190,7 +3190,7 @@ const winCurrentCombat = async (page) => {
     ];
     const save = {
       version: 5,
-      contentVersion: "0.10.0-p4.4",
+      contentVersion: "1.0.0-rc.1",
       runSeed: "S26-EVENT",
       character: "warrior",
       currentHp: 63,
@@ -3389,7 +3389,7 @@ const winCurrentCombat = async (page) => {
     }));
   const mobileSave = (phase, extra = {}) => ({
     version: 5,
-    contentVersion: "0.10.0-p4.4",
+    contentVersion: "1.0.0-rc.1",
     runSeed: "S28",
     character: "warrior",
     currentHp: 63,
@@ -3588,7 +3588,7 @@ const winCurrentCombat = async (page) => {
   };
   const kbSave = (phase, extra = {}) => ({
     version: 5,
-    contentVersion: "0.10.0-p4.4",
+    contentVersion: "1.0.0-rc.1",
     runSeed: "S29",
     character: "warrior",
     currentHp: 63,
@@ -3780,7 +3780,7 @@ const winCurrentCombat = async (page) => {
 {
   const phaseSave = (phase, extra = {}) => ({
     version: 5,
-    contentVersion: "0.10.0-p4.4",
+    contentVersion: "1.0.0-rc.1",
     runSeed: "S31",
     character: "warrior",
     currentHp: 63,
@@ -3907,6 +3907,99 @@ const winCurrentCombat = async (page) => {
     check(`S31 ${label} 에러 0`, errors.length === 0, errors.join(" | "));
     await context.close();
   }
+}
+
+// ---------- 시나리오 32: P5.6 몬스터 패시브 — 구울 '썩은 육체' (balance-provisional) ----------
+{
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error.message)));
+  await page.goto(`${baseUrl}?seed=S32-PASSIVE&encounter=ghoul`, {
+    waitUntil: "networkidle",
+  });
+  const waitTurnReady = () =>
+    page.waitForFunction(
+      () =>
+        document.querySelector(".end-turn:not(:disabled)") !== null &&
+        document.querySelector(".float-text") === null,
+      undefined,
+      { timeout: 30000 },
+    );
+  await waitTurnReady();
+
+  const chip = page.locator(".unit.enemy .passive-chip");
+  check(
+    "S32 패시브 칩 표시 (썩은 육체)",
+    (await chip.count()) === 1 &&
+      ((await chip.textContent()) ?? "").includes("썩은 육체"),
+  );
+  const PASSIVE_DESCRIPTION = "HP를 1 회복";
+  await chip.hover();
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, true);
+  check("S32 패시브 툴팁 hover 표시", true);
+  await page.locator(".unit-name").first().hover();
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, false);
+  await chip.click();
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, true);
+  check("S32 패시브 툴팁 클릭(터치) 표시", true);
+  await page.keyboard.press("Escape");
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, false);
+  check("S32 패시브 툴팁 Escape 닫힘", true);
+  // 키보드 경로 — 칩의 .kw 버튼에 focus 후 Enter (hover-focus-touch 계약 마감)
+  await page.evaluate(() => {
+    document
+      .querySelector(".unit.enemy .passive-chip")
+      ?.closest(".kw-host")
+      ?.querySelector("button.kw")
+      ?.focus();
+  });
+  await page.keyboard.press("Enter");
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, true);
+  check("S32 패시브 툴팁 focus+Enter 표시", true);
+  await page.keyboard.press("Escape");
+  await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, false);
+
+  // 기본 코인을 명시적으로 찾아 베기 장전 — 화상 없이 결정론 회복 산술 (+1) 검증.
+  // 손패 index 가정 금지: 속성/부여 클래스가 전부 없는 코인만 기본 코인이다.
+  const basicCoin = page.locator(
+    ".hand-tray .coin:not(.fire):not(.mana):not(.frost):not(.lightning):not(.granted-fire)",
+  );
+  check("S32 기본 코인 존재", (await basicCoin.count()) > 0);
+  await basicCoin.first().click();
+  await page.locator(".skill-card").nth(0).locator(".socket").nth(0).click();
+  await page
+    .locator(".skill-card")
+    .nth(0)
+    .locator(".card-title")
+    .click();
+  await resolveSkillAnimation(page);
+  await waitTurnReady();
+  const readGhoulHp = async () =>
+    Number(
+      ((await page.locator(".unit.enemy .hp-num").textContent()) ?? "0/0").split(
+        "/",
+      )[0],
+    );
+  const hpAfterAttack = await readGhoulHp();
+  check("S32 베기 피해 적용", hpAfterAttack < 38, `hp=${hpAfterAttack}`);
+  check(
+    "S32 화상 없음 (회복 산술 전제)",
+    (await page.locator(".unit.enemy .burn-chip").count()) === 0,
+  );
+  await page.locator(".end-turn").click();
+  await waitTurnReady();
+  const hpAfterEnemyTurn = await readGhoulHp();
+  check(
+    "S32 적 턴 시작 패시브 회복 +1",
+    hpAfterEnemyTurn === hpAfterAttack + 1,
+    `공격 후 ${hpAfterAttack} → 적 턴 후 ${hpAfterEnemyTurn}`,
+  );
+  check("S32 에러 0", errors.length === 0, errors.join(" | "));
+  await context.close();
 }
 
 await browser.close();

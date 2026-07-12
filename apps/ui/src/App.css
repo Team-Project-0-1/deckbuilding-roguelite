@@ -1127,6 +1127,20 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
+/* 몬스터 패시브 칩 — 고유 특성 자동 발동 (의도와 별개, hover/focus/touch 툴팁) */
+.passive-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #2d2440;
+  border: 1px solid #7b6aa8;
+  color: #d9ccf5;
+  font-style: normal;
+  font-size: 11px;
+}
+
 /* 적 공격 버프 칩 — buffNextAttack (충전 타입 없음, 버프 의도 표기) */
 .attack-buff-chip {
   display: inline-flex;
@@ -2426,7 +2440,8 @@ button:focus-visible {
   .burn-chip,
   .frost-chip,
   .shock-chip,
-  .attack-buff-chip {
+  .attack-buff-chip,
+  .passive-chip {
     font-size: 9px;
     padding: 1px 4px;
   }

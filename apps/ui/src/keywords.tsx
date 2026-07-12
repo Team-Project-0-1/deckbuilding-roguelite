@@ -13,6 +13,7 @@ export type KeywordTerm =
   | "shock"
   | "trigger"
   | "attack-buff"
+  | "passive"
   | "temporary"
   | "elementCoin";
 
@@ -61,6 +62,11 @@ export const KEYWORD_GLOSSARY: Record<
     description:
       "다음 공격 행동 1회의 피해가 표시만큼 늘어난다. 사용하면 사라지고, 사용 전에는 유지되며 중첩 시 더해진다.",
   },
+  passive: {
+    label: "패시브",
+    description:
+      "이 적의 고유 특성. 조건이 되면 자동으로 발동한다 — 의도(다음 행동)와 별개.",
+  },
   temporary: {
     label: "임시 코인",
     description: "이번 전투에서만 쓰는 동전. 전투가 끝나면 사라진다.",
@@ -76,6 +82,8 @@ export function Keyword(props: {
   term: KeywordTerm;
   children?: ReactNode;
   className?: string;
+  // 콘텐츠 정의 용어(몬스터 패시브 등) — 용어 사전 대신 개별 항목으로 툴팁 구성
+  entry?: { label: string; description: string };
 }): JSX.Element {
   const id = useId();
   const host = useRef<HTMLSpanElement>(null);
@@ -83,7 +91,7 @@ export function Keyword(props: {
   // hover/:focus-visible 표시도 Escape로 즉시 해제돼야 한다 (WCAG 1.4.13 — 포커스
   // 이동 없이 닫기). 억제는 hover 이탈·blur에서 풀려 다음 표시를 막지 않는다.
   const [suppressed, setSuppressed] = useState(false);
-  const entry = KEYWORD_GLOSSARY[props.term];
+  const entry = props.entry ?? KEYWORD_GLOSSARY[props.term];
 
   useEffect(() => {
     if (!open) return;

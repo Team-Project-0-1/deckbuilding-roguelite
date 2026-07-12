@@ -629,7 +629,10 @@ const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
     ? (["raider" as EnemyDefId, "raider" as EnemyDefId] as const)
     : encounter === "raider"
       ? (["raider" as EnemyDefId] as const)
-      : null;
+      : encounter === "ghoul"
+        ? // S32 몬스터 패시브 앵커 — 구울 '썩은 육체' 결정론 검증용
+          (["ghoul" as EnemyDefId] as const)
+        : null;
 };
 
 const testSkillsFromUrl = (
@@ -2354,6 +2357,21 @@ const CombatBoard = ({
       triggerVfx("wither-player");
       showFloat(`다음 드로우 -${event.amount}`, "player", "status");
       delay = 460;
+    } else if (event?.type === "enemyPassiveTriggered") {
+      const owner = state.enemies[event.enemy];
+      const passiveDef =
+        owner === undefined
+          ? undefined
+          : contentDb.enemies[String(owner.defId)]?.passive;
+      if (passiveDef !== undefined) {
+        showFloat(`★ ${passiveDef.name}`, "enemy", "status", event.enemy);
+        delay = 320;
+      }
+    } else if (event?.type === "enemyHealed") {
+      if (event.amount > 0) {
+        showFloat(`회복 +${event.amount}`, "enemy", "status", event.enemy);
+        delay = 380;
+      }
     } else if (event?.type === "coinCreated") {
       showFloat("임시 코인", "player", "coin");
       delay = 320;
@@ -2660,6 +2678,7 @@ const CombatBoard = ({
                   targetLegal ? () => confirmTargeting(index) : undefined
                 }
                 attackBuff={enemy.nextAttackBonus}
+                passive={contentDb.enemies[String(enemy.defId)]?.passive}
               />
             );
           })}
@@ -3142,6 +3161,7 @@ interface UnitPanelProps {
   targetSelected?: boolean;
   onTarget?: () => void;
   attackBuff?: number;
+  passive?: { name: string; description: string };
 }
 
 const UnitPanel = ({
@@ -3163,6 +3183,7 @@ const UnitPanel = ({
   targetSelected = false,
   onTarget,
   attackBuff = 0,
+  passive,
 }: UnitPanelProps) => (
   <div
     className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
@@ -3173,6 +3194,23 @@ const UnitPanel = ({
     >
       <div className="plate-row">
         <span className="unit-name">{name}</span>
+        {passive !== undefined ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{
+              label: passive.name,
+              description: `패시브 — ${passive.description} (자동 발동, 의도와 별개)`,
+            }}
+            term="passive"
+          >
+            <em
+              aria-label={`패시브: ${passive.name} — ${passive.description}`}
+              className="passive-chip"
+            >
+              ★ {passive.name}
+            </em>
+          </Keyword>
+        ) : null}
         {block > 0 ? (
           <Keyword term="block" className="chip-keyword">
             <em

@@ -97,11 +97,23 @@ export interface EnemyIntent {
   actions: EnemyAction[];
 }
 
+// 몬스터 패시브 — 설계 가이드 §3 패시브 원칙 준용: 자동 조건 발동 최대 1개.
+// 의도(intent)로 예고되지 않으므로 자기 대상 원자(heal/block/buffNextAttack)만
+// 허용한다 — 플레이어 대상 원자는 "매 턴 의도 공개" 계약(§5 원칙 2)과 충돌.
+export interface EnemyPassiveDef {
+  id: string;
+  name: string;
+  description: string;
+  hook: 'enemyTurnStart';
+  effects: EnemyAction[];
+}
+
 export interface EnemyDef {
   id: EnemyDefId;
   name: string;
   maxHp: number;
   intents: EnemyIntent[];
+  passive?: EnemyPassiveDef;
 }
 
 export type EventRisk = 'combat' | 'hp' | 'gold' | 'coin';
@@ -281,6 +293,25 @@ const validateEvents = (events: readonly EventDef[], enemies: Record<string, Ene
   return errors;
 };
 
+const validateEnemyPassives = (enemies: Record<string, EnemyDef>): string[] => {
+  const errors: string[] = [];
+  const SELF_ONLY = new Set(['heal', 'block', 'buffNextAttack']);
+  for (const enemy of Object.values(enemies)) {
+    const passive = enemy.passive;
+    if (passive === undefined) continue;
+    const owner = `enemy ${String(enemy.id)} passive ${passive.id}`;
+    if (passive.effects.length === 0) errors.push(`${owner}: must declare at least one effect`);
+    for (const action of passive.effects) {
+      if (!SELF_ONLY.has(action.kind)) {
+        errors.push(`${owner}: only self-target actions are allowed (got ${action.kind})`);
+      } else if ('amount' in action && (!Number.isInteger(action.amount) || action.amount <= 0)) {
+        errors.push(`${owner}: ${action.kind} amount must be a positive integer`);
+      }
+    }
+  }
+  return errors;
+};
+
 export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => [
   ...duplicateIds(Object.values(db.coins), 'coin'),
   ...duplicateIds(Object.values(db.skills), 'skill'),
@@ -290,7 +321,8 @@ export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => 
   ...validateSkillCosts(Object.values(db.skills)),
   ...validateTurnTriggers(db),
   ...validateAttackTargets(Object.values(db.skills)),
-  ...validateEvents(Object.values(db.events ?? {}), db.enemies)
+  ...validateEvents(Object.values(db.events ?? {}), db.enemies),
+  ...validateEnemyPassives(db.enemies)
 ];
 
 export const effectiveElements = (coin: CoinInstance, db: ContentDb): Element[] => {

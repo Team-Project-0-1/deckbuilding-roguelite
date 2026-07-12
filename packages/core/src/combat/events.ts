@@ -29,6 +29,7 @@ export type CombatEvent =
   | { type: 'elementGranted'; coins: CoinUid[]; element: Element }
   | { type: 'witherApplied'; enemy: number; amount: number; nextDrawPenalty: number }
   | { type: 'enemyHealed'; enemy: number; amount: number; hp: number }
+  | { type: 'enemyPassiveTriggered'; enemy: number; passive: string }
   | { type: 'enemyAttackBuffed'; enemy: number; amount: number; nextAttackBonus: number }
   | { type: 'intentRevealed'; enemy: number; intent: EnemyIntent }
   | { type: 'turnStarted'; turn: number }

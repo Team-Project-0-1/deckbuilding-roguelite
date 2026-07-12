@@ -4,8 +4,8 @@ import type { CharacterDef, CoinDef, ContentDb, EnemyDef, EventDef, SkillDef } f
 
 // P3.2 승격: 수호자·마나 스킬·exclusiveTo 시대. m5 콘텐츠는 현 버전의 부분집합이고
 // 기존 수치가 불변이므로 m5 저장은 안전하게 로드(마이그레이션)할 수 있다.
-export const CONTENT_VERSION = '0.10.0-p4.4';
-export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
+export const CONTENT_VERSION = '1.0.0-rc.1';
+export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['0.10.0-p4.4', '0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
 // p4→p4.4 호환 근거: 이벤트 4종 가산·기존 플레이어/전투 콘텐츠 수치 불변.
 // p3.4→p4 호환 근거: 몬스터 6종 가산뿐(플레이어 콘텐츠·기존 수치 불변)이라 기존 저장의
 // 모든 참조가 유효하다. 신규 적은 신규 조우(P4.2+ 그래프)에서만 등장한다.
@@ -527,6 +527,17 @@ export const enemies = {
     id: enemy('ghoul'),
     name: '구울',
     maxHp: 38,
+    // 몬스터 패시브 수직 슬라이스 (P5.6 감사) — balance-provisional.
+    // '포식' intent의 회복 5와 의도적으로 공존한다: 패시브는 매 턴 미세 재생으로
+    // "화상으로 회복 상쇄" 대응법(§5.2)의 상시 압박을 만들고, 포식은 3턴 주기의
+    // 순간 회복이다. 수치(1)는 사람 밸런스 판정 전 확정하지 않는다.
+    passive: {
+      id: 'rotting-flesh',
+      name: '썩은 육체',
+      description: '자신의 턴이 시작될 때 HP를 1 회복한다',
+      hook: 'enemyTurnStart',
+      effects: [{ kind: 'heal', amount: 1 }]
+    },
     intents: [
       { id: 'rotting-touch', actions: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1 }] },
       { id: 'bite', actions: [{ kind: 'attack', damage: 8 }] },
