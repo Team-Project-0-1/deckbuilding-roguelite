@@ -92,6 +92,24 @@ import {
 import type { TargetingCommand } from "./targeting";
 import bgForest from "./assets/bg-forest.webp";
 import cardSlash from "./assets/card-slash.webp";
+import cardJab from "./assets/card-jab.webp";
+import cardFistGuard from "./assets/card-fist-guard.webp";
+import cardBurningFist from "./assets/card-burning-fist.webp";
+import cardFlameHook from "./assets/card-flame-hook.webp";
+import cardEmberWeave from "./assets/card-ember-weave.webp";
+import cardSecondWind from "./assets/card-second-wind.webp";
+import cardFireFlurry from "./assets/card-fire-flurry.webp";
+import cardBurnoutBlow from "./assets/card-burnout-blow.webp";
+import cardOverheatStrike from "./assets/card-overheat-strike.webp";
+import cardOverheatVent from "./assets/card-overheat-vent.webp";
+import cardArcaneCharge from "./assets/card-arcane-charge.webp";
+import cardArcaneCommand from "./assets/card-arcane-command.webp";
+import cardAegisPulse from "./assets/card-aegis-pulse.webp";
+import cardShieldSummon from "./assets/card-shield-summon.webp";
+import cardMirrorPlate from "./assets/card-mirror-plate.webp";
+import cardBulwarkCharge from "./assets/card-bulwark-charge.webp";
+import cardWeaponTuning from "./assets/card-weapon-tuning.webp";
+import cardTwinArmory from "./assets/card-twin-armory.webp";
 import cardGuard from "./assets/card-guard.webp";
 import cardBurningStrike from "./assets/card-burning-strike.webp";
 import cardIgnite from "./assets/card-ignite.webp";
@@ -186,6 +204,24 @@ import { TurnBuffBar } from "./turn-buff";
 
 // 생성 에셋 (docs/ui/combat-ui-v2.png 앵커 스타일 — image_gen 산출, 후처리: 크로마 키·리사이즈)
 const CARD_ART: Record<string, string> = {
+  "jab": cardJab,
+  "fist-guard": cardFistGuard,
+  "burning-fist": cardBurningFist,
+  "flame-hook": cardFlameHook,
+  "ember-weave": cardEmberWeave,
+  "second-wind": cardSecondWind,
+  "fire-flurry": cardFireFlurry,
+  "burnout-blow": cardBurnoutBlow,
+  "overheat-strike": cardOverheatStrike,
+  "overheat-vent": cardOverheatVent,
+  "arcane-charge": cardArcaneCharge,
+  "arcane-command": cardArcaneCommand,
+  "aegis-pulse": cardAegisPulse,
+  "shield-summon": cardShieldSummon,
+  "mirror-plate": cardMirrorPlate,
+  "bulwark-charge": cardBulwarkCharge,
+  "weapon-tuning": cardWeaponTuning,
+  "twin-armory": cardTwinArmory,
   slash: cardSlash,
   guard: cardGuard,
   "burning-strike": cardBurningStrike,
