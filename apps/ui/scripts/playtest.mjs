@@ -113,8 +113,14 @@ const waitForKeywordTooltip = (page, description, visible) =>
     { expected: description, shouldBeVisible: visible },
   );
 
-const tooltipLayerEvidence = (page, expected) =>
-  page.evaluate((text) => {
+const tooltipLayerEvidence = async (page, expected) => {
+  await page.waitForFunction((text) => {
+    const tip = [...document.querySelectorAll('[role="tooltip"]')].find(
+      (node) => node.textContent?.includes(text) === true,
+    );
+    return tip instanceof HTMLElement && tip.dataset.placement !== undefined;
+  }, expected);
+  return page.evaluate((text) => {
     const tip = [...document.querySelectorAll('[role="tooltip"]')].find(
       (node) => node.textContent?.includes(text) === true,
     );
@@ -137,6 +143,7 @@ const tooltipLayerEvidence = (page, expected) =>
       topmost: topmost === tip || tip.contains(topmost),
     };
   }, expected);
+};
 
 const continueFromTitleIfShown = async (page) => {
   const continueButton = page.locator('[data-testid="title-continue"]');
@@ -423,7 +430,7 @@ const winCurrentCombat = async (page) => {
   await page.waitForTimeout(300);
   check(
     "S2 2/2 장전 후 프리뷰 표시",
-    (await strike.locator(".preview-tip").count()) === 1,
+    (await page.locator("#skill-preview-2").count()) === 1,
   );
   await page.screenshot({ path: `${outDir}/07-strike-loaded.png` });
 
@@ -619,7 +626,7 @@ const winCurrentCombat = async (page) => {
   check("S7 스트라이크 1/2 손패 4", (await handCount(page)) === 4);
   check(
     "S7 스트라이크 1/2 프리뷰 없음",
-    (await card(2).locator(".preview-tip").count()) === 0,
+    (await page.locator("#skill-preview-2").count()) === 0,
   );
   await page.screenshot({ path: `${outDir}/11-strike-partial.png` });
 
@@ -659,7 +666,7 @@ const winCurrentCombat = async (page) => {
   );
   check(
     "S7 스트라이크 프리뷰 표시",
-    (await card(2).locator(".preview-tip").count()) === 1,
+    (await page.locator("#skill-preview-2").count()) === 1,
   );
 
   // 6. 스트라이크 사용 후 기본 공격 2회 — 별도 행동 카운트 없이 한 턴 4회 행동
@@ -675,7 +682,7 @@ const winCurrentCombat = async (page) => {
   );
   check(
     "S7 사용한 스트라이크 프리뷰 숨김",
-    (await card(2).locator(".preview-tip").count()) === 0,
+    (await page.locator("#skill-preview-2").count()) === 0,
   );
   check("S7 4회 행동 에러 0", errors.length === 0, errors.join(" | "));
   await page.screenshot({ path: `${outDir}/14-four-actions.png` });

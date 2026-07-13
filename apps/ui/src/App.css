@@ -872,7 +872,7 @@ button:focus-visible {
   position: absolute;
   top: 74px;
   left: 50%;
-  z-index: 7;
+  z-index: var(--z-controls);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

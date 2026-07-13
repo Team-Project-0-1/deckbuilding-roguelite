@@ -11,7 +11,7 @@ const dist = join(root, "apps/ui/dist");
 // 2종 규모 증가분. 런 내비게이션 UI는 새 이미지 없이 기존 캐릭터 아틀라스를 재사용하며
 // 총량만 10KiB 상향한다. JS·CSS·단일 파일 한도와 LCP·CLS 게이트는 유지한다.
 const BUDGETS = {
-  total: 2736537, // 기존 2.6 MiB + 10 KiB
+  total: 2740633, // P8.1 오버레이 인프라 반영: 기존 예산 + 4 KiB
   js: 409600, // 400 KiB
   css: 71680, // 70 KiB
   maxFile: 716800, // 700 KiB

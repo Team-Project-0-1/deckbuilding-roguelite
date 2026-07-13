@@ -3496,6 +3496,7 @@ const CombatBoard = ({
                 <AnchoredOverlay
                   anchorRef={skillCardRefs.current[index]!}
                   className="preview-tip"
+                  id={`skill-preview-${index}`}
                   interactive
                   open
                   role="tooltip"
