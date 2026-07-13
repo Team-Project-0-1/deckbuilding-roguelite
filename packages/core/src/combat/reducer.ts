@@ -9,7 +9,7 @@ import { runSummonPhase } from './summons';
 import type { CombatEvent } from './events';
 import { resolveConsume } from './resolve/consume';
 import { applyBlock, applyDamage, applyEffectAtom, checkCombatEnd, resolveFlip } from './resolve/flip';
-import { cloneState, MAX_PRESERVED_COINS, MAX_SKILL_SLOTS, statusStacks } from './state';
+import { bloodSwordPowerFor, cloneState, MAX_PRESERVED_COINS, MAX_SKILL_SLOTS, statusStacks } from './state';
 import type { CombatState, CombatZones } from './state';
 
 export { MAX_SKILL_SLOTS } from './state';
@@ -28,6 +28,7 @@ export interface CreateCombatConfig {
   // P6 D2 — 획득 패시브(combatStart/turnStart 훅), D1 — 막별 적 스케일
   passives?: readonly PassiveId[];
   enemyScale?: number;
+  bloodSwordInvestment?: number;
 }
 
 const slot = (value: number): SlotId => value as SlotId;
@@ -41,11 +42,7 @@ const emptyPlaced = (): Record<SlotId, CoinUid[]> => {
 
 // P6 D2 — 시작 고유 특성(trait)과 획득 패시브를 같은 훅 실행기로 처리한다.
 // 순서 결정론: trait 먼저, 이후 획득 순서(acquiredPassives 배열 순서) 그대로.
-const runHook = (
-  input: CombatState,
-  db: ContentDb,
-  hook: 'combatStart' | 'turnStart'
-): { state: CombatState; events: CombatEvent[] } => {
+const runHook = (input: CombatState, db: ContentDb, hook: 'combatStart' | 'turnStart'): { state: CombatState; events: CombatEvent[] } => {
   const events: CombatEvent[] = [];
   let state = input;
   const apply = (effects: readonly Parameters<typeof applyEffectAtom>[1][]): void => {
@@ -68,7 +65,9 @@ const runHook = (
     if (passive.mechanic === 'coinAppraiser') {
       const frost = Object.values(db.coins).find((coin) => coin.element === 'frost')?.id;
       const basic = Object.values(db.coins).find((coin) => coin.element === null)?.id;
-      const preferred = [frost, basic].find((defId) => defId !== undefined && state.zones.draw.some((uid) => String(state.coins[Number(uid)]?.defId) === String(defId)));
+      const preferred = [frost, basic].find(
+        (defId) => defId !== undefined && state.zones.draw.some((uid) => String(state.coins[Number(uid)]?.defId) === String(defId))
+      );
       if (preferred !== undefined) {
         const drawn = drawSpecificCoin(state, preferred, 1);
         state = drawn.state;
@@ -79,11 +78,7 @@ const runHook = (
   return { state, events };
 };
 
-const startPlayerTurn = (
-  input: CombatState,
-  db: ContentDb,
-  clearBlock = true
-): { state: CombatState; events: CombatEvent[] } => {
+const startPlayerTurn = (input: CombatState, db: ContentDb, clearBlock = true): { state: CombatState; events: CombatEvent[] } => {
   const events: CombatEvent[] = [];
   let state: CombatState = {
     ...input,
@@ -116,6 +111,11 @@ const startPlayerTurn = (
       commandPreservationUsedThisTurn: false,
       manaMembraneBlockThisTurn: 0,
       blueCircuitUsedThisTurn: false,
+      bloodSwordFirstSkillBlockUsedThisTurn: false,
+      bloodSwordKillCoinUsedThisTurn: false,
+      bloodSwordDiscountUsedThisTurn: false,
+      concentratedBloodUsedThisTurn: false,
+      redRefluxUsedThisTurn: false,
       nextAttackDamageBonus: 0
     },
     slots: input.slots.map((candidate) => ({
@@ -155,6 +155,12 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   if (cfg.attempt !== undefined && (!Number.isInteger(cfg.attempt) || cfg.attempt < 0)) {
     throw new Error('attempt must be a non-negative integer');
   }
+  if (
+    cfg.bloodSwordInvestment !== undefined &&
+    (!Number.isInteger(cfg.bloodSwordInvestment) || cfg.bloodSwordInvestment < 0 || cfg.bloodSwordInvestment > 30)
+  ) {
+    throw new Error('bloodSwordInvestment must be an integer in [0, 30]');
+  }
   const bag = cfg.bag === undefined ? character.startingBag : [...cfg.bag];
   for (const coin of bag) {
     if (db.coins[String(coin)] === undefined) throw new Error(`unknown coin: ${String(coin)}`);
@@ -175,25 +181,17 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   }
   const run = seedFromString(seed);
   const hasRunContext = cfg.combatIndex !== undefined || cfg.attempt !== undefined;
-  const combat = hasRunContext
-    ? derive(run, 'combat', cfg.combatIndex ?? 0, cfg.attempt ?? 0)
-    : derive(run, 'combat', 0);
+  const combat = hasRunContext ? derive(run, 'combat', cfg.combatIndex ?? 0, cfg.attempt ?? 0) : derive(run, 'combat', 0);
   const shuffle = derive(combat, 'shuffle');
   const shuffleRng = rngFrom(shuffle);
   const shuffledBag = shuffleRng.shuffle(bag.map((_coinDefId, index) => uid(index + 1)));
 
-  const coins = Object.fromEntries(
-    bag.map((defId, index) => [
-      index + 1,
-      { uid: uid(index + 1), defId, permanent: true, grants: [] }
-    ])
-  );
+  const coins = Object.fromEntries(bag.map((defId, index) => [index + 1, { uid: uid(index + 1), defId, permanent: true, grants: [] }]));
 
   const enemyScale = cfg.enemyScale ?? 1;
   if (!Number.isFinite(enemyScale) || enemyScale < 1) throw new Error('enemyScale must be >= 1');
   for (const passiveId of cfg.passives ?? []) {
-    if ((db.passives ?? {})[String(passiveId)] === undefined)
-      throw new Error(`unknown passive: ${String(passiveId)}`);
+    if ((db.passives ?? {})[String(passiveId)] === undefined) throw new Error(`unknown passive: ${String(passiveId)}`);
   }
   const enemies = cfg.enemies.map((enemyId) => {
     const def = db.enemies[String(enemyId)];
@@ -217,33 +215,74 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
     turn: 1,
     phase: 'player',
     player: {
-      hp: currentHp, maxHp, block: 0, statuses: {}, nextDrawPenalty: 0, nextDrawBonus: 0,
-      overheat: false, weaponOutput: 0,
-      nextAttackDamageBonus: 0, endTurnBlockAoeCap: 0,
-      firstDamageReducedThisTurn: false, combatBreathingUsed: false,
-      firstBurnBoostUsedThisTurn: false, burnAppliedThisTurn: false,
-      previewDeploymentUsed: false, inverseGuardUsedThisTurn: false,
-      crossCalculationUsedThisTurn: false, residualRebuildStored: false,
-      commandPreservationUsedThisTurn: false, manaMembraneBlockThisTurn: 0,
-      blueCircuitUsedThisTurn: false, manaConsumedForResonance: 0,
+      hp: currentHp,
+      maxHp,
+      block: 0,
+      statuses: {},
+      nextDrawPenalty: 0,
+      nextDrawBonus: 0,
+      overheat: false,
+      weaponOutput: 0,
+      nextAttackDamageBonus: 0,
+      endTurnBlockAoeCap: 0,
+      firstDamageReducedThisTurn: false,
+      combatBreathingUsed: false,
+      firstBurnBoostUsedThisTurn: false,
+      burnAppliedThisTurn: false,
+      previewDeploymentUsed: false,
+      inverseGuardUsedThisTurn: false,
+      crossCalculationUsedThisTurn: false,
+      residualRebuildStored: false,
+      commandPreservationUsedThisTurn: false,
+      manaMembraneBlockThisTurn: 0,
+      blueCircuitUsedThisTurn: false,
+      manaConsumedForResonance: 0,
       remiseCharges: character.trait.mechanic === 'remise' ? 1 : 0,
-      continuousMotionUsed: false, retrievalHabitUsed: false, balanceSenseUsed: false,
-      lastMoveUsed: false, residualChargeUsed: false, overcurrentUsed: false,
-      additionalPreserveThisTurn: 0, smallChangeInsuranceUsed: false,
-      headsSeenThisTurn: false, tailsSeenThisTurn: false, doubleEntryUsedThisTurn: false,
-      maturedHandUsedThisTurn: false, profitSettlementUsedThisTurn: false,
-      coldHandsUsedThisTurn: false, frostCompoundUsedThisTurn: false, refrozenLootUsedThisTurn: false
+      continuousMotionUsed: false,
+      retrievalHabitUsed: false,
+      balanceSenseUsed: false,
+      lastMoveUsed: false,
+      residualChargeUsed: false,
+      overcurrentUsed: false,
+      additionalPreserveThisTurn: 0,
+      smallChangeInsuranceUsed: false,
+      headsSeenThisTurn: false,
+      tailsSeenThisTurn: false,
+      doubleEntryUsedThisTurn: false,
+      maturedHandUsedThisTurn: false,
+      profitSettlementUsedThisTurn: false,
+      coldHandsUsedThisTurn: false,
+      frostCompoundUsedThisTurn: false,
+      refrozenLootUsedThisTurn: false,
+      bloodSwordInvestment: cfg.bloodSwordInvestment ?? 0,
+      bloodSwordPower: bloodSwordPowerFor(cfg.bloodSwordInvestment ?? 0),
+      bloodSwordReleaseBonus: 0,
+      bloodSwordFirstSkillBlockUsedThisTurn: false,
+      bloodSwordKillCoinUsedThisTurn: false,
+      bloodSwordDiscountUsedThisTurn: false,
+      concentratedBloodUsedThisTurn: false,
+      redRefluxUsedThisTurn: false
     },
     enemies,
     coins,
-    zones: { draw: shuffledBag, hand: [], placed: emptyPlaced(), discard: [], exhausted: [] },
+    zones: {
+      draw: shuffledBag,
+      hand: [],
+      placed: emptyPlaced(),
+      discard: [],
+      exhausted: []
+    },
     slots: Array.from({ length: MAX_SKILL_SLOTS }, (_, index) => ({
       skillId: skills[index] ?? null,
       cooldownRemaining: 0,
       usedThisCombat: false
     })),
     turnTriggers: [],
-    rng: { flip: derive(combat, 'flip'), shuffle: shuffleRng.snapshot(), ai: derive(combat, 'ai') },
+    rng: {
+      flip: derive(combat, 'flip'),
+      shuffle: shuffleRng.snapshot(),
+      ai: derive(combat, 'ai')
+    },
     nextUid: bag.length + 1,
     nextTurnTriggerUid: 1,
     characterId: cfg.character,
@@ -255,11 +294,32 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
     events: []
   };
 
-  const trait = runHook(base, db, 'combatStart');
+  let bloodSwordState = base;
+  const bloodSwordEvents: CombatEvent[] = [];
+  if (character.trait.mechanic === 'bloodSword' && base.player.bloodSwordPower < 5 && base.player.hp > 1) {
+    bloodSwordEvents.push({
+      type: 'traitTriggered',
+      trait: character.trait.id
+    });
+    bloodSwordState = applyDamage(base, { type: 'player' }, 1, 'self', bloodSwordEvents);
+    const investment = Math.min(30, bloodSwordState.player.bloodSwordInvestment + 1);
+    bloodSwordState = {
+      ...bloodSwordState,
+      player: {
+        ...bloodSwordState.player,
+        bloodSwordInvestment: investment,
+        bloodSwordPower: bloodSwordPowerFor(investment)
+      }
+    };
+  }
+  const trait = runHook(bloodSwordState, db, 'combatStart');
   // 전투 시작 훅은 첫 턴 초기화보다 먼저 실행된다. 여기서 방어를 지우면
   // "전투 시작 시 방어" 특성/패시브가 보이지 않게 소멸하므로 첫 턴만 보존한다.
   const started = startPlayerTurn(trait.state, db, false);
-  return { ...started.state, events: [...trait.events, ...started.events] };
+  return {
+    ...started.state,
+    events: [...bloodSwordEvents, ...trait.events, ...started.events]
+  };
 };
 
 const removeCoin = (coins: readonly CoinUid[], coin: CoinUid): CoinUid[] => coins.filter((candidate) => candidate !== coin);
@@ -277,8 +337,9 @@ const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
   );
 
 const hasPreserveChoice = (skill: FlipSkillDef): boolean =>
-  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? []), ...(skill.preservedBonus ?? [])]
-    .some((effect) => effect.kind === 'preserveChosenCoin');
+  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? []), ...(skill.preservedBonus ?? [])].some(
+    (effect) => effect.kind === 'preserveChosenCoin'
+  );
 
 const isBasicCoinInHand = (input: CombatState, coin: CoinUid, db: ContentDb): boolean => {
   const instance = input.coins[Number(coin)];
@@ -286,19 +347,17 @@ const isBasicCoinInHand = (input: CombatState, coin: CoinUid, db: ContentDb): bo
   return input.zones.hand.includes(coin) && instance !== undefined && def?.element === null && instance.grants.length === 0;
 };
 
-const validateChosenBasicInHand = (
-  input: CombatState,
-  skill: FlipSkillDef,
-  chosen: readonly CoinUid[] | undefined,
-  db: ContentDb
-): StepResult | undefined => {
+const validateChosenBasicInHand = (input: CombatState, skill: FlipSkillDef, chosen: readonly CoinUid[] | undefined, db: ContentDb): StepResult | undefined => {
   if (!hasChooseBasicInHand(skill) && !hasPreserveChoice(skill)) return undefined;
   if (hasPreserveChoice(skill)) {
     if (input.zones.hand.length === 0) {
       return chosen === undefined || chosen.length === 0 ? undefined : { ok: false, error: 'chosen coin is not in hand' };
     }
     if (chosen === undefined || chosen.length !== 1 || !input.zones.hand.includes(chosen[0]!)) {
-      return { ok: false, error: 'preserveChosenCoin requires exactly one chosen coin in hand' };
+      return {
+        ok: false,
+        error: 'preserveChosenCoin requires exactly one chosen coin in hand'
+      };
     }
     return undefined;
   }
@@ -307,7 +366,10 @@ const validateChosenBasicInHand = (
     return chosen === undefined || chosen.length === 0 ? undefined : { ok: false, error: 'chosen coin is not a basic coin in hand' };
   }
   if (chosen === undefined || chosen.length !== 1) {
-    return { ok: false, error: 'chooseBasicInHand requires exactly one chosen coin' };
+    return {
+      ok: false,
+      error: 'chooseBasicInHand requires exactly one chosen coin'
+    };
   }
   const selected = chosen[0];
   if (selected === undefined || !isBasicCoinInHand(input, selected, db)) {
@@ -329,7 +391,14 @@ const tickPlayerDurations = (input: CombatState, events: CombatEvent[]): CombatS
       nextStatuses[status] = { kind: 'duration', turns };
     }
     statuses = nextStatuses;
-    events.push({ type: 'statusTicked', target: { type: 'player' }, status, amount: 0, remaining: 0, turns });
+    events.push({
+      type: 'statusTicked',
+      target: { type: 'player' },
+      status,
+      amount: 0,
+      remaining: 0,
+      turns
+    });
   }
   return statuses === input.player.statuses ? input : { ...input, player: { ...input.player, statuses } };
 };
@@ -351,10 +420,17 @@ const placeCoin = (input: CombatState, coin: CoinUid, slotId: SlotId, db: Conten
     zones: {
       ...input.zones,
       hand: removeCoin(input.zones.hand, coin),
-      placed: { ...input.zones.placed, [slotId]: [...(input.zones.placed[slotId] ?? []), coin] }
+      placed: {
+        ...input.zones.placed,
+        [slotId]: [...(input.zones.placed[slotId] ?? []), coin]
+      }
     }
   };
-  return { ok: true, state, events: [{ type: 'coinPlaced', coin, slot: slotId }] };
+  return {
+    ok: true,
+    state,
+    events: [{ type: 'coinPlaced', coin, slot: slotId }]
+  };
 };
 
 const unplaceCoin = (input: CombatState, coin: CoinUid): StepResult => {
@@ -370,7 +446,10 @@ const unplaceCoin = (input: CombatState, coin: CoinUid): StepResult => {
   if (found === undefined) return { ok: false, error: 'coin is not placed' };
   return {
     ok: true,
-    state: { ...input, zones: { ...input.zones, placed, hand: [...input.zones.hand, coin] } },
+    state: {
+      ...input,
+      zones: { ...input.zones, placed, hand: [...input.zones.hand, coin] }
+    },
     events: [{ type: 'coinUnplaced', coin, slot: found }]
   };
 };
@@ -384,10 +463,12 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
     ...state,
     zones: { ...state.zones, hand: [...state.zones.hand, ...returned], placed }
   };
-  const passiveMechanics = new Set(state.passives.flatMap((id) => {
-    const mechanic = (db.passives ?? {})[String(id)]?.mechanic;
-    return mechanic === undefined ? [] : [mechanic];
-  }));
+  const passiveMechanics = new Set(
+    state.passives.flatMap((id) => {
+      const mechanic = (db.passives ?? {})[String(id)]?.mechanic;
+      return mechanic === undefined ? [] : [mechanic];
+    })
+  );
   if (passiveMechanics.has('preparedStance')) {
     const amount = Math.min(2, state.zones.hand.length);
     if (amount > 0) state = applyBlock(state, { type: 'player' }, amount, events);
@@ -401,21 +482,34 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
     state = applyDamage(state, { type: 'player' }, burn, 'burn', events);
     state = {
       ...state,
-      player: { ...state.player, statuses: { ...state.player.statuses, burn: { kind: 'stack', stacks: Math.max(0, burn - 1) } } }
+      player: {
+        ...state.player,
+        statuses: {
+          ...state.player.statuses,
+          burn: { kind: 'stack', stacks: Math.max(0, burn - 1) }
+        }
+      }
     };
-    events.push({ type: 'statusTicked', target: { type: 'player' }, status: 'burn', amount: burn, remaining: Math.max(0, burn - 1) });
+    events.push({
+      type: 'statusTicked',
+      target: { type: 'player' },
+      status: 'burn',
+      amount: burn,
+      remaining: Math.max(0, burn - 1)
+    });
   }
   state = tickPlayerDurations(state, events);
   state = checkCombatEnd(state, events);
   if (state.phase === 'defeat') return { ok: true, state, events };
   if (state.turnTriggers.length > 0) {
-    events.push({ type: 'turnTriggersExpired', count: state.turnTriggers.length });
+    events.push({
+      type: 'turnTriggersExpired',
+      count: state.turnTriggers.length
+    });
     state = { ...state, turnTriggers: [] };
   }
 
-  const clearedCoins = Object.fromEntries(
-    Object.entries(state.coins).map(([key, coin]) => [key, { ...coin, grants: [] }])
-  );
+  const clearedCoins = Object.fromEntries(Object.entries(state.coins).map(([key, coin]) => [key, { ...coin, grants: [] }]));
   const baseCapacity = db.characters[String(state.characterId)]?.trait.mechanic === 'preserveHand' ? 1 : 0;
   const newCapacity = baseCapacity + Math.min(2, state.player.additionalPreserveThisTurn);
   const alreadyPreserved = state.zones.hand.filter((coin) => state.coins[Number(coin)]?.preserved === true);
@@ -424,28 +518,37 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
     return { ok: false, error: 'preserved coin must be a unique coin in hand' };
   }
   const requestedNew = requested.filter((coin) => !alreadyPreserved.includes(coin));
-  if (
-    requestedNew.length > newCapacity ||
-    new Set([...alreadyPreserved, ...requested]).size > MAX_PRESERVED_COINS
-  ) {
+  if (requestedNew.length > newCapacity || new Set([...alreadyPreserved, ...requested]).size > MAX_PRESERVED_COINS) {
     return { ok: false, error: 'preserved coin count exceeds capacity' };
   }
   const combined = [...alreadyPreserved, ...requestedNew].slice(0, MAX_PRESERVED_COINS);
   const preserveSet = new Set(combined);
   const nextCoins = Object.fromEntries(
-    Object.entries(clearedCoins).map(([key, coin]) => [key, {
-      ...coin,
-      preserved: preserveSet.has(coin.uid)
-    }])
+    Object.entries(clearedCoins).map(([key, coin]) => [
+      key,
+      {
+        ...coin,
+        preserved: preserveSet.has(coin.uid)
+      }
+    ])
   );
   const discarded = state.zones.hand.filter((coin) => !preserveSet.has(coin));
   const preserved = state.zones.hand.filter((coin) => preserveSet.has(coin));
   state = {
     ...state,
     coins: nextCoins,
-    zones: { ...state.zones, discard: [...state.zones.discard, ...discarded], hand: preserved }
+    zones: {
+      ...state.zones,
+      discard: [...state.zones.discard, ...discarded],
+      hand: preserved
+    }
   };
-  if (discarded.length > 0) events.push({ type: 'coinsDiscarded', coins: discarded, reason: 'turnEnd' });
+  if (discarded.length > 0)
+    events.push({
+      type: 'coinsDiscarded',
+      coins: discarded,
+      reason: 'turnEnd'
+    });
   if (preserved.length > 0) events.push({ type: 'coinsPreserved', coins: preserved });
 
   // P6 D6 — 소환 장비 자동 행동 (플레이어 턴 종료, 적 페이즈 전)
@@ -525,11 +628,17 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
       if (skillRequiresSummonChoice(skill) && !input.summons.some((summon) => summon.uid === cmd.chosenSummon))
         return { ok: false, error: 'a valid summon choice is required' };
       const targetedInput = cmd.target === undefined ? input : { ...input, lastTargetedEnemy: cmd.target };
-      return { ok: true, ...resolveConsume(targetedInput, cmd.slot, skill, cmd.coins, cmd.target, db, cmd.chosenSummon, cmd.desiredCoin) };
+      return {
+        ok: true,
+        ...resolveConsume(targetedInput, cmd.slot, skill, cmd.coins, cmd.target, db, cmd.chosenSummon, cmd.desiredCoin)
+      };
     }
     return { ok: false, error: 'unknown command' };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 };
 

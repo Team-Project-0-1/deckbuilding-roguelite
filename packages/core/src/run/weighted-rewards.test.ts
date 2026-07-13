@@ -41,10 +41,7 @@ const wideCoins = {
 const db = (coins: ContentDb["coins"]): ContentDb => ({
   coins,
   skills: Object.fromEntries(
-    ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"].map((skill) => [
-      skill,
-      simpleSkill(skill),
-    ]),
+    ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"].map((skill) => [skill, simpleSkill(skill)]),
   ) as ContentDb["skills"],
   enemies: Object.fromEntries(
     [
@@ -58,19 +55,15 @@ const db = (coins: ContentDb["coins"]): ContentDb => ({
       "ghoul",
       "slime",
       "ember-archmage",
-    ].map(
-      (enemy) => [
-        enemy,
-        {
-          id: id(enemy),
-          name: enemy,
-          maxHp: 10,
-          intents: [
-            { id: "hit", actions: [{ kind: "attack" as const, damage: 1 }] },
-          ],
-        },
-      ],
-    ),
+    ].map((enemy) => [
+      enemy,
+      {
+        id: id(enemy),
+        name: enemy,
+        maxHp: 10,
+        intents: [{ id: "hit", actions: [{ kind: "attack" as const, damage: 1 }] }],
+      },
+    ]),
   ),
   characters: {
     warrior: {
@@ -82,9 +75,7 @@ const db = (coins: ContentDb["coins"]): ContentDb => ({
         id<CoinDefId>("fire"),
         id<CoinDefId>("fire"),
       ],
-      startingSkills: ["s1", "s2", "s3", "s4", "s5", "s6"].map((skill) =>
-        id<SkillId>(skill),
-      ),
+      startingSkills: ["s1", "s2", "s3", "s4", "s5", "s6"].map((skill) => id<SkillId>(skill)),
       trait: { id: "none", name: "none", hook: "combatStart", effects: [] },
     },
   },
@@ -102,32 +93,16 @@ const rewardsAt = (state: RunState, database: ContentDb): RunState => {
 };
 
 const newRun = (database: ContentDb, seed = "WEIGHTED"): RunState =>
-  createRun(
-    { contentVersion: "test", runSeed: seed, character: id<CharacterId>("warrior") },
-    database,
-  );
+  createRun({ contentVersion: "test", runSeed: seed, character: id<CharacterId>("warrior") }, database);
 
-describe("weighted coin rewards (§825 gate)", () => {
-  it("keeps the legacy full-shuffle byte behavior while the pool is 3 or fewer", () => {
-    const legacy = db(baseCoins);
-    const rewards = rewardsAt(newRun(legacy), legacy);
-    const options = rewards.pendingRewards?.coinOptions.map(String) ?? [];
+describe("signature-locked coin rewards (P12)", () => {
+  it("offers only basic and the current character's signature element", () => {
+    for (const coins of [baseCoins, wideCoins]) {
+      const database = db(coins);
+      const options = rewardsAt(newRun(database), database).pendingRewards?.coinOptions.map(String) ?? [];
 
-    // 레거시 계약: 같은 reward 스트림의 exact 셔플 순서와 완전 동일 (순서 회귀 검출)
-    const expected = rngFrom(derive(seedFromString("WEIGHTED"), "reward", 0))
-      .shuffle(["basic", "fire", "mana"]);
-    expect(options).toEqual(expected);
-  });
-
-  it("switches to weighted three picks without duplicates when the pool exceeds 3", () => {
-    const wide = db(wideCoins);
-    const rewards = rewardsAt(newRun(wide), wide);
-    const options = rewards.pendingRewards?.coinOptions.map(String) ?? [];
-
-    expect(options).toHaveLength(3);
-    expect(new Set(options).size).toBe(3);
-    for (const option of options) {
-      expect(Object.keys(wideCoins)).toContain(option);
+      expect(options).toHaveLength(2);
+      expect(new Set(options)).toEqual(new Set(["basic", "fire"]));
     }
   });
 
@@ -136,14 +111,11 @@ describe("weighted coin rewards (§825 gate)", () => {
     const first = rewardsAt(newRun(wide, "DET"), wide).pendingRewards?.coinOptions;
     const second = rewardsAt(newRun(wide, "DET"), wide).pendingRewards?.coinOptions;
     expect(first).toEqual(second);
-    // 서로 다른 고정 시드는 결과가 달라야 한다 (시드 미사용 회귀 검출) — 3개 시드 중 최소 1쌍 상이
+    // 순서는 reward 스트림을 사용한다. 서로 다른 고정 시드 중 최소 한 쌍은 달라야 한다.
     const a = rewardsAt(newRun(wide, "DIV-A"), wide).pendingRewards?.coinOptions?.map(String);
     const b = rewardsAt(newRun(wide, "DIV-B"), wide).pendingRewards?.coinOptions?.map(String);
     const c = rewardsAt(newRun(wide, "DIV-C"), wide).pendingRewards?.coinOptions?.map(String);
-    expect(
-      JSON.stringify(a) !== JSON.stringify(b) ||
-        JSON.stringify(b) !== JSON.stringify(c),
-    ).toBe(true);
+    expect(JSON.stringify(a) !== JSON.stringify(b) || JSON.stringify(b) !== JSON.stringify(c)).toBe(true);
   });
 
   it("routes the exhausted-pool fallback through the same weighted canon", () => {
@@ -154,9 +126,7 @@ describe("weighted coin rewards (§825 gate)", () => {
     const exhausted: ContentDb = {
       ...wide,
       skills: Object.fromEntries(
-        Object.entries(wide.skills).filter(([skill]) =>
-          ["s1", "s2", "s3", "s4", "s5", "s6"].includes(skill),
-        ),
+        Object.entries(wide.skills).filter(([skill]) => ["s1", "s2", "s3", "s4", "s5", "s6"].includes(skill)),
       ),
     };
     const combatNode = (nodeId: string, enemy: string) => ({
@@ -168,11 +138,7 @@ describe("weighted coin rewards (§825 gate)", () => {
     const fallbackState = (): RunState => ({
       ...newRun(exhausted, "FALLBACK"),
       graph: {
-        layers: [
-          [combatNode("l0", "raider")],
-          [combatNode("l1", "shaman")],
-          [combatNode("l2", "gatekeeper")],
-        ],
+        layers: [[combatNode("l0", "raider")], [combatNode("l1", "shaman")], [combatNode("l2", "gatekeeper")]],
       },
       nodeChoices: [0, 0, 0],
       combatIndex: 2,
@@ -190,10 +156,8 @@ describe("weighted coin rewards (§825 gate)", () => {
 
     expect(resolved.phase).toBe("rewards");
     expect(resolved.pendingRewards?.coinChoiceResolved).toBe(false);
-    expect(fallback).toHaveLength(3);
-    expect(new Set(fallback).size).toBe(3);
-    for (const option of fallback) expect(Object.keys(wideCoins)).toContain(option);
-    // 가중 정본 공유: reward-fallback 스트림의 weightedCoinOptions와 완전 동일
+    expect(new Set(fallback)).toEqual(new Set(["basic", "fire"]));
+    // 대표 속성 제한 정본 공유: fallback도 weightedCoinOptions와 완전 동일
     const expected = weightedCoinOptions(
       exhausted,
       id<CharacterId>("warrior"),
@@ -202,35 +166,9 @@ describe("weighted coin rewards (§825 gate)", () => {
     );
     expect(fallback).toEqual(expected.map(String));
     // 결정론: 같은 수제 상태 재구성이 동일한 fallback을 낸다
-    expect(
-      resolveCoinRemoval(fallbackState(), null, exhausted).pendingRewards?.coinOptions.map(
-        String,
-      ),
-    ).toEqual(fallback);
-  });
-
-  it("ranks signature above basic above other elements across many draws", () => {
-    const wide = db(wideCoins);
-    const counts = new Map<string, number>();
-    for (let seedIndex = 0; seedIndex < 400; seedIndex += 1) {
-      const rng = rngFrom(derive(seedFromString(`stat-${seedIndex}`), "reward", 0));
-      const picks = weightedCoinOptions(
-        wide,
-        id<CharacterId>("warrior"),
-        newRun(wide).bag,
-        rng,
-      );
-      const top = String(picks[0]);
-      counts.set(top, (counts.get(top) ?? 0) + 1);
-    }
-    const fire = counts.get("fire") ?? 0; // 대표 50 + 보유 15
-    const basic = counts.get("basic") ?? 0; // 30
-    const frost = counts.get("frost") ?? 0; // 20
-    const lightning = counts.get("lightning") ?? 0; // 20
-
-    expect(fire).toBeGreaterThan(basic);
-    expect(basic).toBeGreaterThan(frost);
-    expect(basic).toBeGreaterThan(lightning);
+    expect(resolveCoinRemoval(fallbackState(), null, exhausted).pendingRewards?.coinOptions.map(String)).toEqual(
+      fallback,
+    );
   });
 
   it("derives the signature element from the starting bag majority", () => {
@@ -238,22 +176,19 @@ describe("weighted coin rewards (§825 gate)", () => {
     expect(signatureElement(wide, id<CharacterId>("warrior"))).toBe("fire");
   });
 
-  it("boosts owned elements via the bag bonus", () => {
+  it("does not widen the pool when the run acquired another element", () => {
     const wide = db(wideCoins);
     const manaBag = [
       ...Array.from({ length: 8 }, () => id<CoinDefId>("basic")),
       id<CoinDefId>("mana"),
       id<CoinDefId>("mana"),
     ];
-    let manaTop = 0;
-    let frostTop = 0;
-    for (let seedIndex = 0; seedIndex < 400; seedIndex += 1) {
-      const rng = rngFrom(derive(seedFromString(`own-${seedIndex}`), "reward", 0));
-      const picks = weightedCoinOptions(wide, id<CharacterId>("warrior"), manaBag, rng);
-      if (String(picks[0]) === "mana") manaTop += 1;
-      if (String(picks[0]) === "frost") frostTop += 1;
-    }
-    // mana(기타 20 + 보유 15 = 35) > frost(기타 20)
-    expect(manaTop).toBeGreaterThan(frostTop);
+    const picks = weightedCoinOptions(
+      wide,
+      id<CharacterId>("warrior"),
+      manaBag,
+      rngFrom(derive(seedFromString("off-element-owned"), "reward", 0)),
+    );
+    expect(new Set(picks.map(String))).toEqual(new Set(["basic", "fire"]));
   });
 });

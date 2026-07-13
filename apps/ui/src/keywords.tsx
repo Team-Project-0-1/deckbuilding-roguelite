@@ -22,14 +22,10 @@ export type KeywordTerm =
   | "oncePerCombat"
   | "overheat";
 
-export const KEYWORD_GLOSSARY: Record<
-  KeywordTerm,
-  { label: string; description: string }
-> = {
+export const KEYWORD_GLOSSARY: Record<KeywordTerm, { label: string; description: string }> = {
   burn: {
     label: "화상",
-    description:
-      "대상의 턴이 끝날 때 스택만큼 피해를 준다 (방어 무시). 그 뒤 스택이 1 줄어든다.",
+    description: "대상의 턴이 끝날 때 스택만큼 피해를 준다 (방어 무시). 그 뒤 스택이 1 줄어든다.",
   },
   wither: {
     label: "위축",
@@ -37,18 +33,15 @@ export const KEYWORD_GLOSSARY: Record<
   },
   block: {
     label: "방어",
-    description:
-      "받는 피해를 먼저 막는다. 자기 턴이 시작되면 0으로 돌아간다.",
+    description: "받는 피해를 먼저 막는다. 자기 턴이 시작되면 0으로 돌아간다.",
   },
   flip: {
     label: "플립",
-    description:
-      "장전한 동전을 던져 앞·뒤를 정한다. 기본 효과는 항상 발동하고, 면 결과는 보너스만 더한다.",
+    description: "장전한 동전을 던져 앞·뒤를 정한다. 기본 효과는 항상 발동하고, 면 결과는 보너스만 더한다.",
   },
   consume: {
     label: "소비",
-    description:
-      "동전을 던지지 않고 그대로 지불한다. 앞·뒤 효과는 발동하지 않는다.",
+    description: "동전을 던지지 않고 그대로 지불한다. 앞·뒤 효과는 발동하지 않는다.",
   },
   frostbite: {
     label: "동상",
@@ -69,8 +62,7 @@ export const KEYWORD_GLOSSARY: Record<
   },
   passive: {
     label: "패시브",
-    description:
-      "이 적의 고유 특성. 조건이 되면 자동으로 발동한다 — 의도(다음 행동)와 별개.",
+    description: "이 적의 고유 특성. 조건이 되면 자동으로 발동한다 — 의도(다음 행동)와 별개.",
   },
   temporary: {
     label: "임시 코인",
@@ -78,8 +70,7 @@ export const KEYWORD_GLOSSARY: Record<
   },
   elementCoin: {
     label: "속성 코인",
-    description:
-      "앞면과 뒷면에 서로 다른 속성 효과가 있는 동전. 플립할 때만 발동하고, 소비하면 발동하지 않는다.",
+    description: "앞면과 뒷면에 서로 다른 속성 효과가 있는 동전. 플립할 때만 발동하고, 소비하면 발동하지 않는다.",
   },
   // P7 D1/D5 — 쿨다운·전투당 1회·과열 (공식 용어 정본)
   cooldown: {
@@ -94,7 +85,7 @@ export const KEYWORD_GLOSSARY: Record<
   overheat: {
     label: "과열",
     description:
-      "화염 코인을 소비하는 스킬로 진입한다. 하나만 유지되고 턴이 지나도 남는다. 과열 강화 스킬을 성공시키면 강화 효과가 적용된 뒤 과열이 사라진다.",
+      "일부 화염 스킬로 진입한다. 하나만 유지되고 턴이 지나도 남는다. 과열 강화 스킬을 성공시키면 강화 효과가 적용된 뒤 과열이 사라진다.",
   },
 };
 
@@ -179,13 +170,7 @@ export function Keyword(props: {
       >
         {props.children ?? entry.label}
       </button>
-      <AnchoredOverlay
-        anchorRef={host}
-        className="kw-tip"
-        id={id}
-        open={open}
-        role="tooltip"
-      >
+      <AnchoredOverlay anchorRef={host} className="kw-tip" id={id} open={open} role="tooltip">
         <strong>{entry.label}</strong>
         {entry.description}
       </AnchoredOverlay>

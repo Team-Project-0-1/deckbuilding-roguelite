@@ -8,9 +8,16 @@ export const MAX_SKILL_SLOTS = 8;
 // P11 — 자동/직접/턴 종료 보존이 모두 공유하는 전투 중 절대 상한.
 export const MAX_PRESERVED_COINS = 3;
 
-export type StatusState =
-  | { kind: 'stack'; stacks: number }
-  | { kind: 'duration'; turns: number };
+export const bloodSwordPowerFor = (investment: number): number => {
+  if (investment >= 30) return 5;
+  if (investment >= 25) return 4;
+  if (investment >= 15) return 3;
+  if (investment >= 10) return 2;
+  if (investment >= 5) return 1;
+  return 0;
+};
+
+export type StatusState = { kind: 'stack'; stacks: number } | { kind: 'duration'; turns: number };
 
 export const statusStacks = (statuses: Partial<Record<StatusId, StatusState>>, id: StatusId): number => {
   const status = statuses[id];
@@ -67,6 +74,14 @@ export interface PlayerState extends UnitState {
   coldHandsUsedThisTurn: boolean;
   frostCompoundUsedThisTurn: boolean;
   refrozenLootUsedThisTurn: boolean;
+  bloodSwordInvestment: number;
+  bloodSwordPower: number;
+  bloodSwordReleaseBonus: number;
+  bloodSwordFirstSkillBlockUsedThisTurn: boolean;
+  bloodSwordKillCoinUsedThisTurn: boolean;
+  bloodSwordDiscountUsedThisTurn: boolean;
+  concentratedBloodUsedThisTurn: boolean;
+  redRefluxUsedThisTurn: boolean;
 }
 
 export interface EnemyState extends UnitState {

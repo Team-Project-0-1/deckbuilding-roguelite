@@ -10,6 +10,7 @@ import {
   buyShopSkill,
   chooseCoinReward,
   chooseRunNode,
+  chooseSkillReward,
   completedCombatCount,
   createRun,
   leaveShop,
@@ -24,11 +25,7 @@ import type { RunState } from "./types";
 
 const id = <T extends string>(value: string): T => value as T;
 
-const skillDef = (
-  value: string,
-  rarity: SkillDef["rarity"] = "common",
-  exclusiveTo?: CharacterId,
-): SkillDef => ({
+const skillDef = (value: string, rarity: SkillDef["rarity"] = "common", exclusiveTo?: CharacterId): SkillDef => ({
   id: id<SkillId>(value),
   name: value,
   type: "flip",
@@ -55,9 +52,7 @@ const testDb = (): ContentDb => ({
       id: id<CoinDefId>("fire"),
       element: "fire",
       procs: {
-        heads: [
-          { kind: "applyStatus", status: "burn", stacks: 1, to: "target" },
-        ],
+        heads: [{ kind: "applyStatus", status: "burn", stacks: 1, to: "target" }],
         tails: [{ kind: "damage", amount: 1 }],
       },
     },
@@ -88,9 +83,7 @@ const testDb = (): ContentDb => ({
       id: id<CoinDefId>("lightning"),
       element: "lightning",
       procs: {
-        heads: [
-          { kind: "applyStatus", status: "shock", stacks: 1, to: "target" },
-        ],
+        heads: [{ kind: "applyStatus", status: "shock", stacks: 1, to: "target" }],
         tails: [{ kind: "damage", amount: 1 }],
       },
     },
@@ -107,11 +100,7 @@ const testDb = (): ContentDb => ({
     c3: skillDef("c3"),
     a1: skillDef("a1", "advanced"),
     r1: skillDef("r1", "rare"),
-    guardianOnly: skillDef(
-      "guardianOnly",
-      "rare",
-      id<CharacterId>("guardian"),
-    ),
+    guardianOnly: skillDef("guardianOnly", "rare", id<CharacterId>("guardian")),
   },
   enemies: Object.fromEntries(
     [
@@ -137,9 +126,7 @@ const testDb = (): ContentDb => ({
         id<CoinDefId>("fire"),
         id<CoinDefId>("fire"),
       ],
-      startingSkills: ["s1", "s2", "s3", "s4", "s5", "s6"].map((skill) =>
-        id<SkillId>(skill),
-      ),
+      startingSkills: ["s1", "s2", "s3", "s4", "s5", "s6"].map((skill) => id<SkillId>(skill)),
       trait: { id: "none", name: "none", hook: "combatStart", effects: [] },
     },
   },
@@ -229,8 +216,7 @@ const reachLayerThreeChoice = (db: ContentDb): RunState => {
   return run;
 };
 
-const reachFirstShop = (db: ContentDb): RunState =>
-  chooseRunNode(reachLayerThreeChoice(db), 0, db);
+const reachFirstShop = (db: ContentDb): RunState => chooseRunNode(reachLayerThreeChoice(db), 0, db);
 
 const coinPrice = (db: ContentDb, run: RunState, coin: CoinDefId): number => {
   const element = db.coins[String(coin)]?.element;
@@ -269,18 +255,12 @@ describe("P4.3 independent verification", () => {
     const db = testDb();
     const choice = reachLayerThreeChoice(db);
 
-    expect(() => chooseRunNode(choice, -1, db)).toThrow(
-      "node choice is out of range",
+    expect(() => chooseRunNode(choice, -1, db)).toThrow("node choice is out of range");
+    expect(() => chooseRunNode(choice, 2, db)).toThrow("node choice is out of range");
+    expect(() => chooseRunNode({ ...choice, phase: "ready" }, 0, db)).toThrow("run is not choosing a node");
+    expect(() => chooseRunNode({ ...newRun(db), phase: "choose-node" }, 0, db)).toThrow(
+      "current layer is not a branch",
     );
-    expect(() => chooseRunNode(choice, 2, db)).toThrow(
-      "node choice is out of range",
-    );
-    expect(() => chooseRunNode({ ...choice, phase: "ready" }, 0, db)).toThrow(
-      "run is not choosing a node",
-    );
-    expect(() =>
-      chooseRunNode({ ...newRun(db), phase: "choose-node" }, 0, db),
-    ).toThrow("current layer is not a branch");
 
     const eventBranch = chooseRunNode(choice, 1, db);
     expect(eventBranch.phase).toBe("event");
@@ -294,45 +274,29 @@ describe("P4.3 independent verification", () => {
     const pending = shop.pendingShop;
     if (pending === undefined) throw new Error("missing pending shop");
 
-    expect(pending.coinPrices).toEqual(
-      pending.coinOptions.map((coin) => coinPrice(db, shop, coin)),
-    );
-    expect(pending.skillPrices).toEqual(
-      pending.skillOptions.map((skill) => skillPrice(db, skill)),
-    );
-    expect(pending.coinOptions).toHaveLength(3);
-    expect(new Set(pending.coinOptions.map(String)).size).toBe(3);
+    expect(pending.coinPrices).toEqual(pending.coinOptions.map((coin) => coinPrice(db, shop, coin)));
+    expect(pending.skillPrices).toEqual(pending.skillOptions.map((skill) => skillPrice(db, skill)));
+    expect(pending.coinOptions).toHaveLength(2);
+    expect(new Set(pending.coinOptions.map(String))).toEqual(new Set(["basic", "fire"]));
     expect(pending.skillOptions).not.toContain(id<SkillId>("guardianOnly"));
 
-    expect(() =>
-      buyShopCoin({ ...shop, gold: pending.coinPrices[0]! - 1 }, 0, db),
-    ).toThrow("not enough gold");
+    expect(() => buyShopCoin({ ...shop, gold: pending.coinPrices[0]! - 1 }, 0, db)).toThrow("not enough gold");
 
     const boughtCoin = buyShopCoin(shop, 0, db);
     expect(boughtCoin.gold).toBe(shop.gold - pending.coinPrices[0]!);
     expect(boughtCoin.bag.at(-1)).toBe(pending.coinOptions[0]);
     expect(boughtCoin.shopPurchasedCoins).toBe(1);
-    expect(boughtCoin.pendingShop?.coinOptions).not.toContain(
-      pending.coinOptions[0],
-    );
+    expect(boughtCoin.pendingShop?.coinOptions).not.toContain(pending.coinOptions[0]);
 
-    const removedOnce = buyShopRemoval(
-      { ...shop, bag: ["basic", "fire", "mana"] as never },
-      0,
-      db,
-    );
+    const removedOnce = buyShopRemoval({ ...shop, bag: ["basic", "fire", "mana"] as never }, 0, db);
     expect(removedOnce.gold).toBe(325);
     expect(removedOnce.shopRemovals).toBe(1);
     const removedTwice = buyShopRemoval(removedOnce, 0, db);
     expect(removedTwice.gold).toBe(225);
     expect(removedTwice.shopRemovals).toBe(2);
-    expect(() => buyShopRemoval(removedTwice, 0, db)).toThrow(
-      "cannot remove the last coin",
-    );
+    expect(() => buyShopRemoval(removedTwice, 0, db)).toThrow("cannot remove the last coin");
 
-    expect(() => buyShopRemoval({ ...shop, gold: 74 }, 0, db)).toThrow(
-      "not enough gold",
-    );
+    expect(() => buyShopRemoval({ ...shop, gold: 74 }, 0, db)).toThrow("not enough gold");
 
     const skill = pending.skillOptions[0];
     if (skill === undefined) throw new Error("missing shop skill");
@@ -356,6 +320,84 @@ describe("P4.3 independent verification", () => {
         1,
       ),
     ).toThrow("shop skill is already owned");
+  });
+
+  it("rejects tampered off-pool offers and protects a locked unique skill", () => {
+    const db = testDb();
+    db.skills["s1"] = {
+      ...db.skills["s1"]!,
+      bloodOffering: true,
+    };
+    const shop = { ...reachFirstShop(db), gold: 400 };
+    const pending = shop.pendingShop;
+    if (pending === undefined) throw new Error("missing pending shop");
+
+    const offSignatureShop = {
+      ...shop,
+      pendingShop: {
+        ...pending,
+        coinOptions: [id<CoinDefId>("mana")],
+        coinPrices: [70],
+      },
+    };
+    expect(() => buyShopCoin(offSignatureShop, 0, db)).toThrow("shop coin is not eligible for this character");
+
+    const foreignSkillShop = {
+      ...shop,
+      pendingShop: {
+        ...pending,
+        skillOptions: [id<SkillId>("guardianOnly")],
+        skillPrices: [120],
+      },
+    };
+    expect(() => buyShopSkill(foreignSkillShop, 0, db, 1)).toThrow("shop skill is not eligible for this character");
+
+    const offeredSkill = pending.skillOptions[0];
+    if (offeredSkill === undefined) throw new Error("missing shop skill");
+    expect(() => buyShopSkill(shop, 0, db, 0)).toThrow("locked skill cannot be replaced");
+
+    const rewardState: RunState = {
+      ...newRun(db, "LOCKED-REWARD"),
+      phase: "rewards",
+      pendingRewards: {
+        coinOptions: [id<CoinDefId>("basic")],
+        coinChoiceResolved: true,
+        coinRemovalResolved: true,
+        skillOptions: [offeredSkill],
+        skillChoiceResolved: false,
+      },
+    };
+    expect(() => chooseSkillReward(rewardState, offeredSkill, 0, db)).toThrow("locked skill cannot be replaced");
+    expect(() =>
+      chooseSkillReward(
+        {
+          ...rewardState,
+          pendingRewards: {
+            ...rewardState.pendingRewards!,
+            skillOptions: [id<SkillId>("guardianOnly")],
+          },
+        },
+        id<SkillId>("guardianOnly"),
+        1,
+        db,
+      ),
+    ).toThrow("skill reward is not eligible for this character");
+
+    expect(() =>
+      chooseCoinReward(
+        {
+          ...rewardState,
+          pendingRewards: {
+            ...rewardState.pendingRewards!,
+            coinOptions: [id<CoinDefId>("mana")],
+            coinChoiceResolved: false,
+            skillChoiceResolved: true,
+          },
+        },
+        id<CoinDefId>("mana"),
+        db,
+      ),
+    ).toThrow("coin reward is not eligible for this character");
   });
 
   it("uses graph and shop streams deterministically and keeps shop coins on the shared weighted canon", () => {
@@ -384,13 +426,11 @@ describe("P4.3 independent verification", () => {
       shopA.bag,
       rngFrom(derive(seedFromString(shopA.runSeed), "reward", 0)),
     );
-    expect(shopA.pendingShop?.coinOptions).not.toEqual(rewardStreamCoins);
+    // P12의 2종 후보에서는 독립 스트림이 우연히 같은 순서를 낼 수 있다.
+    // 두 스트림 모두 동일한 기본+대표 속성 정본을 사용한다는 계약만 고정한다.
+    expect(new Set(rewardStreamCoins.map(String))).toEqual(new Set(["basic", "fire"]));
 
-    const eligible = rewardEligibleSkillIds(
-      db.skills,
-      shopA.character,
-      shopA.equippedSkills,
-    );
+    const eligible = rewardEligibleSkillIds(db.skills, shopA.character, shopA.equippedSkills);
     expect(eligible).not.toContain(id<SkillId>("guardianOnly"));
     for (const skill of shopA.pendingShop?.skillOptions ?? []) {
       expect(eligible).toContain(skill);

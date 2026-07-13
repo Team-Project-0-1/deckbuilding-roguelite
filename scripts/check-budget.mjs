@@ -12,8 +12,10 @@ const dist = join(root, "apps/ui/dist");
 // 명시적 보존 선택 패널의 상태·접근성 스타일에는 CSS 1KiB를 배정한다.
 // 단일 파일·LCP·CLS 게이트는 유지한다.
 const BUDGETS = {
-  total: 2800025,
-  js: 448512, // 438 KiB
+  // P12: Blood Spellblade combat, reward validation, and save migration add
+  // deliberate runtime code. Keep bounded headroom instead of masking growth.
+  total: 2820505,
+  js: 481280, // 470 KiB
   css: 72704, // 71 KiB
   maxFile: 716800, // 700 KiB
 };

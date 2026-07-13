@@ -1333,7 +1333,7 @@ const winCurrentCombat = async (page) => {
       "1막 1/10",
   );
   await winCurrentCombat(page);
-  // P6 신스펙: 일반 전투 보상 = 동전 3중1택만 (제거 단계·스킬 2택 삭제).
+  // P12 신스펙: 일반 전투 보상 = 기본 + 현재 캐릭터 대표 속성 중 1택.
   // 앱 결함 의심(보고 대상): rewardViewStage(apps/ui/src/interaction.ts)가 코인 단독
   // 보상(coinRemovalResolved=true·skillOptions=[])을 v5 '대체 코인'과 구분하지 못해
   // stage가 'fallback-coin'으로 투영된다 — 여기서는 두 값 모두 코인 선택 단계로 수용.
@@ -1359,8 +1359,11 @@ const winCurrentCombat = async (page) => {
       buttons.map((button) => button.getAttribute("data-testid")),
     );
   check(
-    "S12 코인 보상 3개·중복 없음",
-    coinIds.length === 3 && new Set(coinIds).size === 3,
+    "S12 코인 보상 2개·기본/화염만·중복 없음",
+    coinIds.length === 2 &&
+      new Set(coinIds).size === 2 &&
+      coinIds.includes("coin-reward-basic") &&
+      coinIds.includes("coin-reward-fire"),
     coinIds.join(","),
   );
   await page.screenshot({ path: `${outDir}/30-m5-coin-reward-1280.png` });
@@ -1375,13 +1378,13 @@ const winCurrentCombat = async (page) => {
   await page.screenshot({ path: `${outDir}/31-m5-coin-reward-1920.png` });
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.locator('[data-testid="coin-reward-mana"]').click();
+  await page.locator('[data-testid="coin-reward-fire"]').click();
   await page.waitForSelector('[data-testid="node-choice"]', { timeout: 15000 });
   const bagAfterAdd = await bag();
   check(
-    "S12 마나 코인 영구 추가",
+    "S12 화염 코인 영구 추가",
     bagAfterAdd.length === bagBeforeReward.length + 1 &&
-      bagAfterAdd.includes("mana"),
+      bagAfterAdd.includes("fire"),
     bagAfterAdd.join(","),
   );
   // P6 신스펙: 제거 단계 삭제(상점 전용 회귀) — 일반 전투는 코인 1택 후 즉시 다음
@@ -1438,7 +1441,7 @@ const winCurrentCombat = async (page) => {
 
   await page.locator('[data-testid="next-combat"]').click();
   await waitForCombatOrBoundary(page);
-  check("S12 다음 전투에 마나 코인 보존", (await bag()).includes("mana"));
+  check("S12 다음 전투에 화염 코인 보존", (await bag()).includes("fire"));
   const carriedHp = Number(
     (await page.locator(".unit.player .hp-num").innerText()).split("/")[0],
   );
@@ -1447,13 +1450,13 @@ const winCurrentCombat = async (page) => {
     carriedHp === hpAfterFirst,
     `${carriedHp} vs ${hpAfterFirst}`,
   );
-  let manaVisible = (await page.locator(".hand-tray .coin.mana").count()) > 0;
-  if (!manaVisible) {
+  let fireVisible = (await page.locator(".hand-tray .coin.fire").count()) > 0;
+  if (!fireVisible) {
     await page.locator(".pouch-circle").click();
-    manaVisible = (await page.locator(".pouch-pop .pop-coin.mana").count()) > 0;
+    fireVisible = (await page.locator(".pouch-pop .pop-coin.fire").count()) > 0;
     await page.keyboard.press("Escape");
   }
-  check("S12 추가한 마나 코인이 다음 전투 UI에 표시", manaVisible);
+  check("S12 추가한 화염 코인이 다음 전투 UI에 표시", fireVisible);
 
   const attemptBeforeReload = Number(await main().getAttribute("data-attempt"));
   await page.reload({ waitUntil: "networkidle" });
@@ -2635,13 +2638,14 @@ const winCurrentCombat = async (page) => {
     url: `${baseUrl}?seed=${SEED}&select=1`,
     waitFor: "select",
   });
-  // P6 D6: 마도기사(arcanist) 추가로 5종 — 데이터 주도 노출의 의도 변경
+  // P12: 혈액 마검사 추가로 6종 — 데이터 주도 노출 계약
   check(
-    "S21 선택 화면 캐릭터 카드 5종 (화염 격투가·수호자·술사·냉기 도적·마도기사)",
-    (await page.locator(".character-card").count()) === 5 &&
+    "S21 선택 화면 캐릭터 카드 6종 (화염 격투가·수호자·술사·냉기 도적·마도기사·혈액 마검사)",
+    (await page.locator(".character-card").count()) === 6 &&
       (await page.locator('[data-testid="character-select-sorcerer"]').count()) === 1 &&
       (await page.locator('[data-testid="character-select-frost-knight"]').count()) === 1 &&
-      (await page.locator('[data-testid="character-select-arcanist"]').count()) === 1,
+      (await page.locator('[data-testid="character-select-arcanist"]').count()) === 1 &&
+      (await page.locator('[data-testid="character-select-blood-spellblade"]').count()) === 1,
   );
   // P6 D5: warrior 표시명 '화염 격투가' (id는 'warrior' 유지)
   check(

@@ -3,7 +3,9 @@ import { effectiveElements, skillCooldown } from '../../content-types';
 import type { CoinDefId, CoinUid, SlotId } from '../../ids';
 import type { CombatEvent } from '../events';
 import type { CombatState } from '../state';
+import { consumeRequirementFor } from '../consume-requirement';
 import {
+  applyBloodSwordSkillResolved,
   applyEffectAtom,
   applyMaturedHandBonus,
   applyPrimaryDamageBonus,
@@ -18,8 +20,7 @@ export interface ResolveConsumeResult {
   events: CombatEvent[];
 }
 
-const removeCoins = (coins: readonly CoinUid[], selected: ReadonlySet<CoinUid>): CoinUid[] =>
-  coins.filter((coin) => !selected.has(coin));
+const removeCoins = (coins: readonly CoinUid[], selected: ReadonlySet<CoinUid>): CoinUid[] => coins.filter((coin) => !selected.has(coin));
 
 const isAliveEnemy = (state: CombatState, index: number): boolean => {
   const enemy = state.enemies[index];
@@ -27,9 +28,7 @@ const isAliveEnemy = (state: CombatState, index: number): boolean => {
 };
 
 const firstAliveEnemy = (state: CombatState): number | undefined =>
-  state.enemies.findIndex((enemy) => enemy.hp > 0) >= 0
-    ? state.enemies.findIndex((enemy) => enemy.hp > 0)
-    : undefined;
+  state.enemies.findIndex((enemy) => enemy.hp > 0) >= 0 ? state.enemies.findIndex((enemy) => enemy.hp > 0) : undefined;
 
 const targetForSkill = (state: CombatState, skill: ConsumeSkillDef, target?: number): TargetRef => {
   if (skill.targetType === 'self' || skill.targetType === 'none') return { type: 'player' };
@@ -58,27 +57,29 @@ export const resolveConsume = (
   if (slotState === undefined) throw new Error('slot does not exist');
   if (slotState.cooldownRemaining > 0) throw new Error('skill is cooling down');
   if (skill.oncePerCombat === true && slotState.usedThisCombat) throw new Error('skill already used this combat');
-  if (skill.consume.mode === 'all') {
+  const requirement = consumeRequirementFor(input, skill);
+  if (requirement.mode === 'all') {
     const all = input.zones.hand.filter((coin) => db.coins[String(input.coins[Number(coin)]?.defId)]?.element === skill.consume.element);
-    if (coins.length < skill.consume.count || coins.length !== all.length || all.some((coin) => !coins.includes(coin))) throw new Error('all matching coins must be consumed after meeting minimum cost');
-  } else if (skill.consume.mode === 'upTo') {
-    if (coins.length < 1 || coins.length > skill.consume.count) throw new Error('consumed coin count exceeds skill limit');
-  } else if (coins.length !== skill.consume.count) throw new Error('consumed coin count must equal skill cost');
+    if (coins.length < requirement.min || coins.length !== all.length || all.some((coin) => !coins.includes(coin)))
+      throw new Error('all matching coins must be consumed after meeting minimum cost');
+  } else if (requirement.mode === 'upTo') {
+    if (coins.length < requirement.min || coins.length > requirement.max) throw new Error('consumed coin count exceeds skill limit');
+  } else if (coins.length !== requirement.min) throw new Error('consumed coin count must equal skill cost');
   if (new Set(coins).size !== coins.length) throw new Error('consumed coins must be unique');
 
   for (const coin of coins) {
     if (!input.zones.hand.includes(coin)) throw new Error('consumed coin is not in hand');
     const instance = input.coins[Number(coin)];
     const def = instance === undefined ? undefined : db.coins[String(instance.defId)];
-    const satisfies = skill.consume.element === 'frost'
-      ? def?.element === 'frost'
-      : instance !== undefined && effectiveElements(instance, db).includes(skill.consume.element);
+    const satisfies =
+      skill.consume.element === 'frost' ? def?.element === 'frost' : instance !== undefined && effectiveElements(instance, db).includes(skill.consume.element);
     if (!satisfies) {
       throw new Error('consumed coin does not satisfy required element');
     }
   }
 
   const skillTarget = targetForSkill(input, skill, target);
+  const aliveBefore = input.enemies.filter((enemy) => enemy.hp > 0).length;
   const turnTriggerScope = input.turnTriggers;
   const consumed = new Set<CoinUid>(coins);
   const consumedPreserved = coins.some((coin) => input.coins[Number(coin)]?.preserved === true);
@@ -117,10 +118,7 @@ export const resolveConsume = (
       hand: removeCoins(input.zones.hand, consumed),
       exhausted: [...input.zones.exhausted, ...coins]
     },
-    coins: Object.fromEntries(Object.entries(input.coins).map(([key, coin]) => [
-      key,
-      consumed.has(coin.uid) ? { ...coin, preserved: false } : coin
-    ]))
+    coins: Object.fromEntries(Object.entries(input.coins).map(([key, coin]) => [key, consumed.has(coin.uid) ? { ...coin, preserved: false } : coin]))
   };
   const passiveMechanics = new Set(
     input.passives.flatMap((id) => {
@@ -128,6 +126,20 @@ export const resolveConsume = (
       return mechanic === undefined ? [] : [mechanic];
     })
   );
+  if (skill.bloodSword === true && input.player.bloodSwordPower >= 4 && !input.player.bloodSwordDiscountUsedThisTurn) {
+    state = {
+      ...state,
+      player: { ...state.player, bloodSwordDiscountUsedThisTurn: true }
+    };
+  }
+  if (coins.length > 0 && !state.player.redRefluxUsedThisTurn && passiveMechanics.has('redReflux')) {
+    const blood = Object.values(db.coins).find((coin) => coin.element === 'blood')?.id;
+    if (blood !== undefined) state = applyEffectAtom(state, { kind: 'addCoin', coin: blood, zone: 'discard', count: 1 }, { type: 'player' }, db, events);
+    state = {
+      ...state,
+      player: { ...state.player, redRefluxUsedThisTurn: true }
+    };
+  }
   if (skill.consume.element === 'mana') {
     if (coins.length >= 2 && !state.player.blueCircuitUsedThisTurn && passiveMechanics.has('blueCircuit')) {
       const mana = Object.values(db.coins).find((coin) => coin.element === 'mana')?.id;
@@ -174,16 +186,18 @@ export const resolveConsume = (
     }
     state = { ...state, player: { ...state.player, coldHandsUsedThisTurn: true } };
   }
-  if (skill.tags.includes('attack') && skillTarget.type === 'enemy' &&
-    (state.enemies[skillTarget.index]?.statuses.frostbite?.kind === 'duration') &&
-    !state.player.frostCompoundUsedThisTurn && passiveMechanics.has('frostCompound')) {
+  if (
+    skill.tags.includes('attack') &&
+    skillTarget.type === 'enemy' &&
+    state.enemies[skillTarget.index]?.statuses.frostbite?.kind === 'duration' &&
+    !state.player.frostCompoundUsedThisTurn &&
+    passiveMechanics.has('frostCompound')
+  ) {
     effects = applyPrimaryDamageBonus(effects, 3);
     state = { ...state, player: { ...state.player, frostCompoundUsedThisTurn: true } };
   }
   if (skill.tags.includes('attack') && state.player.nextAttackDamageBonus > 0) {
-    const primaryDamageIndex = effects.findIndex((atom) =>
-      atom.kind === 'damage' || atom.kind === 'damagePlusBlock'
-    );
+    const primaryDamageIndex = effects.findIndex((atom) => atom.kind === 'damage' || atom.kind === 'damagePlusBlock');
     if (primaryDamageIndex >= 0) {
       effects = effects.map((atom, index) => {
         if (index !== primaryDamageIndex) return atom;
@@ -218,12 +232,17 @@ export const resolveConsume = (
   for (const atom of effects) {
     for (const effectTarget of targetsForSkillEffect(state, atom, skill, skillTarget)) {
       state = applyEffectAtom(state, atom, effectTarget, db, events, undefined, {
-        turnTriggerScope, sourceSlot: slot, chosenSummon, desiredCoin, consumedCount: coins.length
+        turnTriggerScope,
+        sourceSlot: slot,
+        chosenSummon,
+        desiredCoin,
+        consumedCount: coins.length
       });
       if (state.phase === 'victory' || state.phase === 'defeat') return finish(state);
     }
   }
 
+  state = applyBloodSwordSkillResolved(state, skill, aliveBefore, db, events);
   state = checkCombatEnd(state, events);
   if (state.phase !== 'victory' && state.phase !== 'defeat' && skill.tags.includes('attack')) {
     state = fireTurnTriggers(state, 'onAttackSkillResolved', skillTarget, db, events, turnTriggerScope);

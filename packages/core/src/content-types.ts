@@ -1,15 +1,4 @@
-import type {
-  CharacterId,
-  CoinDefId,
-  PassiveId,
-  EquipmentDefId,
-  CoinUid,
-  Element,
-  EventDefId,
-  EnemyDefId,
-  Face,
-  SkillId
-} from './ids';
+import type { CharacterId, CoinDefId, PassiveId, EquipmentDefId, CoinUid, Element, EventDefId, EnemyDefId, Face, SkillId } from './ids';
 
 // 확정 어휘 (docs/implementation-plan.md §6): 화상 burn(M3), 동상 frostbite·감전 shock(포스트 MVP 예약)
 export type StatusId = 'burn' | 'frostbite' | 'shock';
@@ -64,13 +53,39 @@ export interface PassiveDef {
   hook: 'combatStart' | 'turnStart';
   effects: EffectAtom[];
   mechanic?:
-    | 'continuousMotion' | 'retrievalHabit' | 'balanceSense' | 'lastMove' | 'residualCharge' | 'overcurrent' | 'dischargeSuppression'
-    | 'shieldMastery' | 'preparedStance' | 'indomitableSpirit' | 'combatBreathing'
-    | 'ignitionInstinct' | 'emberBlade' | 'hotBarrier'
-    | 'previewDeployment' | 'inverseGuard' | 'crossCalculation' | 'residualRebuild'
-    | 'commandPreservation' | 'manaMembrane' | 'blueCircuit' | 'armamentResonance'
-    | 'coinAppraiser' | 'smallChangeInsurance' | 'doubleEntry' | 'maturedHand' | 'profitSettlement'
-    | 'coldHands' | 'frostCompound' | 'refrozenLoot';
+    | 'continuousMotion'
+    | 'retrievalHabit'
+    | 'balanceSense'
+    | 'lastMove'
+    | 'residualCharge'
+    | 'overcurrent'
+    | 'dischargeSuppression'
+    | 'shieldMastery'
+    | 'preparedStance'
+    | 'indomitableSpirit'
+    | 'combatBreathing'
+    | 'ignitionInstinct'
+    | 'emberBlade'
+    | 'hotBarrier'
+    | 'previewDeployment'
+    | 'inverseGuard'
+    | 'crossCalculation'
+    | 'residualRebuild'
+    | 'commandPreservation'
+    | 'manaMembrane'
+    | 'blueCircuit'
+    | 'armamentResonance'
+    | 'coinAppraiser'
+    | 'smallChangeInsurance'
+    | 'doubleEntry'
+    | 'maturedHand'
+    | 'profitSettlement'
+    | 'coldHands'
+    | 'frostCompound'
+    | 'refrozenLoot'
+    | 'concentratedBlood'
+    | 'bloodSwordDividend'
+    | 'redReflux';
   price: number;
 }
 
@@ -92,6 +107,11 @@ export interface SkillDefBase {
   // 해당 스킬 판정에만 적용되며 소비 비용에는 절대 사용되지 않는다.
   preservedBonus?: EffectAtom[];
   treatPreservedBasicAsElement?: Element;
+  // Blood Spellblade contracts. `bloodSword` marks techniques that scale from
+  // the run-long weapon investment; `bloodOffering` changes its effect at the
+  // final stage without replacing the stable skill id in saves.
+  bloodSword?: boolean;
+  bloodOffering?: boolean;
   // 캐릭터 전용 스킬 — 공용 보상 풀에서 제외되고 해당 캐릭터 런에서만 노출된다.
   // 숨김 프로퍼티 같은 암묵 경계 대신 명시적 데이터로 풀 경계를 표현한다 (P3.2 결정).
   exclusiveTo?: CharacterId;
@@ -102,6 +122,7 @@ export interface FlipSkillDef extends SkillDefBase {
   cost: number;
   // 일부 플립형 스킬은 지정 속성 동전만 장전할 수 있다. 소비가 아니므로 면과 proc은 정상 판정한다.
   requiredElement?: Element;
+  requiredCoin?: CoinDefId;
   base: EffectAtom[];
   heads?: { mode: 'any' | 'per'; effects: EffectAtom[] };
   tails?: { mode: 'any' | 'per'; effects: EffectAtom[] };
@@ -113,13 +134,17 @@ export interface FlipSkillDef extends SkillDefBase {
     returnFirstCoinOnReuse?: boolean;
     addLightningToHandAfterReuse?: number;
   };
+  returnUsedElementToDrawTop?: {
+    element: Element;
+    count: number;
+    minimumUsed?: number;
+  };
 }
 
 // P7 D1 — 쿨다운 미지정 기본값 1 (기존 usedThisTurn=턴당 1회와 동일 케이던스).
 // 전투당 1회 스킬은 usedThisCombat만으로 잠그며 쿨다운 상태를 만들지 않는다.
 // 강화로 oncePerCombat이 제거되면 다시 기본 쿨다운 1을 적용한다.
-export const skillCooldown = (skill: SkillDefBase): number =>
-  skill.oncePerCombat === true ? 0 : (skill.cooldown ?? 1);
+export const skillCooldown = (skill: SkillDefBase): number => (skill.oncePerCombat === true ? 0 : (skill.cooldown ?? 1));
 
 export interface ConsumeSkillDef extends SkillDefBase {
   type: 'consume';
@@ -139,11 +164,13 @@ export type EffectAtom =
   | { kind: 'damage'; amount: number }
   | { kind: 'block'; amount: number }
   | { kind: 'selfDamage'; amount: number }
+  | { kind: 'payHp'; amount: number }
   // P7 D4 — 회복 (플레이어 전용, maxHp 상한)
   | { kind: 'heal'; amount: number }
   // P7 D3 — 즉시 드로우 / 다음 턴 드로우 보너스
   | { kind: 'draw'; count: number }
   | { kind: 'drawSpecific'; coins: CoinDefId[]; count: number; preserve?: boolean }
+  | { kind: 'returnDiscardCoin'; coin: CoinDefId; count: number }
   | { kind: 'nextTurnDraw'; count: number }
   | { kind: 'preserveChosenCoin'; count: number }
   | { kind: 'increasePreserveCapacity'; count: number }
@@ -159,6 +186,11 @@ export type EffectAtom =
   | { kind: 'damagePerTargetBurn'; amountPerStack: number }
   | { kind: 'damageByConsumed'; base: number; perCoin: number; frostbittenBonusPerCoin?: number }
   | { kind: 'damageByTargetFrostbite'; base: number; multiplier: number; cap: number }
+  | { kind: 'lifesteal'; amount: number }
+  | { kind: 'lifestealByConsumed'; amountPerCoin: number }
+  | { kind: 'investBloodSword' }
+  | { kind: 'bloodOffering' }
+  | { kind: 'damageByBloodSword'; base: number; multiplier: number }
   // P6 D6 — 마력 갑주: 현재 방어 참조 피해 (방어 비소모)
   | { kind: 'damagePerBlock'; amountPerBlock: number }
   | { kind: 'blockFromCurrent'; cap: number }
@@ -204,7 +236,7 @@ export interface CharacterDef {
     name: string;
     hook: 'combatStart' | 'turnStart';
     effects: EffectAtom[];
-    mechanic?: 'remise' | 'preserveHand';
+    mechanic?: 'remise' | 'preserveHand' | 'bloodSword';
   };
 }
 
@@ -324,11 +356,24 @@ const validateAtomAmounts = (db: Omit<ContentDb, 'validate'>): string[] => {
   const errors: string[] = [];
   const checkAtoms = (atoms: readonly EffectAtom[], owner: string): void => {
     for (const atom of atoms) {
-      if ((atom.kind === 'draw' || atom.kind === 'drawSpecific' || atom.kind === 'nextTurnDraw' || atom.kind === 'preserveChosenCoin' || atom.kind === 'increasePreserveCapacity') && (!Number.isInteger(atom.count) || atom.count <= 0)) {
+      if (
+        (atom.kind === 'draw' ||
+          atom.kind === 'drawSpecific' ||
+          atom.kind === 'nextTurnDraw' ||
+          atom.kind === 'preserveChosenCoin' ||
+          atom.kind === 'increasePreserveCapacity') &&
+        (!Number.isInteger(atom.count) || atom.count <= 0)
+      ) {
         errors.push(`${owner}: ${atom.kind} count must be a positive integer`);
       }
-      if ((atom.kind === 'heal' || atom.kind === 'reduceCooldown') && (!Number.isInteger(atom.amount) || atom.amount <= 0)) {
+      if (
+        (atom.kind === 'heal' || atom.kind === 'payHp' || atom.kind === 'lifesteal' || atom.kind === 'reduceCooldown') &&
+        (!Number.isInteger(atom.amount) || atom.amount <= 0)
+      ) {
         errors.push(`${owner}: ${atom.kind} amount must be a positive integer`);
+      }
+      if (atom.kind === 'returnDiscardCoin' && (!Number.isInteger(atom.count) || atom.count <= 0)) {
+        errors.push(`${owner}: returnDiscardCoin count must be a positive integer`);
       }
     }
   };
@@ -380,8 +425,9 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
 
   for (const skill of skills) {
     if (skill.type === 'consume') {
-      if (!Number.isInteger(skill.consume.count) || skill.consume.count < 1 || skill.consume.count > 3) {
-        errors.push(`skill ${String(skill.id)}: consume count must be an integer from 1 to 3`);
+      const maximum = skill.bloodOffering === true ? 5 : 3;
+      if (!Number.isInteger(skill.consume.count) || skill.consume.count < 1 || skill.consume.count > maximum) {
+        errors.push(`skill ${String(skill.id)}: consume count must be an integer from 1 to ${maximum}`);
       }
       if (skill.consume.mode !== undefined && !['exact', 'upTo', 'all'].includes(skill.consume.mode)) {
         errors.push(`skill ${String(skill.id)}: unknown consume mode ${String(skill.consume.mode)}`);
@@ -389,7 +435,8 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
       continue;
     }
 
-    if (!Number.isInteger(skill.cost) || skill.cost < 1) {
+    const hpPaidZeroCost = skill.cost === 0 && skill.base.some((atom) => atom.kind === 'payHp');
+    if (!Number.isInteger(skill.cost) || skill.cost < 0 || (skill.cost === 0 && !hpPaidZeroCost)) {
       errors.push(`skill ${String(skill.id)}: flip cost must be a positive integer`);
       continue;
     }
@@ -399,8 +446,7 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
       continue;
     }
 
-    const isExceptionalCost =
-      skill.rarity === 'rare' && (skill.oncePerCombat === true || skill.tags.includes('ultimate'));
+    const isExceptionalCost = skill.rarity === 'rare' && (skill.oncePerCombat === true || skill.tags.includes('ultimate'));
     if (skill.cost === 5 && !isExceptionalCost) {
       errors.push(`skill ${String(skill.id)}: flip cost 5 requires rare rarity and oncePerCombat or ultimate`);
     }
@@ -413,12 +459,7 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
 // 중첩 addTurnTrigger(순환 폭주 표면)를 콘텐츠 단계에서 거부한다 (P3.3 감사).
 const TURN_TRIGGER_HOOKS = ['onDamageDealt', 'onAttackSkillResolved'] as const;
 
-const validateTriggerAtoms = (
-  atoms: readonly EffectAtom[],
-  owner: string,
-  insideTrigger: boolean,
-  errors: string[]
-): void => {
+const validateTriggerAtoms = (atoms: readonly EffectAtom[], owner: string, insideTrigger: boolean, errors: string[]): void => {
   for (const atom of atoms) {
     if (atom.kind !== 'addTurnTrigger') continue;
     if (insideTrigger) {
@@ -445,14 +486,8 @@ const validateTriggerAtoms = (
 const validateAttackTargets = (skills: readonly SkillDef[]): string[] => {
   const errors: string[] = [];
   for (const skill of skills) {
-    if (
-      skill.tags.includes('attack') &&
-      skill.targetType !== 'single-enemy' &&
-      skill.targetType !== 'all-enemies'
-    ) {
-      errors.push(
-        `skill ${String(skill.id)}: attack tag requires an enemy targetType (got ${skill.targetType})`
-      );
+    if (skill.tags.includes('attack') && skill.targetType !== 'single-enemy' && skill.targetType !== 'all-enemies') {
+      errors.push(`skill ${String(skill.id)}: attack tag requires an enemy targetType (got ${skill.targetType})`);
     }
   }
   return errors;
@@ -526,14 +561,11 @@ const validatePassives = (passives: Record<string, PassiveDef> | undefined): str
   for (const passive of Object.values(passives ?? {})) {
     const owner = `passive ${String(passive.id)}`;
     if (passive.description.length === 0) errors.push(`${owner}: description is required`);
-    if (!Number.isInteger(passive.price) || passive.price <= 0)
-      errors.push(`${owner}: price must be a positive integer`);
+    if (!Number.isInteger(passive.price) || passive.price <= 0) errors.push(`${owner}: price must be a positive integer`);
     if (passive.effects.length === 0 && passive.mechanic === undefined) errors.push(`${owner}: must declare at least one effect or mechanic`);
     for (const atom of passive.effects) {
-      if (!PASSIVE_SAFE_ATOMS.has(atom.kind))
-        errors.push(`${owner}: atom ${atom.kind} is not allowed in a passive`);
-      if (atom.kind === 'summonEquipment' && atom.equipment === 'chosen')
-        errors.push(`${owner}: passive summon must name a concrete equipment`);
+      if (!PASSIVE_SAFE_ATOMS.has(atom.kind)) errors.push(`${owner}: atom ${atom.kind} is not allowed in a passive`);
+      if (atom.kind === 'summonEquipment' && atom.equipment === 'chosen') errors.push(`${owner}: passive summon must name a concrete equipment`);
     }
     validateTriggerAtoms(passive.effects, owner, false, errors);
   }
@@ -545,8 +577,7 @@ const validateEquipment = (equipment: Record<string, EquipmentDef> | undefined):
   for (const def of Object.values(equipment ?? {})) {
     const owner = `equipment ${String(def.id)}`;
     const amount = def.action.kind === 'strike' ? def.action.damage : def.action.block;
-    if (!Number.isInteger(amount) || amount <= 0)
-      errors.push(`${owner}: action amount must be a positive integer`);
+    if (!Number.isInteger(amount) || amount <= 0) errors.push(`${owner}: action amount must be a positive integer`);
   }
   return errors;
 };
@@ -563,33 +594,34 @@ const validateSkillUpgrades = (skills: readonly SkillDef[]): string[] => {
     if (patch.kind === 'multi') {
       if (patch.patches.length < 2) errors.push(`${owner}: multi requires at least two patches`);
       for (const child of patch.patches) {
-        const nested = { ...skill, upgrade: { ...upgrade, patch: child } } as SkillDef;
+        const nested = {
+          ...skill,
+          upgrade: { ...upgrade, patch: child }
+        } as SkillDef;
         errors.push(...validateSkillUpgrades([nested]));
       }
     } else if (patch.kind === 'baseAmount') {
       const atoms = skill.type === 'flip' ? skill.base : skill.effects;
       const atom = atoms[patch.index];
-      if (atom === undefined || !('amount' in atom) || typeof atom.amount !== 'number')
-        errors.push(`${owner}: baseAmount index ${patch.index} has no amount`);
-      if (!Number.isInteger(patch.delta) || patch.delta === 0)
-        errors.push(`${owner}: baseAmount delta must be a nonzero integer`);
+      if (atom === undefined || !('amount' in atom) || typeof atom.amount !== 'number') errors.push(`${owner}: baseAmount index ${patch.index} has no amount`);
+      if (!Number.isInteger(patch.delta) || patch.delta === 0) errors.push(`${owner}: baseAmount delta must be a nonzero integer`);
     } else if (patch.kind === 'addFaceEffect' || patch.kind === 'addMixedFaceEffect') {
       if (skill.type !== 'flip') errors.push(`${owner}: addFaceEffect requires a flip skill`);
     } else if (patch.kind === 'setFaceMode') {
-      if (skill.type !== 'flip' || skill[patch.face] === undefined)
-        errors.push(`${owner}: setFaceMode requires an existing flip face`);
+      if (skill.type !== 'flip' || skill[patch.face] === undefined) errors.push(`${owner}: setFaceMode requires an existing flip face`);
     } else if (patch.kind === 'replaceEffect') {
-      if (patch.section !== 'base' && skill.type !== 'flip')
-        errors.push(`${owner}: replaceEffect ${patch.section} requires a flip skill`);
-      const atoms = patch.section === 'base'
-        ? (skill.type === 'flip' ? skill.base : skill.effects)
-        : patch.section === 'overheat'
-          ? skill.overheatBonus
-        : skill.type === 'flip'
-          ? skill[patch.section]?.effects
-          : undefined;
-      if (atoms?.[patch.index] === undefined)
-        errors.push(`${owner}: replaceEffect index ${patch.index} does not exist`);
+      if (patch.section !== 'base' && skill.type !== 'flip') errors.push(`${owner}: replaceEffect ${patch.section} requires a flip skill`);
+      const atoms =
+        patch.section === 'base'
+          ? skill.type === 'flip'
+            ? skill.base
+            : skill.effects
+          : patch.section === 'overheat'
+            ? skill.overheatBonus
+            : skill.type === 'flip'
+              ? skill[patch.section]?.effects
+              : undefined;
+      if (atoms?.[patch.index] === undefined) errors.push(`${owner}: replaceEffect index ${patch.index} does not exist`);
     } else if (patch.kind === 'setRemiseLightningCount') {
       if (skill.type !== 'flip' || skill.remise === undefined || !Number.isInteger(patch.count) || patch.count <= 0)
         errors.push(`${owner}: setRemiseLightningCount requires a remise flip skill and positive count`);
@@ -599,14 +631,13 @@ const validateSkillUpgrades = (skills: readonly SkillDef[]): string[] => {
         if (cost < 0 || cost > 5) errors.push(`${owner}: costDelta leaves cost out of range`);
       } else {
         const count = skill.consume.count + patch.delta;
-        if (count < 1 || count > 3) errors.push(`${owner}: costDelta leaves consume count out of range`);
+        const maximum = skill.bloodOffering === true ? 5 : 3;
+        if (count < 1 || count > maximum) errors.push(`${owner}: costDelta leaves consume count out of range`);
       }
     } else if (patch.kind === 'removeOncePerCombat') {
-      if (skill.oncePerCombat !== true)
-        errors.push(`${owner}: removeOncePerCombat requires a oncePerCombat skill`);
+      if (skill.oncePerCombat !== true) errors.push(`${owner}: removeOncePerCombat requires a oncePerCombat skill`);
     } else if (patch.kind === 'addCoinOnUse') {
-      if (!Number.isInteger(patch.count) || patch.count <= 0)
-        errors.push(`${owner}: addCoinOnUse count must be a positive integer`);
+      if (!Number.isInteger(patch.count) || patch.count <= 0) errors.push(`${owner}: addCoinOnUse count must be a positive integer`);
     }
   }
   return errors;

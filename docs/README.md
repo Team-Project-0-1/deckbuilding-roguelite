@@ -1,65 +1,62 @@
 # 문서 안내
 
-> 마지막 동기화: 2026-07-13 · 기준: P11 / PRD v1.3 · 런 저장 v7
+> 마지막 동기화: 2026-07-13 · 기준: PRD v2.0 / P12
 
-이 디렉터리에는 현재 규칙, 구현 스냅샷, 과거 구현 계획이 함께 있다. 문서 세대가 다르므로 아래 우선순위를 먼저 확인한다.
+문서의 역할을 제품 정본, 구현 스냅샷, 콘텐츠 작성 가이드, 결정 기록으로 분리한다. 같은 규칙을 여러 문서에서 독립적으로 수정하지 않는다.
 
 ## 문서 우선순위
 
-1. **제품·게임 규칙**: [`PRD.md`](./PRD.md)의 최신 변경 이력과 [`../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md`](../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md). 기반 전투 규칙은 P7·P9·P10 결정 로그를 함께 참조한다.
-2. **현재 구현 동작**: `packages/core`, `packages/content`의 코드와 회귀 테스트
-3. **현재 구현 요약**: [`current-implementation.md`](./current-implementation.md)
-4. **신규 콘텐츠 작성 기준**: [`content-design-guide.md`](./content-design-guide.md)
-5. **역사적 계획·근거**: [`implementation-plan.md`](./implementation-plan.md), `../PRD/01_PRD.md`~`04_PROJECT_SPEC.md`
+1. **제품과 게임 규칙**: [`PRD.md`](./PRD.md)
+2. **실제 동작**: `packages/core`, `packages/content`, `apps/ui`의 코드와 회귀 테스트
+3. **구현 안내**: [`current-implementation.md`](./current-implementation.md)
+4. **신규 콘텐츠 작성 계약**: [`content-design-guide.md`](./content-design-guide.md)
+5. **결정 근거와 이력**: `../PRD/P7_*.md`~`../PRD/P12_*.md`, 역사 문서
 
-제품 문서와 코드가 다르면 어느 한쪽을 조용히 정본으로 간주하지 않는다. 의도한 변경이면 같은 PR에서 제품 문서·구현 요약·테스트를 함께 갱신하고, 의도하지 않은 차이면 회귀 결함으로 취급한다.
+제품 문서와 코드가 다르면 한쪽을 조용히 정답으로 간주하지 않는다. 의도한 변경이면 같은 작업에서 제품 정본·구현 스냅샷·테스트를 함께 갱신하고, 의도하지 않은 차이면 회귀 결함으로 처리한다.
 
 ## 현재 문서
 
 | 문서 | 역할 | 상태 |
 |---|---|---|
-| [`PRD.md`](./PRD.md) | 브랜드 코어, 전투 규칙, UX, 콘텐츠 방향 | **현재 제품 정본** — v1.3 변경 이력이 본문 충돌보다 우선 |
-| [`../PRD/P10_CHARACTER_DESIGN_SYNC.md`](../PRD/P10_CHARACTER_DESIGN_SYNC.md) | 화염 전사·마도기사 최신 통합안과 충돌 해소 | **최신 캐릭터 오버라이드** |
-| [`../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md`](../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md) | 냉기 도적 최신 통합안과 혈액 캐릭터 보류 | **최신 냉기 오버라이드** |
-| [`../PRD/P9_NEW_DESIGN_DECISIONS.md`](../PRD/P9_NEW_DESIGN_DECISIONS.md) | 번개 결투사·르미즈·소환 선택 등 P9 결정 로그 | **활성 기반 규칙** |
-| [`../PRD/P7_NEW_DESIGN_DECISIONS.md`](../PRD/P7_NEW_DESIGN_DECISIONS.md) | 쿨다운·8슬롯·양면 속성 코인·과열 등 기반 전투 규칙 | **활성 기반 규칙** |
-| [`current-implementation.md`](./current-implementation.md) | 모노레포, 전투 파이프라인, 런·저장·CI의 현재 구현 스냅샷 | **현재 기술 안내** |
-| [`content-design-guide.md`](./content-design-guide.md) | 캐릭터·스킬·코인·몬스터를 추가할 때의 활성 양식 | **현재 작성 가이드** |
-| [`../PRD/PLAYTEST_KIT.md`](../PRD/PLAYTEST_KIT.md) | 사람 플레이테스트 실행 절차 | 경험 검증용 |
+| [`PRD.md`](./PRD.md) | 브랜드 코어, 전투·런·보상·캐릭터·UX 규칙 | **제품 단일 정본** |
+| [`current-implementation.md`](./current-implementation.md) | 현재 코드의 상태·명령·해결 순서·저장·검증 안내 | **기술 스냅샷** |
+| [`content-design-guide.md`](./content-design-guide.md) | 코인·스킬·패시브·캐릭터·몬스터 작성 규칙 | **작성 계약** |
+| [`../PRD/P12_BLOOD_SPELLBLADE_DESIGN_SYNC.md`](../PRD/P12_BLOOD_SPELLBLADE_DESIGN_SYNC.md) | 혈액 마검사와 혈마검 런 성장의 구현 근거 | **최신 결정 기록** |
+| [`../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md`](../PRD/P11_COLD_ROGUE_DESIGN_SYNC.md) | 냉기 도적·보존·지정 드로우 구현 근거 | 결정 기록 |
+| [`../PRD/P10_CHARACTER_DESIGN_SYNC.md`](../PRD/P10_CHARACTER_DESIGN_SYNC.md) | 화염 격투가·마도기사 구현 근거 | 결정 기록 |
+| [`../PRD/P9_NEW_DESIGN_DECISIONS.md`](../PRD/P9_NEW_DESIGN_DECISIONS.md) | 번개 결투사·르미즈 구현 근거 | 결정 기록 |
+| [`../PRD/P7_NEW_DESIGN_DECISIONS.md`](../PRD/P7_NEW_DESIGN_DECISIONS.md) | 쿨다운·8슬롯·양면 코인 기반 규칙의 전환 근거 | 결정 기록 |
+| [`../PRD/PLAYTEST_KIT.md`](../PRD/PLAYTEST_KIT.md) | 사람 플레이테스트 절차와 기록 양식 | 경험 검증 |
 
 ## 역사 문서
 
-다음 문서는 삭제하지 않는다. 당시 결정 근거와 마일스톤 기록으로는 유효하지만, 신규 구현의 규칙 정본으로 사용하지 않는다.
+다음 문서는 당시 계획과 근거를 보존하지만 현재 규칙을 구현하는 데 사용하지 않는다.
 
-| 문서 | 보존 이유 | 대표적인 구규칙 |
-|---|---|---|
-| [`implementation-plan.md`](./implementation-plan.md) | M0~M6 아키텍처와 파이프라인 설계 근거 | 턴당 3회, 스킬별 턴당 1회, 6슬롯, 단면 속성 proc |
-| [`../PRD/01_PRD.md`](../PRD/01_PRD.md) | 초기 MVP 범위·가정 원장 | 5전투 런, 전사 중심 MVP, Phase 3 미구현 전제 |
-| [`../PRD/02_DATA_MODEL.md`](../PRD/02_DATA_MODEL.md) | 초기 3층 데이터 모델 설명 | `proc` 단수, `usedThisTurn`, 슬롯 6 |
-| [`../PRD/03_PHASES.md`](../PRD/03_PHASES.md) | 초기 3-Phase 진행 기록 | M0~M6 체크리스트와 당시 범위 |
-| [`../PRD/04_PROJECT_SPEC.md`](../PRD/04_PROJECT_SPEC.md) | 초기 AI 작업 규율 | 오래된 경로·명령·MVP 제한 일부 포함 |
-
-## P7에서 바뀐 핵심
-
-- 전역 **턴당 스킬 3회 제한**과 `usedThisTurn`을 제거하고, 스킬별 `cooldown: 0..3`으로 교체했다.
-- 장착 슬롯은 **8칸**, 시작 스킬은 **4개**, 빈 슬롯은 `null`이다.
-- 모든 속성 코인은 앞면과 뒷면 양쪽에 고유 효과가 있으며 혈액 코인과 회복 효과가 추가됐다.
-- 화염 코인 소비로 진입하고 강화 스킬 해결 뒤 소비되는 **과열** 상태를 도입했다.
-- 즉시 드로우·다음 턴 드로우·임시 코인 생성 규칙과 손 상한 10을 표준화했다.
-- 런은 **3막 × 막당 10방문**, 저장 형식은 v7이다.
-
-세부 구현은 [`current-implementation.md`](./current-implementation.md)를 본다.
-
-## 문서 갱신 규칙
-
-규칙 변경 PR은 변경 종류에 따라 다음 파일을 함께 갱신한다.
-
-| 변경 | 반드시 확인할 문서 |
+| 문서 | 대표 구규칙 |
 |---|---|
-| 플레이 규칙·캐릭터 정체성 | `docs/PRD.md`, 해당 결정 로그 |
-| 전투 상태·명령·효과 원자·턴 순서 | `docs/current-implementation.md` |
-| 콘텐츠 작성 제한·수치 기준 | `docs/content-design-guide.md` |
-| 저장 스키마·마이그레이션 | `docs/current-implementation.md`의 저장 절, 저장 버전 주석 |
-| 테스트·배포 게이트 | `README.md`, `docs/current-implementation.md` |
+| [`implementation-plan.md`](./implementation-plan.md) | 턴당 3회, 스킬별 턴당 1회, 6슬롯, 단면 속성 proc |
+| [`history/implementation-plan-v1.2.md`](./history/implementation-plan-v1.2.md) | 초기 구현 계획 원문 |
+| [`../PRD/01_PRD.md`](../PRD/01_PRD.md) | 5전투 런, 전사 중심 초기 MVP |
+| [`../PRD/02_DATA_MODEL.md`](../PRD/02_DATA_MODEL.md) | `usedThisTurn`, 6슬롯, 단일 `proc` |
+| [`../PRD/03_PHASES.md`](../PRD/03_PHASES.md) | 초기 M0~M6 진행 계획 |
+| [`../PRD/04_PROJECT_SPEC.md`](../PRD/04_PROJECT_SPEC.md) | 초기 작업 규율과 경로 일부 |
 
-테스트 개수, 번들 바이트처럼 자주 바뀌는 수치는 README에 복사하지 않는다. 실행 스크립트와 임계값이 있는 소스 경로를 링크해 드리프트를 줄인다.
+## 문서 소유권
+
+| 정보 | 원본 |
+|---|---|
+| 왜 필요한가, 플레이어가 무엇을 경험하는가 | `docs/PRD.md` |
+| 현재 코드가 어떤 순서로 처리하는가 | 코드·테스트, `current-implementation.md` |
+| 콘텐츠 필드와 작성 제한 | 타입·검증기, `content-design-guide.md` |
+| 실제 수치와 ID | `packages/content/src/index.ts` |
+| 수치 기준·확률·제작 상태 | 데이터/시뮬레이션 출력 |
+| 결정 이유와 폐기 대안 | `PRD/P*.md` |
+
+## 갱신 규칙
+
+- 규칙 변경: `PRD.md`와 관련 테스트를 함께 수정한다.
+- 전투 상태·효과 원자·턴 순서 변경: `current-implementation.md`를 함께 수정한다.
+- 콘텐츠 필드·검증 제한 변경: `content-design-guide.md`를 함께 수정한다.
+- 저장 스키마 변경: 버전·마이그레이션·검증·왕복 테스트와 구현 문서를 함께 수정한다.
+- 자주 바뀌는 테스트 개수, 번들 바이트, 실행 시간은 문서에 복사하지 않고 스크립트와 CI를 정본으로 둔다.
+- `최종`, `진짜최종`, `최종2` 같은 파일명 대신 Git 이력과 문서 상태를 사용한다.

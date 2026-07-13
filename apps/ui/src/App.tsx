@@ -1,14 +1,5 @@
 import { CONTENT_VERSION, contentDb } from "@game/content";
-import type {
-  CoinDefId,
-  CoinUid,
-  CharacterId,
-  EnemyDefId,
-  Face,
-  RunState,
-  SkillId,
-  SlotId,
-} from "@game/core";
+import type { CoinDefId, CoinUid, CharacterId, EnemyDefId, Face, RunState, SkillId, SlotId } from "@game/core";
 import {
   acceptEvent,
   buyShopCoin,
@@ -32,6 +23,7 @@ import {
   createRun,
   leaveShop,
   legalCommands,
+  isLockedSkill,
   MAX_PRESERVED_COINS,
   previewFlip,
   resolveCoinRemoval,
@@ -45,11 +37,7 @@ import {
 } from "@game/core";
 import type { CombatEvent, CombatState, Command } from "@game/core";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type {
-  PointerEvent as ReactPointerEvent,
-  ReactNode,
-  RefObject,
-} from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 
 import "./App.css";
 import "./vfx.css";
@@ -57,7 +45,7 @@ import { AtlasSprite } from "./AtlasSprite";
 import { REJECTION_TEXT, rejectionReason } from "./action-feedback";
 import { TutorialStrip } from "./tutorial";
 import { isMuted, playSfx, setMuted } from "./audio";
-import { CardEffectRows, skillSummaryText } from "./card-effects";
+import { CardEffectRows, skillDisplayName, skillSummaryText } from "./card-effects";
 import { CharacterSelect } from "./character-select";
 import { RunMenu } from "./run-menu";
 import { TitleScreen } from "./title-screen";
@@ -70,13 +58,7 @@ import {
   toggleCoinChoice,
 } from "./coin-choice";
 import type { CoinChoiceSelection } from "./coin-choice";
-import {
-  autoSuggestFuel,
-  fuelCommand,
-  fuelRequirement,
-  requiresFuelSelection,
-  toggleFuel,
-} from "./fuel-selection";
+import { autoSuggestFuel, fuelCommand, fuelRequirement, requiresFuelSelection, toggleFuel } from "./fuel-selection";
 import type { FuelSelection } from "./fuel-selection";
 import {
   PRESERVE_SELECTION_INSTRUCTIONS,
@@ -85,13 +67,7 @@ import {
   togglePreservedCoin,
 } from "./preserve-selection";
 import type { PreserveSelection } from "./preserve-selection";
-import {
-  EmberIcon,
-  HeartIcon,
-  ShieldIcon,
-  SkullIcon,
-  SwordIcon,
-} from "./icons";
+import { EmberIcon, HeartIcon, ShieldIcon, SkullIcon, SwordIcon } from "./icons";
 import { coinNameFor, coinRewardDetailFor } from "./coin-info";
 import { EventScreen } from "./event-screen";
 import { NodeChoice } from "./node-choice";
@@ -103,12 +79,7 @@ import { ResolutionTicket } from "./resolution-ticket";
 import type { ResolutionSummary } from "./resolution-summary";
 import { feedbackCuesFor } from "./feedback-cues";
 import { sfxCuesFor } from "./combat-sfx";
-import {
-  cycleTarget,
-  defaultTarget,
-  legalTargetsForCommand,
-  livingEnemyTargets,
-} from "./targeting";
+import { cycleTarget, defaultTarget, legalTargetsForCommand, livingEnemyTargets } from "./targeting";
 import type { TargetingCommand } from "./targeting";
 import bgForest from "./assets/bg-forest.webp";
 import cardSlash from "./assets/card-slash.webp";
@@ -199,12 +170,7 @@ import {
   sameCommand,
   stepSequence,
 } from "./interaction";
-import type {
-  CoinFaces,
-  CoinPileGroup,
-  CoinPileZone,
-  DragSource,
-} from "./interaction";
+import type { CoinFaces, CoinPileGroup, CoinPileZone, DragSource } from "./interaction";
 import { clearRun, loadRunDetailed, saveRun } from "./run-storage";
 import {
   beginHumanCombat,
@@ -221,21 +187,15 @@ import {
   recordHumanReward,
   recordHumanShopAction,
 } from "./telemetry";
-import type {
-  HumanRunTrace,
-  HumanShopAction,
-  RecordHumanRewardInput,
-} from "./telemetry";
+import type { HumanRunTrace, HumanShopAction, RecordHumanRewardInput } from "./telemetry";
 import { TurnBuffBar } from "./turn-buff";
 
 const isInteractiveKeyTarget = (target: EventTarget | null): boolean =>
-  target instanceof Element &&
-  target.closest("button, [role='button'], input, select, textarea, a[href]") !==
-    null;
+  target instanceof Element && target.closest("button, [role='button'], input, select, textarea, a[href]") !== null;
 
 // 생성 에셋 (docs/ui/combat-ui-v2.png 앵커 스타일 — image_gen 산출, 후처리: 크로마 키·리사이즈)
 const CARD_ART: Record<string, string> = {
-  "jab": cardJab,
+  jab: cardJab,
   "fist-guard": cardFistGuard,
   "burning-fist": cardBurningFist,
   "flame-hook": cardFlameHook,
@@ -257,7 +217,7 @@ const CARD_ART: Record<string, string> = {
   "fire-fist": cardFireFist,
   "comet-blow": cardCometBlow,
   "battle-focus": cardBattleFocus,
-  "regroup": cardRegroup,
+  regroup: cardRegroup,
   "arsenal-barrage": cardArsenalBarrage,
   slash: cardSlash,
   guard: cardGuard,
@@ -295,16 +255,7 @@ const CARD_ART: Record<string, string> = {
   "aegis-surge": cardAegisSurge,
 };
 
-const WORDS = [
-  "BRAVE",
-  "EMBER",
-  "IRON",
-  "MOSS",
-  "RIVER",
-  "DUSK",
-  "SPARK",
-  "VALE",
-];
+const WORDS = ["BRAVE", "EMBER", "IRON", "MOSS", "RIVER", "DUSK", "SPARK", "VALE"];
 
 interface SpriteAsset {
   atlasUrl: string;
@@ -435,10 +386,8 @@ type DragState = {
 const slot = (value: number): SlotId => value as SlotId;
 
 const randomSeed = (): string =>
-  Array.from(
-    { length: 3 },
-    () => WORDS[Math.floor(Math.random() * WORDS.length)] ?? "EMBER",
-  ).join("-") + `-${Math.floor(Math.random() * 90 + 10)}`;
+  Array.from({ length: 3 }, () => WORDS[Math.floor(Math.random() * WORDS.length)] ?? "EMBER").join("-") +
+  `-${Math.floor(Math.random() * 90 + 10)}`;
 
 const seedFromUrl = (): string => {
   const url = new URL(window.location.href);
@@ -450,10 +399,7 @@ const seedFromUrl = (): string => {
   return seed;
 };
 
-const combatReducer = (
-  _state: CombatState,
-  action: CombatAction,
-): CombatState => {
+const combatReducer = (_state: CombatState, action: CombatAction): CombatState => {
   return action.state;
 };
 
@@ -463,9 +409,7 @@ const IntentBadge = ({ enemy }: { enemy: CombatState["enemies"][number] }) => (
       action.kind === "attack" ? (
         <span key={index}>
           <SwordIcon scale={1.6} />
-          {action.hits !== undefined && action.hits > 1
-            ? `${action.damage}×${action.hits}`
-            : action.damage}
+          {action.hits !== undefined && action.hits > 1 ? `${action.damage}×${action.hits}` : action.damage}
         </span>
       ) : action.kind === "block" ? (
         <span key={index}>
@@ -512,12 +456,8 @@ const elementKo = (value: string): string => ELEMENT_KO[value] ?? value;
 
 const coinLabel = (state: CombatState, coin: CoinUid): string => {
   const instance = state.coins[Number(coin)];
-  const def =
-    instance === undefined
-      ? undefined
-      : contentDb.coins[String(instance.defId)];
-  const granted =
-    instance?.grants.includes("fire") === true && def?.element !== "fire";
+  const def = instance === undefined ? undefined : contentDb.coins[String(instance.defId)];
+  const granted = instance?.grants.includes("fire") === true && def?.element !== "fire";
   const base = granted
     ? "기본+화염"
     : def?.element !== null && def?.element !== undefined
@@ -528,18 +468,13 @@ const coinLabel = (state: CombatState, coin: CoinUid): string => {
 
 const coinVisualClasses = (state: CombatState, coin: CoinUid): string => {
   const instance = state.coins[Number(coin)];
-  const def =
-    instance === undefined
-      ? undefined
-      : contentDb.coins[String(instance.defId)];
+  const def = instance === undefined ? undefined : contentDb.coins[String(instance.defId)];
   return [
     def?.element === "fire" ? "fire" : "",
     def?.element === "mana" ? "mana" : "",
     def?.element === "frost" ? "frost" : "",
     def?.element === "lightning" ? "lightning" : "",
-    instance?.grants.includes("fire") === true && def?.element !== "fire"
-      ? "granted-fire"
-      : "",
+    instance?.grants.includes("fire") === true && def?.element !== "fire" ? "granted-fire" : "",
     instance?.permanent === false ? "temporary" : "",
     instance?.preserved === true ? "preserved" : "",
   ]
@@ -547,10 +482,7 @@ const coinVisualClasses = (state: CombatState, coin: CoinUid): string => {
     .join(" ");
 };
 
-const PILE_COPY: Record<
-  CoinPileZone,
-  { label: string; title: string; rule: string; empty: string }
-> = {
+const PILE_COPY: Record<CoinPileZone, { label: string; title: string; rule: string; empty: string }> = {
   draw: {
     label: "뽑을 더미",
     title: "주머니 속 — 순서는 비밀",
@@ -598,9 +530,7 @@ const PilePopover = ({
       ) : (
         <ul>
           {groups.map((group) => {
-            const granted = group.grants.filter(
-              (element) => element !== group.element,
-            );
+            const granted = group.grants.filter((element) => element !== group.element);
             const lifecycle =
               zone === "exhausted"
                 ? group.temporary
@@ -612,18 +542,14 @@ const PilePopover = ({
                     ? "전투 후 소멸"
                     : "영구 동전";
             return (
-              <li
-                key={`${group.defId}-${String(group.temporary)}-${group.grants.join("-")}`}
-              >
+              <li key={`${group.defId}-${String(group.temporary)}-${group.grants.join("-")}`}>
                 <span
                   aria-hidden="true"
                   className={`pop-coin ${group.element ?? ""} ${granted.includes("fire") ? "granted-fire" : ""} ${group.temporary ? "temporary" : ""}`}
                 />
                 <span className="pile-item-copy">
                   {group.element === null ? "기본" : elementKo(group.element)}
-                  {granted.length > 0
-                    ? ` · ${granted.map(elementKo).join("+")} 취급`
-                    : ""}
+                  {granted.length > 0 ? ` · ${granted.map(elementKo).join("+")} 취급` : ""}
                   {group.temporary ? " (임시)" : ""} ×{group.count}
                   <small>{lifecycle}</small>
                 </span>
@@ -654,17 +580,9 @@ const CoinDisc = ({
     className={`socket-coin ${coinVisualClasses(state, coin)} ${flipping === true ? "flipping" : ""} ${
       face !== undefined ? `face-${face}` : ""
     } ${vfx ? "vfx-reveal" : ""}`}
-    style={
-      vfx && face === undefined
-        ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" }
-        : undefined
-    }
+    style={vfx && face === undefined ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" } : undefined}
   >
-    {face !== undefined ? (
-      <span className={`coin-face-mark ${face}`}>
-        {face === "heads" ? "앞" : "뒤"}
-      </span>
-    ) : null}
+    {face !== undefined ? <span className={`coin-face-mark ${face}`}>{face === "heads" ? "앞" : "뒤"}</span> : null}
   </span>
 );
 
@@ -706,9 +624,7 @@ const replaceUrlWithSelection = (seed: string): void => {
 const characterFromUrl = (): CharacterId | null => {
   const character = new URL(window.location.href).searchParams.get("character");
   if (character === null) return null;
-  return contentDb.characters[character] === undefined
-    ? null
-    : (character as CharacterId);
+  return contentDb.characters[character] === undefined ? null : (character as CharacterId);
 };
 
 const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
@@ -726,9 +642,7 @@ const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
         : null;
 };
 
-const testSkillsFromUrl = (
-  fallback: RunState["equippedSkills"],
-): RunState["equippedSkills"] | null => {
+const testSkillsFromUrl = (fallback: RunState["equippedSkills"]): RunState["equippedSkills"] | null => {
   const skills = new URL(window.location.href).searchParams.get("skills");
   if (skills === null) return null;
   // 테스트 전용 스킬 표면: 정식 콘텐츠·런 보상 로직을 건드리지 않고 UI 시작 장착만 바꾼다.
@@ -750,15 +664,10 @@ const persistRun = (run: RunState): void => {
     ok = false;
   }
   // 저장 실패는 조용히 넘기지 않는다 — RunMeta 경고 배지가 구독 (P5.4)
-  window.dispatchEvent(
-    new CustomEvent("run-save-status", { detail: { ok } }),
-  );
+  window.dispatchEvent(new CustomEvent("run-save-status", { detail: { ok } }));
 };
 
-const freshSession = (
-  seed: string,
-  character: CharacterId = "warrior" as CharacterId,
-): RunSession => {
+const freshSession = (seed: string, character: CharacterId = "warrior" as CharacterId): RunSession => {
   const created = createRun(
     {
       contentVersion: CONTENT_VERSION,
@@ -768,10 +677,7 @@ const freshSession = (
     contentDb,
   );
   const skillOverride = testSkillsFromUrl(created.equippedSkills);
-  const ready =
-    skillOverride === null
-      ? created
-      : { ...created, equippedSkills: skillOverride };
+  const ready = skillOverride === null ? created : { ...created, equippedSkills: skillOverride };
   const testEnemies = testEncounterFromUrl();
   if (testEnemies !== null) {
     const run = { ...ready, phase: "combat" as const };
@@ -815,8 +721,7 @@ const titleSaveSummary = (run: RunState): TitleSaveSummary => {
       ? `노드 ${Math.min(run.combatIndex + 1, run.graph.layers.length)}/${run.graph.layers.length}`
       : `${act + 1}막 ${Math.min(run.combatIndex - actStart + 1, actEnd - actStart)}/${actEnd - actStart}`;
   return {
-    characterName:
-      contentDb.characters[String(run.character)]?.name ?? String(run.character),
+    characterName: contentDb.characters[String(run.character)]?.name ?? String(run.character),
     currentHp: run.currentHp,
     maxHp: run.maxHp,
     progress,
@@ -828,10 +733,7 @@ const bootState = (): BootState => {
   const urlSeed = url.searchParams.get("seed");
   const testCharacter = characterFromUrl();
   const hasSeed = urlSeed !== null && urlSeed.trim().length > 0;
-  const hasTestBoot =
-    testEncounterFromUrl() !== null ||
-    url.searchParams.has("skills") ||
-    testCharacter !== null;
+  const hasTestBoot = testEncounterFromUrl() !== null || url.searchParams.has("skills") || testCharacter !== null;
   if (url.searchParams.get("select") === "1") {
     return { mode: "select", seed: hasSeed ? urlSeed : null };
   }
@@ -846,13 +748,10 @@ const bootState = (): BootState => {
   if (detailed.status === "unavailable") {
     // 저장소 접근 불가 — 진행은 가능하되 경고 배지를 세운다 (마운트 후 1회)
     window.setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent("run-save-status", { detail: { ok: false } }),
-      );
+      window.dispatchEvent(new CustomEvent("run-save-status", { detail: { ok: false } }));
     }, 0);
   }
-  if (detailed.status === "corrupt" || detailed.status === "unsupported")
-    return { mode: "corrupt-save" };
+  if (detailed.status === "corrupt" || detailed.status === "unsupported") return { mode: "corrupt-save" };
   const saved = detailed.save;
   if (saved === null && hasSeed) {
     return {
@@ -866,24 +765,16 @@ const bootState = (): BootState => {
   };
 };
 
-const coinName = (coin: CoinDefId): string =>
-  coinNameFor(contentDb, String(coin));
+const coinName = (coin: CoinDefId): string => coinNameFor(contentDb, String(coin));
 
-const coinRewardDetail = (coin: CoinDefId): string =>
-  coinRewardDetailFor(contentDb, String(coin));
+const coinRewardDetail = (coin: CoinDefId): string => coinRewardDetailFor(contentDb, String(coin));
 
 const skillRarityName = (skill: SkillId): string => {
   const rarity = contentDb.skills[String(skill)]?.rarity;
   return rarity === "rare" ? "희귀" : rarity === "advanced" ? "고급" : "일반";
 };
 
-const SkillRewardMark = ({
-  skill,
-  scale = 3.2,
-}: {
-  skill: SkillId;
-  scale?: number;
-}) => {
+const SkillRewardMark = ({ skill, scale = 3.2 }: { skill: SkillId; scale?: number }) => {
   const tags = contentDb.skills[String(skill)]?.tags ?? [];
   if (tags.includes("defense")) return <ShieldIcon scale={scale} />;
   if (tags.includes("attack")) return <SwordIcon scale={scale} />;
@@ -926,8 +817,7 @@ const MuteToggle = () => {
   );
 };
 
-const currentNodeFor = (run: RunState) =>
-  run.graph.layers[run.combatIndex]?.[run.nodeChoices[run.combatIndex] ?? 0];
+const currentNodeFor = (run: RunState) => run.graph.layers[run.combatIndex]?.[run.nodeChoices[run.combatIndex] ?? 0];
 
 const NODE_KIND_KO: Record<string, string> = {
   combat: "전투",
@@ -941,9 +831,7 @@ const NODE_KIND_KO: Record<string, string> = {
 
 const enemyNameFor = (run: RunState): string => {
   const node = currentNodeFor(run);
-  const names = (node?.encounter ?? []).map(
-    (id) => contentDb.enemies[String(id)]?.name ?? "적",
-  );
+  const names = (node?.encounter ?? []).map((id) => contentDb.enemies[String(id)]?.name ?? "적");
   return names.length === 0 ? "적" : names.join("·");
 };
 
@@ -1006,11 +894,7 @@ const RunMeta = ({ run }: { run: RunState }) => {
       </span>
       <span>시도 {run.attempt + 1}</span>
       {run.acquiredPassives.length > 0 ? (
-        <span
-          className="passive-count"
-          data-testid="run-passives"
-          title={passiveNames}
-        >
+        <span className="passive-count" data-testid="run-passives" title={passiveNames}>
           ★ 패시브 {run.acquiredPassives.length}
         </span>
       ) : null}
@@ -1051,12 +935,7 @@ interface RunGameProps {
   onStartNewRun: () => void;
 }
 
-const RunGame = ({
-  initialSession,
-  onExitToTitle,
-  onLoadSaved,
-  onStartNewRun,
-}: RunGameProps) => {
+const RunGame = ({ initialSession, onExitToTitle, onLoadSaved, onStartNewRun }: RunGameProps) => {
   const [session, setSession] = useState<RunSession>(initialSession);
   const [menuOpen, setMenuOpen] = useState(false);
   const [removalIndex, setRemovalIndex] = useState<number | null>(null);
@@ -1117,9 +996,7 @@ const RunGame = ({
       setShopRejection(null);
       commitRun(next);
     } catch (error) {
-      setShopRejection(
-        error instanceof Error ? shopRejectionKo(error.message) : "구매할 수 없습니다.",
-      );
+      setShopRejection(error instanceof Error ? shopRejectionKo(error.message) : "구매할 수 없습니다.");
     }
   };
 
@@ -1129,10 +1006,7 @@ const RunGame = ({
   };
 
   // 이벤트 액션 공통 경로 — 성공 시에만 경로 사실 기록 (schema v2 additive)
-  const runEventAction = (
-    action: () => RunState,
-    fact: { action: "accept" | "decline"; choice?: number },
-  ) => {
+  const runEventAction = (action: () => RunState, fact: { action: "accept" | "decline"; choice?: number }) => {
     try {
       const next = action();
       telemetryRef.current = recordHumanEventAction(currentTelemetry(), {
@@ -1142,11 +1016,7 @@ const RunGame = ({
       setEventRejection(null);
       commitRun(next);
     } catch (error) {
-      setEventRejection(
-        error instanceof Error
-          ? eventRejectionKo(error.message)
-          : "지금은 수락할 수 없습니다.",
-      );
+      setEventRejection(error instanceof Error ? eventRejectionKo(error.message) : "지금은 수락할 수 없습니다.");
     }
   };
 
@@ -1158,12 +1028,7 @@ const RunGame = ({
 
   const completeCombat = (completed: CombatState) => {
     if (run.phase !== "combat") return;
-    telemetryRef.current = finishHumanCombat(
-      currentTelemetry(),
-      run.combatIndex,
-      run.attempt,
-      completed,
-    );
+    telemetryRef.current = finishHumanCombat(currentTelemetry(), run.combatIndex, run.attempt, completed);
     const settled = settleRunCombat(run, completed, contentDb);
     playSfx(completed.phase === "victory" ? "victory" : "defeat");
     if (settled.phase === "victory" || settled.phase === "defeat") {
@@ -1281,320 +1146,211 @@ const RunGame = ({
   return (
     <>
       <main
-      aria-label="런 진행 화면"
-      className="run-stage-shell"
-      data-attempt={run.attempt}
-      data-bag={run.bag.map(String).join(",")}
-      data-combat-index={run.combatIndex}
-      data-current-hp={run.currentHp}
-      data-equipped-skills={run.equippedSkills.map(String).join(",")}
-      data-run-phase={run.phase}
-      data-testid="run-phase"
-    >
-      <div className="backdrop" aria-hidden="true">
-        <img alt="" className="backdrop-img" src={bgForest} />
-      </div>
-      <RunMeta run={run} />
-      <div
-        aria-label={
-          run.phase === "rewards"
-            ? "전투 보상"
-            : run.phase === "victory"
-              ? "런 승리 결과"
-              : run.phase === "defeat"
-                ? "런 패배 결과"
-                : "다음 전투"
-        }
-        aria-modal="true"
-        className={`result-overlay run-overlay ${run.phase === "rewards" ? "reward-overlay" : ""}`}
-        data-testid={
-          run.phase === "rewards"
-            ? "reward-overlay"
-            : run.phase === "victory" || run.phase === "defeat"
-              ? "run-result"
-              : "ready-overlay"
-        }
-        role="dialog"
+        aria-label="런 진행 화면"
+        className="run-stage-shell"
+        data-attempt={run.attempt}
+        data-bag={run.bag.map(String).join(",")}
+        data-combat-index={run.combatIndex}
+        data-current-hp={run.currentHp}
+        data-equipped-skills={run.equippedSkills.map(String).join(",")}
+        data-run-phase={run.phase}
+        data-testid="run-phase"
       >
-        <section
-          className={`result-panel run-panel phase-${run.phase} stage-${rewardStage ?? "none"}`}
+        <div className="backdrop" aria-hidden="true">
+          <img alt="" className="backdrop-img" src={bgForest} />
+        </div>
+        <RunMeta run={run} />
+        <div
+          aria-label={
+            run.phase === "rewards"
+              ? "전투 보상"
+              : run.phase === "victory"
+                ? "런 승리 결과"
+                : run.phase === "defeat"
+                  ? "런 패배 결과"
+                  : "다음 전투"
+          }
+          aria-modal="true"
+          className={`result-overlay run-overlay ${run.phase === "rewards" ? "reward-overlay" : ""}`}
+          data-testid={
+            run.phase === "rewards"
+              ? "reward-overlay"
+              : run.phase === "victory" || run.phase === "defeat"
+                ? "run-result"
+                : "ready-overlay"
+          }
+          role="dialog"
         >
-          {run.phase === "rewards" && pending !== undefined ? (
-            <>
-              <p className="run-kicker">
-                전투 {completedCombatCount(run)} 완료
-              </p>
-              <h1>전투 보상</h1>
-              <p
-                className="reward-step"
-                data-reward-stage={rewardStage ?? undefined}
-                data-testid="reward-stage"
-              >
-                {rewardStage === "coin"
-                  ? "코인 추가"
-                  : rewardStage === "removal"
-                    ? "코인 제거"
-                    : rewardStage === "fallback-coin"
-                      ? "대체 보상 · 추가 코인"
-                      : rewardStage === "passive"
-                        ? "보스 전리품 · 패시브 선택"
-                        : "스킬 선택"}
-              </p>
+          <section className={`result-panel run-panel phase-${run.phase} stage-${rewardStage ?? "none"}`}>
+            {run.phase === "rewards" && pending !== undefined ? (
+              <>
+                <p className="run-kicker">전투 {completedCombatCount(run)} 완료</p>
+                <h1>전투 보상</h1>
+                <p className="reward-step" data-reward-stage={rewardStage ?? undefined} data-testid="reward-stage">
+                  {rewardStage === "coin"
+                    ? "코인 추가"
+                    : rewardStage === "removal"
+                      ? "코인 제거"
+                      : rewardStage === "fallback-coin"
+                        ? "대체 보상 · 추가 코인"
+                        : rewardStage === "passive"
+                          ? "보스 전리품 · 패시브 선택"
+                          : "스킬 선택"}
+                </p>
 
-              {isCoinStage ? (
-                <div
-                  className={`reward-body ${rewardStage === "fallback-coin" ? "fallback-reward" : ""}`}
-                >
-                  <p>
-                    {rewardStage === "fallback-coin"
-                      ? "새 스킬 후보가 부족해 추가 영구 코인 보상으로 대체되었습니다."
-                      : "주머니에 영구 코인 하나를 추가합니다."}
-                  </p>
-                  <div className="reward-grid coin-rewards">
-                    {pending.coinOptions.map((coin, index) => (
-                      <button
-                        className={`reward-choice coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
-                        data-testid={`coin-reward-${String(coin)}`}
-                        key={String(coin)}
-                        ref={index === 0 ? primaryRef : undefined}
-                        type="button"
-                        onClick={() =>
-                          commitReward(chooseCoinReward(run, coin, contentDb), {
-                            combatIndex: run.combatIndex - 1,
-                            stage:
-                              rewardStage === "fallback-coin"
-                                ? "fallback-coin"
-                                : "coin",
-                            options: pending.coinOptions.map(String),
-                            choice: String(coin),
-                            resolution: "selected",
-                          })
-                        }
-                      >
-                        <span className="reward-coin" aria-hidden="true" />
-                        <strong>{coinName(coin)}</strong>
-                        <small>{coinRewardDetail(coin)}</small>
-                        <em>주머니 +1</em>
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    className="secondary-action"
-                    data-testid="coin-reward-skip"
-                    type="button"
-                    onClick={() =>
-                      commitReward(chooseCoinReward(run, null, contentDb), {
-                        combatIndex: run.combatIndex - 1,
-                        stage:
-                          rewardStage === "fallback-coin"
-                            ? "fallback-coin"
-                            : "coin",
-                        options: pending.coinOptions.map(String),
-                        choice: null,
-                        resolution: "skipped",
-                      })
-                    }
-                  >
-                    {rewardStage === "fallback-coin"
-                      ? "대체 코인 건너뛰기"
-                      : "코인 보상 건너뛰기"}
-                  </button>
-                </div>
-              ) : null}
-
-              {rewardStage === "removal" ? (
-                <div className="reward-body">
-                  <p>현재 주머니에서 영구 코인 하나를 고르거나 건너뜁니다.</p>
-                  <div aria-label="현재 영구 코인 주머니" className="bag-list">
-                    {run.bag.map((coin, index) => (
-                      <button
-                        aria-pressed={removalIndex === index}
-                        className={`bag-choice ${removalIndex === index ? "selected" : ""}`}
-                        data-testid={`bag-remove-${index}`}
-                        key={`${String(coin)}-${index}`}
-                        ref={index === 0 ? primaryRef : undefined}
-                        type="button"
-                        onClick={() => setRemovalIndex(index)}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className={`bag-choice-coin coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
-                        />
-                        <span className="bag-choice-copy">
-                          {coinName(coin)} <small>#{index + 1}</small>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="reward-actions">
-                    <button
-                      className="destructive-action"
-                      data-testid="removal-confirm"
-                      disabled={removalIndex === null}
-                      type="button"
-                      onClick={() => {
-                        if (removalIndex === null) return;
-                        commitReward(resolveCoinRemoval(run, removalIndex, contentDb), {
-                          combatIndex: run.combatIndex - 1,
-                          stage: "removal",
-                          options: run.bag.map(String),
-                          choice: String(run.bag[removalIndex]),
-                          resolution: "selected",
-                          bagIndex: removalIndex,
-                        });
-                      }}
-                    >
-                      선택한 코인 제거
-                    </button>
+                {isCoinStage ? (
+                  <div className={`reward-body ${rewardStage === "fallback-coin" ? "fallback-reward" : ""}`}>
+                    <p>
+                      {rewardStage === "fallback-coin"
+                        ? "새 스킬 후보가 부족해 추가 영구 코인 보상으로 대체되었습니다."
+                        : "주머니에 영구 코인 하나를 추가합니다."}
+                    </p>
+                    <div className="reward-grid coin-rewards">
+                      {pending.coinOptions.map((coin, index) => (
+                        <button
+                          className={`reward-choice coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
+                          data-testid={`coin-reward-${String(coin)}`}
+                          key={String(coin)}
+                          ref={index === 0 ? primaryRef : undefined}
+                          type="button"
+                          onClick={() =>
+                            commitReward(chooseCoinReward(run, coin, contentDb), {
+                              combatIndex: run.combatIndex - 1,
+                              stage: rewardStage === "fallback-coin" ? "fallback-coin" : "coin",
+                              options: pending.coinOptions.map(String),
+                              choice: String(coin),
+                              resolution: "selected",
+                            })
+                          }
+                        >
+                          <span className="reward-coin" aria-hidden="true" />
+                          <strong>{coinName(coin)}</strong>
+                          <small>{coinRewardDetail(coin)}</small>
+                          <em>주머니 +1</em>
+                        </button>
+                      ))}
+                    </div>
                     <button
                       className="secondary-action"
-                      data-testid="removal-cancel"
-                      disabled={removalIndex === null}
-                      type="button"
-                      onClick={() => setRemovalIndex(null)}
-                    >
-                      선택 취소
-                    </button>
-                    <button
-                      className="secondary-action"
-                      data-testid="removal-skip"
+                      data-testid="coin-reward-skip"
                       type="button"
                       onClick={() =>
-                        commitReward(resolveCoinRemoval(run, null, contentDb), {
+                        commitReward(chooseCoinReward(run, null, contentDb), {
                           combatIndex: run.combatIndex - 1,
-                          stage: "removal",
-                          options: run.bag.map(String),
+                          stage: rewardStage === "fallback-coin" ? "fallback-coin" : "coin",
+                          options: pending.coinOptions.map(String),
                           choice: null,
                           resolution: "skipped",
                         })
                       }
                     >
-                      제거 건너뛰기
+                      {rewardStage === "fallback-coin" ? "대체 코인 건너뛰기" : "코인 보상 건너뛰기"}
                     </button>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {rewardStage === "skill" ? (
-                <div className="reward-body">
-                  {selectedSkill === null ? (
-                    <>
-                      <p>새 스킬을 고르면 교체할 슬롯을 선택합니다.</p>
-                      <div className="reward-grid skill-rewards">
-                        {pending.skillOptions.map((skill, index) => (
-                          <button
-                            className="reward-choice skill-choice"
-                            data-testid={`skill-reward-${String(skill)}`}
-                            key={String(skill)}
-                            ref={index === 0 ? primaryRef : undefined}
-                            type="button"
-                            onClick={() => setSelectedSkill(skill)}
-                          >
-                            <span
-                              className="skill-reward-mark"
-                              aria-hidden="true"
-                            >
-                              <SkillRewardMark skill={skill} />
-                            </span>
-                            <em
-                              className={`rarity rarity-${contentDb.skills[String(skill)]?.rarity ?? "common"}`}
-                            >
-                              {skillRarityName(skill)}
-                            </em>
-                            <strong>
-                              {contentDb.skills[String(skill)]?.name ??
-                                String(skill)}
-                            </strong>
-                            <small>{effectText(String(skill))}</small>
-                          </button>
-                        ))}
-                      </div>
+                {rewardStage === "removal" ? (
+                  <div className="reward-body">
+                    <p>현재 주머니에서 영구 코인 하나를 고르거나 건너뜁니다.</p>
+                    <div aria-label="현재 영구 코인 주머니" className="bag-list">
+                      {run.bag.map((coin, index) => (
+                        <button
+                          aria-pressed={removalIndex === index}
+                          className={`bag-choice ${removalIndex === index ? "selected" : ""}`}
+                          data-testid={`bag-remove-${index}`}
+                          key={`${String(coin)}-${index}`}
+                          ref={index === 0 ? primaryRef : undefined}
+                          type="button"
+                          onClick={() => setRemovalIndex(index)}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`bag-choice-coin coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
+                          />
+                          <span className="bag-choice-copy">
+                            {coinName(coin)} <small>#{index + 1}</small>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="reward-actions">
+                      <button
+                        className="destructive-action"
+                        data-testid="removal-confirm"
+                        disabled={removalIndex === null}
+                        type="button"
+                        onClick={() => {
+                          if (removalIndex === null) return;
+                          commitReward(resolveCoinRemoval(run, removalIndex, contentDb), {
+                            combatIndex: run.combatIndex - 1,
+                            stage: "removal",
+                            options: run.bag.map(String),
+                            choice: String(run.bag[removalIndex]),
+                            resolution: "selected",
+                            bagIndex: removalIndex,
+                          });
+                        }}
+                      >
+                        선택한 코인 제거
+                      </button>
                       <button
                         className="secondary-action"
-                        data-testid="skill-reward-skip"
+                        data-testid="removal-cancel"
+                        disabled={removalIndex === null}
+                        type="button"
+                        onClick={() => setRemovalIndex(null)}
+                      >
+                        선택 취소
+                      </button>
+                      <button
+                        className="secondary-action"
+                        data-testid="removal-skip"
                         type="button"
                         onClick={() =>
-                          commitReward(skipSkillReward(run, contentDb), {
+                          commitReward(resolveCoinRemoval(run, null, contentDb), {
                             combatIndex: run.combatIndex - 1,
-                            stage: "skill",
-                            options: pending.skillOptions.map(String),
+                            stage: "removal",
+                            options: run.bag.map(String),
                             choice: null,
                             resolution: "skipped",
                           })
                         }
                       >
-                        스킬 보상 건너뛰기
+                        제거 건너뛰기
                       </button>
-                    </>
-                  ) : (
-                    <>
-                      <p>
-                        <strong>
-                          {contentDb.skills[String(selectedSkill)]?.name ??
-                            String(selectedSkill)}
-                        </strong>{" "}
-                        — 교체할 슬롯을 고르세요.
-                      </p>
-                      <div
-                        aria-label="교체할 스킬 슬롯"
-                        className="replacement-list"
-                      >
-                        {run.equippedSkills.map((skill, index) => (
-                          <button
-                            aria-label={`슬롯 ${index + 1} ${skill !== null ? `${contentDb.skills[String(skill)]?.name ?? String(skill)} 교체` : "빈 슬롯 장착"}`}
-                            data-testid={`replace-slot-${index}`}
-                            key={`${String(skill)}-${index}`}
-                            ref={index === 0 ? primaryRef : undefined}
-                            type="button"
-                            onClick={() =>
-                              commitReward(
-                                chooseSkillReward(run, selectedSkill, index, contentDb),
-                                {
-                                  combatIndex: run.combatIndex - 1,
-                                  stage: "skill",
-                                  options: pending.skillOptions.map(String),
-                                  choice: String(selectedSkill),
-                                  resolution: "selected",
-                                  replacedSlot: index,
-                                },
-                              )
-                            }
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="replacement-mark"
+                    </div>
+                  </div>
+                ) : null}
+
+                {rewardStage === "skill" ? (
+                  <div className="reward-body">
+                    {selectedSkill === null ? (
+                      <>
+                        <p>새 스킬을 고르면 교체할 슬롯을 선택합니다.</p>
+                        <div className="reward-grid skill-rewards">
+                          {pending.skillOptions.map((skill, index) => (
+                            <button
+                              className="reward-choice skill-choice"
+                              data-testid={`skill-reward-${String(skill)}`}
+                              key={String(skill)}
+                              ref={index === 0 ? primaryRef : undefined}
+                              type="button"
+                              onClick={() => setSelectedSkill(skill)}
                             >
-                              {skill !== null ? (
-                                <SkillRewardMark scale={2.6} skill={skill} />
-                              ) : null}
-                            </span>
-                            <span className="replacement-copy">
-                              <small>
-                                슬롯 {index + 1} ·{" "}
-                                {skill !== null ? skillRarityName(skill) : "빈 슬롯"}
-                              </small>
-                              <strong>
-                                {skill !== null
-                                  ? contentDb.skills[String(skill)]?.name ??
-                                    String(skill)
-                                  : "장착"}
-                              </strong>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="reward-actions">
+                              <span className="skill-reward-mark" aria-hidden="true">
+                                <SkillRewardMark skill={skill} />
+                              </span>
+                              <em className={`rarity rarity-${contentDb.skills[String(skill)]?.rarity ?? "common"}`}>
+                                {skillRarityName(skill)}
+                              </em>
+                              <strong>{contentDb.skills[String(skill)]?.name ?? String(skill)}</strong>
+                              <small>{effectText(String(skill))}</small>
+                            </button>
+                          ))}
+                        </div>
                         <button
                           className="secondary-action"
-                          data-testid="replace-cancel"
-                          type="button"
-                          onClick={() => setSelectedSkill(null)}
-                        >
-                          스킬 선택 취소
-                        </button>
-                        <button
-                          className="secondary-action decline-action"
-                          data-testid="replace-decline"
+                          data-testid="skill-reward-skip"
                           type="button"
                           onClick={() =>
                             commitReward(skipSkillReward(run, contentDb), {
@@ -1602,193 +1358,240 @@ const RunGame = ({
                               stage: "skill",
                               options: pending.skillOptions.map(String),
                               choice: null,
-                              resolution: "declined",
+                              resolution: "skipped",
                             })
                           }
                         >
-                          교체하지 않고 거절
+                          스킬 보상 건너뛰기
                         </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>{contentDb.skills[String(selectedSkill)]?.name ?? String(selectedSkill)}</strong> —
+                          교체할 슬롯을 고르세요.
+                        </p>
+                        <div aria-label="교체할 스킬 슬롯" className="replacement-list">
+                          {run.equippedSkills.map((skill, index) => (
+                            <button
+                              aria-label={`슬롯 ${index + 1} ${skill !== null ? `${contentDb.skills[String(skill)]?.name ?? String(skill)} ${isLockedSkill(contentDb, skill) ? "고유 스킬, 교체 불가" : "교체"}` : "빈 슬롯 장착"}`}
+                              data-testid={`replace-slot-${index}`}
+                              disabled={isLockedSkill(contentDb, skill)}
+                              key={`${String(skill)}-${index}`}
+                              ref={index === 0 ? primaryRef : undefined}
+                              type="button"
+                              onClick={() =>
+                                commitReward(chooseSkillReward(run, selectedSkill, index, contentDb), {
+                                  combatIndex: run.combatIndex - 1,
+                                  stage: "skill",
+                                  options: pending.skillOptions.map(String),
+                                  choice: String(selectedSkill),
+                                  resolution: "selected",
+                                  replacedSlot: index,
+                                })
+                              }
+                            >
+                              <span aria-hidden="true" className="replacement-mark">
+                                {skill !== null ? <SkillRewardMark scale={2.6} skill={skill} /> : null}
+                              </span>
+                              <span className="replacement-copy">
+                                <small>
+                                  슬롯 {index + 1} · {skill !== null ? skillRarityName(skill) : "빈 슬롯"}
+                                  {isLockedSkill(contentDb, skill) ? " · 고유 스킬 · 교체 불가" : ""}
+                                </small>
+                                <strong>
+                                  {skill !== null ? (contentDb.skills[String(skill)]?.name ?? String(skill)) : "장착"}
+                                </strong>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="reward-actions">
+                          <button
+                            className="secondary-action"
+                            data-testid="replace-cancel"
+                            type="button"
+                            onClick={() => setSelectedSkill(null)}
+                          >
+                            스킬 선택 취소
+                          </button>
+                          <button
+                            className="secondary-action decline-action"
+                            data-testid="replace-decline"
+                            type="button"
+                            onClick={() =>
+                              commitReward(skipSkillReward(run, contentDb), {
+                                combatIndex: run.combatIndex - 1,
+                                stage: "skill",
+                                options: pending.skillOptions.map(String),
+                                choice: null,
+                                resolution: "declined",
+                              })
+                            }
+                          >
+                            교체하지 않고 거절
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : null}
 
-              {rewardStage === "passive" ? (
-                <div className="reward-body">
-                  <p>보스의 전리품 — 획득할 패시브를 하나 고릅니다.</p>
-                  <div className="reward-grid passive-rewards">
-                    {(pending.passiveOptions ?? []).map((passiveId, index) => {
-                      const def = (contentDb.passives ?? {})[String(passiveId)];
-                      return (
-                        <button
-                          className="reward-choice passive-choice"
-                          data-testid={`passive-reward-${String(passiveId)}`}
-                          key={String(passiveId)}
-                          ref={index === 0 ? primaryRef : undefined}
-                          type="button"
-                          onClick={() => {
-                            telemetryRef.current = recordHumanPassiveReward(
-                              currentTelemetry(),
-                              {
+                {rewardStage === "passive" ? (
+                  <div className="reward-body">
+                    <p>보스의 전리품 — 획득할 패시브를 하나 고릅니다.</p>
+                    <div className="reward-grid passive-rewards">
+                      {(pending.passiveOptions ?? []).map((passiveId, index) => {
+                        const def = (contentDb.passives ?? {})[String(passiveId)];
+                        return (
+                          <button
+                            className="reward-choice passive-choice"
+                            data-testid={`passive-reward-${String(passiveId)}`}
+                            key={String(passiveId)}
+                            ref={index === 0 ? primaryRef : undefined}
+                            type="button"
+                            onClick={() => {
+                              telemetryRef.current = recordHumanPassiveReward(currentTelemetry(), {
                                 layer: run.combatIndex,
                                 passiveId: String(passiveId),
-                              },
-                            );
-                            commitRun(
-                              choosePassiveReward(run, passiveId, contentDb),
-                            );
-                          }}
-                        >
-                          <span aria-hidden="true" className="passive-mark">★</span>
-                          <strong>{def?.name ?? String(passiveId)}</strong>
-                          <small>{def?.description ?? ""}</small>
-                        </button>
-                      );
-                    })}
+                              });
+                              commitRun(choosePassiveReward(run, passiveId, contentDb));
+                            }}
+                          >
+                            <span aria-hidden="true" className="passive-mark">
+                              ★
+                            </span>
+                            <strong>{def?.name ?? String(passiveId)}</strong>
+                            <small>{def?.description ?? ""}</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      className="secondary-action"
+                      data-testid="passive-reward-skip"
+                      type="button"
+                      onClick={() => {
+                        telemetryRef.current = recordHumanPassiveReward(currentTelemetry(), {
+                          layer: run.combatIndex,
+                          passiveId: null,
+                        });
+                        commitRun(choosePassiveReward(run, null, contentDb));
+                      }}
+                    >
+                      패시브 보상 건너뛰기
+                    </button>
                   </div>
-                  <button
-                    className="secondary-action"
-                    data-testid="passive-reward-skip"
-                    type="button"
-                    onClick={() => {
-                      telemetryRef.current = recordHumanPassiveReward(
-                        currentTelemetry(),
-                        { layer: run.combatIndex, passiveId: null },
-                      );
-                      commitRun(choosePassiveReward(run, null, contentDb));
+                ) : null}
+              </>
+            ) : run.phase === "ready" ? (
+              <>
+                <p className="run-kicker">{NODE_KIND_KO[currentNodeFor(run)?.kind ?? "combat"]} 노드</p>
+                <h1>
+                  {currentNodeFor(run)?.kind === "boss"
+                    ? "보스전"
+                    : currentNodeFor(run)?.kind === "elite"
+                      ? "엘리트 전투"
+                      : "다음 전투"}
+                </h1>
+                <p>
+                  {enemyNameFor(run)} · HP {run.currentHp}/{run.maxHp}
+                </p>
+                <p>체력은 회복되지 않고 그대로 이어집니다.</p>
+                <button data-testid="next-combat" ref={primaryRef} type="button" onClick={startNextCombat}>
+                  노드 {run.combatIndex + 1}/{run.graph.layers.length} 전투 시작
+                </button>
+              </>
+            ) : run.phase === "event" && run.pendingEvent !== undefined ? (
+              (() => {
+                const def = (contentDb.events ?? {})[String(run.pendingEvent.eventId)];
+                if (def === undefined) return null;
+                const needsPick = def.risk === "gold" || def.risk === "coin";
+                const riskLine =
+                  def.risk === "combat"
+                    ? "엘리트 전투 — 패배하면 런이 끝난다"
+                    : def.risk === "hp"
+                      ? `체력 ${def.hpCost} 감소`
+                      : def.risk === "gold"
+                        ? `골드 ${def.goldCost} 지불 + 기본 코인 1개 영구 변환`
+                        : "기본 코인 1개 제거";
+                const rewardLine =
+                  def.risk === "combat"
+                    ? `승리 시 골드 70 + 희귀 스킬 ${def.rareSkillOptions}종 진열`
+                    : "대표 속성 코인 1개";
+                const acceptDisabled =
+                  (def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove) ||
+                  (def.risk === "gold" && run.gold < def.goldCost) ||
+                  (needsPick && eventPick === null);
+                const disabledReason =
+                  def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove
+                    ? "체력이 부족합니다."
+                    : def.risk === "gold" && run.gold < def.goldCost
+                      ? "골드가 부족합니다."
+                      : needsPick && eventPick === null
+                        ? "대상 기본 코인을 먼저 고릅니다."
+                        : null;
+                return (
+                  <EventScreen
+                    acceptDisabled={acceptDisabled}
+                    acceptLabel={def.risk === "combat" ? "맞서 싸운다" : "수락한다"}
+                    coinPicks={
+                      needsPick
+                        ? run.bag.map((coin, bagIndex) => ({
+                            bagIndex,
+                            name: coinName(coin),
+                            visualClass: String(contentDb.coins[String(coin)]?.element ?? ""),
+                            pickable: String(coin) === "basic",
+                          }))
+                        : null
+                    }
+                    disabledReason={disabledReason}
+                    name={def.name}
+                    prompt={def.prompt}
+                    rejection={eventRejection}
+                    rewardLine={rewardLine}
+                    riskLine={riskLine}
+                    selectedPick={eventPick}
+                    onAccept={() =>
+                      runEventAction(
+                        () => acceptEvent(run, contentDb, needsPick ? (eventPick ?? undefined) : undefined),
+                        {
+                          action: "accept",
+                          ...(needsPick && eventPick !== null ? { choice: eventPick } : {}),
+                        },
+                      )
+                    }
+                    onDecline={() =>
+                      runEventAction(() => declineEvent(run, contentDb), {
+                        action: "decline",
+                      })
+                    }
+                    onPick={(bagIndex) => {
+                      setEventRejection(null);
+                      setEventPick(bagIndex);
                     }}
-                  >
-                    패시브 보상 건너뛰기
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : run.phase === "ready" ? (
-            <>
-              <p className="run-kicker">
-                {NODE_KIND_KO[currentNodeFor(run)?.kind ?? "combat"]} 노드
-              </p>
-              <h1>
-                {currentNodeFor(run)?.kind === "boss"
-                  ? "보스전"
-                  : currentNodeFor(run)?.kind === "elite"
-                    ? "엘리트 전투"
-                    : "다음 전투"}
-              </h1>
-              <p>
-                {enemyNameFor(run)} · HP {run.currentHp}/{run.maxHp}
-              </p>
-              <p>체력은 회복되지 않고 그대로 이어집니다.</p>
-              <button
-                data-testid="next-combat"
-                ref={primaryRef}
-                type="button"
-                onClick={startNextCombat}
-              >
-                노드 {run.combatIndex + 1}/{run.graph.layers.length} 전투 시작
-              </button>
-            </>
-          ) : run.phase === "event" && run.pendingEvent !== undefined ? (
-            (() => {
-              const def = (contentDb.events ?? {})[String(run.pendingEvent.eventId)];
-              if (def === undefined) return null;
-              const needsPick = def.risk === "gold" || def.risk === "coin";
-              const riskLine =
-                def.risk === "combat"
-                  ? "엘리트 전투 — 패배하면 런이 끝난다"
-                  : def.risk === "hp"
-                    ? `체력 ${def.hpCost} 감소`
-                    : def.risk === "gold"
-                      ? `골드 ${def.goldCost} 지불 + 기본 코인 1개 영구 변환`
-                      : "기본 코인 1개 제거";
-              const rewardLine =
-                def.risk === "combat"
-                  ? `승리 시 골드 70 + 희귀 스킬 ${def.rareSkillOptions}종 진열`
-                  : "대표 속성 코인 1개";
-              const acceptDisabled =
-                (def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove) ||
-                (def.risk === "gold" && run.gold < def.goldCost) ||
-                (needsPick && eventPick === null);
-              const disabledReason =
-                def.risk === "hp" && run.currentHp <= def.requireCurrentHpAbove
-                  ? "체력이 부족합니다."
-                  : def.risk === "gold" && run.gold < def.goldCost
-                    ? "골드가 부족합니다."
-                    : needsPick && eventPick === null
-                      ? "대상 기본 코인을 먼저 고릅니다."
-                      : null;
-              return (
-                <EventScreen
-                  acceptDisabled={acceptDisabled}
-                  acceptLabel={def.risk === "combat" ? "맞서 싸운다" : "수락한다"}
-                  coinPicks={
-                    needsPick
-                      ? run.bag.map((coin, bagIndex) => ({
-                          bagIndex,
-                          name: coinName(coin),
-                          visualClass: String(
-                            contentDb.coins[String(coin)]?.element ?? "",
-                          ),
-                          pickable: String(coin) === "basic",
-                        }))
-                      : null
-                  }
-                  disabledReason={disabledReason}
-                  name={def.name}
-                  prompt={def.prompt}
-                  rejection={eventRejection}
-                  rewardLine={rewardLine}
-                  riskLine={riskLine}
-                  selectedPick={eventPick}
-                  onAccept={() =>
-                    runEventAction(
-                      () =>
-                        acceptEvent(
-                          run,
-                          contentDb,
-                          needsPick ? (eventPick ?? undefined) : undefined,
-                        ),
-                      {
-                        action: "accept",
-                        ...(needsPick && eventPick !== null
-                          ? { choice: eventPick }
-                          : {}),
-                      },
-                    )
-                  }
-                  onDecline={() =>
-                    runEventAction(() => declineEvent(run, contentDb), {
-                      action: "decline",
-                    })
-                  }
-                  onPick={(bagIndex) => {
-                    setEventRejection(null);
-                    setEventPick(bagIndex);
-                  }}
-                />
-              );
-            })()
-          ) : run.phase === "choose-node" ? (
-            <NodeChoice
-              iconFor={(kind) =>
-                kind === "shop" ? (
-                  <EmberIcon scale={2.4} />
-                ) : kind === "elite" || kind === "boss" ? (
-                  <SkullIcon scale={2.4} />
-                ) : kind === "rest" ? (
-                  <HeartIcon scale={2.4} />
-                ) : kind === "treasure" ? (
-                  <EmberIcon scale={2.4} />
-                ) : kind === "event" ? (
-                  <HeartIcon scale={2.4} />
-                ) : (
-                  <SwordIcon scale={2.4} />
-                )
-              }
-              layerLabel={`노드 ${run.combatIndex + 1}/${run.graph.layers.length}`}
-              options={(run.graph.layers[run.combatIndex] ?? []).map(
-                (node, index) => ({
+                  />
+                );
+              })()
+            ) : run.phase === "choose-node" ? (
+              <NodeChoice
+                iconFor={(kind) =>
+                  kind === "shop" ? (
+                    <EmberIcon scale={2.4} />
+                  ) : kind === "elite" || kind === "boss" ? (
+                    <SkullIcon scale={2.4} />
+                  ) : kind === "rest" ? (
+                    <HeartIcon scale={2.4} />
+                  ) : kind === "treasure" ? (
+                    <EmberIcon scale={2.4} />
+                  ) : kind === "event" ? (
+                    <HeartIcon scale={2.4} />
+                  ) : (
+                    <SwordIcon scale={2.4} />
+                  )
+                }
+                layerLabel={`노드 ${run.combatIndex + 1}/${run.graph.layers.length}`}
+                options={(run.graph.layers[run.combatIndex] ?? []).map((node, index) => ({
                   index,
                   kind: node.kind,
                   title: NODE_KIND_KO[node.kind] ?? node.kind,
@@ -1802,255 +1605,221 @@ const RunGame = ({
                           : node.kind === "treasure"
                             ? "금화 100과 패시브가 잠들어 있다"
                             : (node.encounter ?? [])
-                          .map(
-                            (enemy) =>
-                              contentDb.enemies[String(enemy)]?.name ?? "적",
-                          )
-                          .join("·"),
-                }),
-              )}
-              onChoose={(index) => {
-                telemetryRef.current = recordHumanNodeChoice(
-                  currentTelemetry(),
-                  { layer: run.combatIndex, choice: index },
-                );
-                commitRun(chooseRunNode(run, index, contentDb));
-              }}
-            />
-          ) : run.phase === "rest" ? (
-            <section aria-label="휴식" className="rest-screen" data-testid="rest-screen">
-              <p className="run-kicker">휴식 노드</p>
-              <h1>모닥불</h1>
-              <p>
-                회복하거나, 장착 스킬 하나를 강화합니다. HP {run.currentHp}/
-                {run.maxHp}
-              </p>
-              <button
-                data-testid="rest-heal"
-                ref={primaryRef}
-                type="button"
-                onClick={() => {
-                  telemetryRef.current = recordHumanRestChoice(
-                    currentTelemetry(),
-                    { layer: run.combatIndex, choice: "heal" },
-                  );
-                  commitRun(restHeal(run, contentDb));
-                }}
-              >
-                최대 체력 30% 회복 (+{Math.floor(run.maxHp * 0.3)})
-              </button>
-              <div aria-label="강화할 스킬 선택" className="rest-upgrade-list">
-                {run.equippedSkills.map((skill, index) => {
-                  if (skill === null) return null;
-                  const def = contentDb.skills[String(skill)];
-                  const upgradable =
-                    def?.upgrade !== undefined && !run.upgradedSlots[index];
-                  const reason =
-                    def?.upgrade === undefined
-                      ? "강화가 정의되지 않은 스킬"
-                      : run.upgradedSlots[index]
-                        ? "이미 강화됨"
-                        : (def.upgrade.description ?? "");
-                  return (
-                    <button
-                      className={`rest-upgrade ${upgradable ? "" : "locked"}`}
-                      data-testid={`rest-upgrade-${index}`}
-                      disabled={!upgradable}
-                      key={`${String(skill)}-${index}`}
-                      title={reason}
-                      type="button"
-                      onClick={() => {
-                        telemetryRef.current = recordHumanRestChoice(
-                          currentTelemetry(),
-                          { layer: run.combatIndex, choice: "upgrade", slot: index },
-                        );
-                        commitRun(restUpgrade(run, index, contentDb));
-                      }}
-                    >
-                      <strong>
-                        {def?.name ?? String(skill)}
-                        {run.upgradedSlots[index] ? " ＋" : ""}
-                      </strong>
-                      <small>
-                        {def?.upgrade !== undefined
-                          ? `강화: ${def.upgrade.name} — ${def.upgrade.description}`
-                          : "강화 불가"}
-                      </small>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ) : run.phase === "treasure" && run.pendingTreasure !== undefined ? (
-            <section
-              aria-label="보물"
-              className="treasure-screen"
-              data-testid="treasure-screen"
-            >
-              <p className="run-kicker">보물 노드</p>
-              <h1>봉인된 상자</h1>
-              <p>금화 100이 들어 있습니다.</p>
-              {run.pendingTreasure.passiveOption !== null ? (
-                <p className="treasure-passive">
-                  ★{" "}
-                  {(contentDb.passives ?? {})[
-                    String(run.pendingTreasure.passiveOption)
-                  ]?.name ?? String(run.pendingTreasure.passiveOption)}
-                  {" — "}
-                  {(contentDb.passives ?? {})[
-                    String(run.pendingTreasure.passiveOption)
-                  ]?.description ?? ""}
-                </p>
-              ) : (
-                <p className="treasure-passive">패시브 풀이 비어 금화만 남았습니다.</p>
-              )}
-              <button
-                data-testid="treasure-claim"
-                ref={primaryRef}
-                type="button"
-                onClick={() => {
-                  telemetryRef.current = recordHumanTreasure(currentTelemetry(), {
+                                .map((enemy) => contentDb.enemies[String(enemy)]?.name ?? "적")
+                                .join("·"),
+                }))}
+                onChoose={(index) => {
+                  telemetryRef.current = recordHumanNodeChoice(currentTelemetry(), {
                     layer: run.combatIndex,
-                    passiveId:
-                      run.pendingTreasure?.passiveOption === null ||
-                      run.pendingTreasure === undefined
-                        ? null
-                        : String(run.pendingTreasure.passiveOption),
+                    choice: index,
                   });
-                  commitRun(claimTreasure(run, contentDb));
+                  commitRun(chooseRunNode(run, index, contentDb));
                 }}
-              >
-                상자를 연다
-              </button>
-            </section>
-          ) : run.phase === "shop" && run.pendingShop !== undefined ? (
-            <ShopScreen
-              gold={run.gold}
-              removalPrice={75 + 25 * run.shopRemovals}
-              coinOffers={run.pendingShop.coinOptions.map((coin, index) => ({
-                id: String(coin),
-                name: coinName(coin),
-                price: run.pendingShop?.coinPrices[index] ?? 0,
-                visualClass: String(
-                  contentDb.coins[String(coin)]?.element ?? "",
-                ),
-              }))}
-              skillOffers={run.pendingShop.skillOptions.map((skill, index) => ({
-                id: String(skill),
-                name: contentDb.skills[String(skill)]?.name ?? String(skill),
-                price: run.pendingShop?.skillPrices[index] ?? 0,
-                rarityName: skillRarityName(skill),
-                card: <SkillRewardMark scale={2.6} skill={skill} />,
-              }))}
-              passiveOffers={(run.pendingShop.passiveOptions ?? []).map(
-                (passiveId, index) => ({
-                  id: String(passiveId),
-                  name:
-                    (contentDb.passives ?? {})[String(passiveId)]?.name ??
-                    String(passiveId),
-                  description:
-                    (contentDb.passives ?? {})[String(passiveId)]
-                      ?.description ?? "",
-                  price: run.pendingShop?.passivePrices?.[index] ?? 0,
-                }),
-              )}
-              bagCoins={run.bag.map((coin, bagIndex) => ({
-                bagIndex,
-                name: coinName(coin),
-                visualClass: String(
-                  contentDb.coins[String(coin)]?.element ?? "",
-                ),
-              }))}
-              rejection={shopRejection}
-              skillPick={shopSkillPick}
-              slotLabels={run.equippedSkills.map((skill) =>
-                skill === null
-                  ? "빈 슬롯"
-                  : contentDb.skills[String(skill)]?.name ?? String(skill),
-              )}
-              onBuyCoin={(index) =>
-                runShopAction(
-                  () => buyShopCoin(run, index, contentDb),
-                  { kind: "buy-coin", option: index },
-                )
-              }
-              onBuyPassive={(index) =>
-                runShopAction(
-                  () => buyShopPassive(run, index, contentDb),
-                  { kind: "buy-passive", option: index },
-                )
-              }
-              onPickSkill={(index) => {
-                setShopRejection(null);
-                setShopSkillPick(index);
-              }}
-              onConfirmSkill={(slot) =>
-                runShopAction(
-                  () => {
-                    const next = buyShopSkill(
-                      run,
-                      shopSkillPick ?? -1,
-                      contentDb,
-                      slot,
+              />
+            ) : run.phase === "rest" ? (
+              <section aria-label="휴식" className="rest-screen" data-testid="rest-screen">
+                <p className="run-kicker">휴식 노드</p>
+                <h1>모닥불</h1>
+                <p>
+                  회복하거나, 장착 스킬 하나를 강화합니다. HP {run.currentHp}/{run.maxHp}
+                </p>
+                <button
+                  data-testid="rest-heal"
+                  ref={primaryRef}
+                  type="button"
+                  onClick={() => {
+                    telemetryRef.current = recordHumanRestChoice(currentTelemetry(), {
+                      layer: run.combatIndex,
+                      choice: "heal",
+                    });
+                    commitRun(restHeal(run, contentDb));
+                  }}
+                >
+                  최대 체력 30% 회복 (+{Math.floor(run.maxHp * 0.3)})
+                </button>
+                <div aria-label="강화할 스킬 선택" className="rest-upgrade-list">
+                  {run.equippedSkills.map((skill, index) => {
+                    if (skill === null) return null;
+                    const def = contentDb.skills[String(skill)];
+                    const upgradable = def?.upgrade !== undefined && !run.upgradedSlots[index];
+                    const reason =
+                      def?.upgrade === undefined
+                        ? "강화가 정의되지 않은 스킬"
+                        : run.upgradedSlots[index]
+                          ? "이미 강화됨"
+                          : (def.upgrade.description ?? "");
+                    return (
+                      <button
+                        className={`rest-upgrade ${upgradable ? "" : "locked"}`}
+                        data-testid={`rest-upgrade-${index}`}
+                        disabled={!upgradable}
+                        key={`${String(skill)}-${index}`}
+                        title={reason}
+                        type="button"
+                        onClick={() => {
+                          telemetryRef.current = recordHumanRestChoice(currentTelemetry(), {
+                            layer: run.combatIndex,
+                            choice: "upgrade",
+                            slot: index,
+                          });
+                          commitRun(restUpgrade(run, index, contentDb));
+                        }}
+                      >
+                        <strong>
+                          {def?.name ?? String(skill)}
+                          {run.upgradedSlots[index] ? " ＋" : ""}
+                        </strong>
+                        <small>
+                          {def?.upgrade !== undefined
+                            ? `강화: ${def.upgrade.name} — ${def.upgrade.description}`
+                            : "강화 불가"}
+                        </small>
+                      </button>
                     );
-                    setShopSkillPick(null);
-                    return next;
-                  },
-                  { kind: "buy-skill", option: shopSkillPick ?? -1, slot },
-                )
-              }
-              onCancelSkill={() => setShopSkillPick(null)}
-              onRemoveCoin={(bagIndex) =>
-                runShopAction(
-                  () => buyShopRemoval(run, bagIndex, contentDb),
-                  { kind: "remove-coin", bagIndex },
-                )
-              }
-              onLeave={() =>
-                runShopAction(() => leaveShop(run, contentDb), {
-                  kind: "leave",
-                })
-              }
-            />
-          ) : (
-            <>
-              <p className="run-kicker">
-                전투 {completedCombatCount(run)} 완료
-              </p>
-              <h1>{run.phase === "victory" ? "런 승리" : "런 패배"}</h1>
-              <p>
-                최종 HP {run.currentHp}/{run.maxHp}
-              </p>
-              <p>시드 {run.runSeed}</p>
-              <button
-                aria-label="같은 시드로 재시작"
-                data-testid="restart-same-seed"
-                ref={primaryRef}
-                type="button"
-                onClick={() => restartRun(run.runSeed)}
-              >
-                같은 시드로 새 런
-              </button>
-              <button
-                className="secondary-action"
-                data-testid="play-log-download"
-                type="button"
-                onClick={exportPlayLog}
-              >
-                플레이 로그 저장
-              </button>
-              <button
-                className="secondary-action"
-                data-testid="new-seed"
-                type="button"
-                onClick={() => restartRun(randomSeed())}
-              >
-                새 시드
-              </button>
-            </>
-          )}
-        </section>
-      </div>
+                  })}
+                </div>
+              </section>
+            ) : run.phase === "treasure" && run.pendingTreasure !== undefined ? (
+              <section aria-label="보물" className="treasure-screen" data-testid="treasure-screen">
+                <p className="run-kicker">보물 노드</p>
+                <h1>봉인된 상자</h1>
+                <p>금화 100이 들어 있습니다.</p>
+                {run.pendingTreasure.passiveOption !== null ? (
+                  <p className="treasure-passive">
+                    ★{" "}
+                    {(contentDb.passives ?? {})[String(run.pendingTreasure.passiveOption)]?.name ??
+                      String(run.pendingTreasure.passiveOption)}
+                    {" — "}
+                    {(contentDb.passives ?? {})[String(run.pendingTreasure.passiveOption)]?.description ?? ""}
+                  </p>
+                ) : (
+                  <p className="treasure-passive">패시브 풀이 비어 금화만 남았습니다.</p>
+                )}
+                <button
+                  data-testid="treasure-claim"
+                  ref={primaryRef}
+                  type="button"
+                  onClick={() => {
+                    telemetryRef.current = recordHumanTreasure(currentTelemetry(), {
+                      layer: run.combatIndex,
+                      passiveId:
+                        run.pendingTreasure?.passiveOption === null || run.pendingTreasure === undefined
+                          ? null
+                          : String(run.pendingTreasure.passiveOption),
+                    });
+                    commitRun(claimTreasure(run, contentDb));
+                  }}
+                >
+                  상자를 연다
+                </button>
+              </section>
+            ) : run.phase === "shop" && run.pendingShop !== undefined ? (
+              <ShopScreen
+                gold={run.gold}
+                removalPrice={75 + 25 * run.shopRemovals}
+                coinOffers={run.pendingShop.coinOptions.map((coin, index) => ({
+                  id: String(coin),
+                  name: coinName(coin),
+                  price: run.pendingShop?.coinPrices[index] ?? 0,
+                  visualClass: String(contentDb.coins[String(coin)]?.element ?? ""),
+                }))}
+                skillOffers={run.pendingShop.skillOptions.map((skill, index) => ({
+                  id: String(skill),
+                  name: contentDb.skills[String(skill)]?.name ?? String(skill),
+                  price: run.pendingShop?.skillPrices[index] ?? 0,
+                  rarityName: skillRarityName(skill),
+                  card: <SkillRewardMark scale={2.6} skill={skill} />,
+                }))}
+                passiveOffers={(run.pendingShop.passiveOptions ?? []).map((passiveId, index) => ({
+                  id: String(passiveId),
+                  name: (contentDb.passives ?? {})[String(passiveId)]?.name ?? String(passiveId),
+                  description: (contentDb.passives ?? {})[String(passiveId)]?.description ?? "",
+                  price: run.pendingShop?.passivePrices?.[index] ?? 0,
+                }))}
+                bagCoins={run.bag.map((coin, bagIndex) => ({
+                  bagIndex,
+                  name: coinName(coin),
+                  visualClass: String(contentDb.coins[String(coin)]?.element ?? ""),
+                }))}
+                rejection={shopRejection}
+                skillPick={shopSkillPick}
+                slotLabels={run.equippedSkills.map((skill) =>
+                  skill === null ? "빈 슬롯" : (contentDb.skills[String(skill)]?.name ?? String(skill)),
+                )}
+                lockedSlots={run.equippedSkills.map((skill) => isLockedSkill(contentDb, skill))}
+                onBuyCoin={(index) =>
+                  runShopAction(() => buyShopCoin(run, index, contentDb), {
+                    kind: "buy-coin",
+                    option: index,
+                  })
+                }
+                onBuyPassive={(index) =>
+                  runShopAction(() => buyShopPassive(run, index, contentDb), {
+                    kind: "buy-passive",
+                    option: index,
+                  })
+                }
+                onPickSkill={(index) => {
+                  setShopRejection(null);
+                  setShopSkillPick(index);
+                }}
+                onConfirmSkill={(slot) =>
+                  runShopAction(
+                    () => {
+                      const next = buyShopSkill(run, shopSkillPick ?? -1, contentDb, slot);
+                      setShopSkillPick(null);
+                      return next;
+                    },
+                    { kind: "buy-skill", option: shopSkillPick ?? -1, slot },
+                  )
+                }
+                onCancelSkill={() => setShopSkillPick(null)}
+                onRemoveCoin={(bagIndex) =>
+                  runShopAction(() => buyShopRemoval(run, bagIndex, contentDb), { kind: "remove-coin", bagIndex })
+                }
+                onLeave={() =>
+                  runShopAction(() => leaveShop(run, contentDb), {
+                    kind: "leave",
+                  })
+                }
+              />
+            ) : (
+              <>
+                <p className="run-kicker">전투 {completedCombatCount(run)} 완료</p>
+                <h1>{run.phase === "victory" ? "런 승리" : "런 패배"}</h1>
+                <p>
+                  최종 HP {run.currentHp}/{run.maxHp}
+                </p>
+                <p>시드 {run.runSeed}</p>
+                <button
+                  aria-label="같은 시드로 재시작"
+                  data-testid="restart-same-seed"
+                  ref={primaryRef}
+                  type="button"
+                  onClick={() => restartRun(run.runSeed)}
+                >
+                  같은 시드로 새 런
+                </button>
+                <button
+                  className="secondary-action"
+                  data-testid="play-log-download"
+                  type="button"
+                  onClick={exportPlayLog}
+                >
+                  플레이 로그 저장
+                </button>
+                <button
+                  className="secondary-action"
+                  data-testid="new-seed"
+                  type="button"
+                  onClick={() => restartRun(randomSeed())}
+                >
+                  새 시드
+                </button>
+              </>
+            )}
+          </section>
+        </div>
       </main>
       {runMenuControls}
     </>
@@ -2072,11 +1841,7 @@ export const App = () => {
   };
 
   const loadSavedRun = () => {
-    const detailed = loadRunDetailed(
-      window.localStorage,
-      CONTENT_VERSION,
-      contentDb,
-    );
+    const detailed = loadRunDetailed(window.localStorage, CONTENT_VERSION, contentDb);
     if (detailed.status === "corrupt" || detailed.status === "unsupported") {
       setBoot({ mode: "corrupt-save" });
       return;
@@ -2097,20 +1862,11 @@ export const App = () => {
 
   if (boot.mode === "title") {
     return (
-      <main
-        aria-label="타이틀 화면"
-        className="run-stage-shell"
-        data-run-phase="title"
-        data-testid="run-phase"
-      >
+      <main aria-label="타이틀 화면" className="run-stage-shell" data-run-phase="title" data-testid="run-phase">
         <div className="backdrop" aria-hidden="true">
           <img alt="" className="backdrop-img" src={bgForest} />
         </div>
-        <TitleScreen
-          save={boot.save}
-          onContinue={loadSavedRun}
-          onNewRun={startNewRun}
-        />
+        <TitleScreen save={boot.save} onContinue={loadSavedRun} onNewRun={startNewRun} />
       </main>
     );
   }
@@ -2128,10 +1884,7 @@ export const App = () => {
         </div>
         <section className="boot-recovery" role="alert">
           <h1>저장 데이터를 읽을 수 없습니다</h1>
-          <p>
-            저장이 손상되었거나 알 수 없는 형식입니다. 기존 저장은 이어할 수
-            없으며, 새 런을 시작하면 삭제됩니다.
-          </p>
+          <p>저장이 손상되었거나 알 수 없는 형식입니다. 기존 저장은 이어할 수 없으며, 새 런을 시작하면 삭제됩니다.</p>
           <button
             data-testid="corrupt-save-restart"
             type="button"
@@ -2141,9 +1894,7 @@ export const App = () => {
               } catch {
                 // 저장소 접근 불가 시에도 새 런 진입은 가능해야 한다
               }
-              window.location.replace(
-                `${window.location.pathname}?select=1`,
-              );
+              window.location.replace(`${window.location.pathname}?select=1`);
             }}
           >
             새 런 시작
@@ -2166,10 +1917,7 @@ export const App = () => {
         </div>
         <CharacterSelect
           artByCharacter={Object.fromEntries(
-            Object.values(contentDb.characters).map((character) => [
-              String(character.id),
-              playerSprite(character.id),
-            ]),
+            Object.values(contentDb.characters).map((character) => [String(character.id), playerSprite(character.id)]),
           )}
           characters={Object.values(contentDb.characters)}
           contentDb={contentDb}
@@ -2209,23 +1957,12 @@ interface CombatBoardProps {
   ) => void;
 }
 
-const CombatBoard = ({
-  combat,
-  run,
-  onComplete,
-  onTelemetryCombatStart,
-  onTelemetryDecision,
-}: CombatBoardProps) => {
+const CombatBoard = ({ combat, run, onComplete, onTelemetryCombatStart, onTelemetryDecision }: CombatBoardProps) => {
   const [state, dispatchState] = useReducer(combatReducer, combat);
   const [selectedCoin, setSelectedCoin] = useState<CoinUid | null>(null);
-  const [fuelSelection, setFuelSelection] = useState<FuelSelection | null>(
-    null,
-  );
-  const [coinChoice, setCoinChoice] = useState<CoinChoiceSelection | null>(
-    null,
-  );
-  const [preserveSelection, setPreserveSelection] =
-    useState<PreserveSelection | null>(null);
+  const [fuelSelection, setFuelSelection] = useState<FuelSelection | null>(null);
+  const [coinChoice, setCoinChoice] = useState<CoinChoiceSelection | null>(null);
+  const [preserveSelection, setPreserveSelection] = useState<PreserveSelection | null>(null);
   const [queue, setQueue] = useState<CombatEvent[]>([]);
   const [locked, setLocked] = useState(false);
   const [coinFaces, setCoinFaces] = useState<CoinFaces>({});
@@ -2238,18 +1975,14 @@ const CombatBoard = ({
   const [rejection, setRejection] = useState<RejectionChip | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [targeting, setTargeting] = useState<TargetingSelection | null>(null);
-  const [summonTargeting, setSummonTargeting] =
-    useState<TargetingCommand | null>(null);
+  const [summonTargeting, setSummonTargeting] = useState<TargetingCommand | null>(null);
   const [lastAttackTarget, setLastAttackTarget] = useState<number | null>(null);
   const [shakeCoin, setShakeCoin] = useState<CoinUid | null>(null);
   const [hintStage, setHintStage] = useState<0 | 1 | 2>(0);
   const [openPile, setOpenPile] = useState<CoinPileZone | null>(null);
-  const [resolutionTicket, setResolutionTicket] =
-    useState<ResolutionSummary | null>(null);
+  const [resolutionTicket, setResolutionTicket] = useState<ResolutionSummary | null>(null);
   const [vfx, setVfx] = useState<Set<string>>(() => new Set());
-  const skillCardRefs = useRef<Array<{ current: HTMLElement | null }>>(
-    state.slots.map(() => ({ current: null })),
-  );
+  const skillCardRefs = useRef<Array<{ current: HTMLElement | null }>>(state.slots.map(() => ({ current: null })));
   const pouchRef = useRef<HTMLDivElement | null>(null);
   const pileCountsRef = useRef<HTMLDivElement | null>(null);
   const drawPileButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2325,13 +2058,10 @@ const CombatBoard = ({
     const onPointerDown = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       const insidePouch = pouchRef.current?.contains(event.target) === true;
-      const insidePileCounts =
-        pileCountsRef.current?.contains(event.target) === true;
+      const insidePileCounts = pileCountsRef.current?.contains(event.target) === true;
       const insidePortalPopover =
-        event.target instanceof Element &&
-        event.target.closest('[data-overlay-layer="popover"]') !== null;
-      if (!insidePouch && !insidePileCounts && !insidePortalPopover)
-        setOpenPile(null);
+        event.target instanceof Element && event.target.closest('[data-overlay-layer="popover"]') !== null;
+      if (!insidePouch && !insidePileCounts && !insidePortalPopover) setOpenPile(null);
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onPointerDown);
@@ -2341,32 +2071,22 @@ const CombatBoard = ({
     };
   }, [openPile]);
 
-  const togglePile = (zone: CoinPileZone) =>
-    setOpenPile((open) => (open === zone ? null : zone));
+  const togglePile = (zone: CoinPileZone) => setOpenPile((open) => (open === zone ? null : zone));
 
-  const findLegal = (cmd: Command): Command | undefined =>
-    legal.find((candidate) => sameCommand(candidate, cmd));
+  const findLegal = (cmd: Command): Command | undefined => legal.find((candidate) => sameCommand(candidate, cmd));
 
-  const withTarget = (
-    command: TargetingCommand,
-    target: number,
-  ): TargetingCommand => ({ ...command, target });
+  const withTarget = (command: TargetingCommand, target: number): TargetingCommand => ({ ...command, target });
 
-  const targetingCommandFor = (
-    command: TargetingCommand,
-  ): TargetingCommand | undefined =>
+  const targetingCommandFor = (command: TargetingCommand): TargetingCommand | undefined =>
     legal.find(
       (candidate): candidate is TargetingCommand =>
-        (candidate.type === "useFlipSkill" ||
-          candidate.type === "useConsumeSkill") &&
+        (candidate.type === "useFlipSkill" || candidate.type === "useConsumeSkill") &&
         candidate.type === command.type &&
         candidate.slot === command.slot &&
         (candidate.type !== "useConsumeSkill" ||
           command.type !== "useConsumeSkill" ||
           (candidate.coins.length === command.coins.length &&
-            candidate.coins.every(
-              (coin, index) => coin === command.coins[index],
-            ))),
+            candidate.coins.every((coin, index) => coin === command.coins[index]))),
     );
 
   const commandRequiresTargeting = (command: TargetingCommand): boolean =>
@@ -2374,8 +2094,7 @@ const CombatBoard = ({
 
   const showRejection = (text: string) => {
     if (showResult) return;
-    if (rejectionTimer.current !== null)
-      window.clearTimeout(rejectionTimer.current);
+    if (rejectionTimer.current !== null) window.clearTimeout(rejectionTimer.current);
     const id = nextRejectionId.current;
     nextRejectionId.current += 1;
     setRejection({ id, text });
@@ -2387,10 +2106,8 @@ const CombatBoard = ({
 
   useEffect(
     () => () => {
-      if (rejectionTimer.current !== null)
-        window.clearTimeout(rejectionTimer.current);
-      if (resolutionTimer.current !== null)
-        window.clearTimeout(resolutionTimer.current);
+      if (rejectionTimer.current !== null) window.clearTimeout(rejectionTimer.current);
+      if (resolutionTimer.current !== null) window.clearTimeout(resolutionTimer.current);
     },
     [],
   );
@@ -2403,27 +2120,19 @@ const CombatBoard = ({
     setTargeting(null);
     setSummonTargeting(null);
     // 장전/회수는 상태 반영이 곧 피드백 — 큐·잠금 없이 즉답해 연속 장전이 끊기지 않는다
-    const immediate = events.filter(
-      (event) => event.type === "coinPlaced" || event.type === "coinUnplaced",
-    );
+    const immediate = events.filter((event) => event.type === "coinPlaced" || event.type === "coinUnplaced");
     const reducedMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     for (const event of immediate) {
-      if (!reducedMotion)
-        for (const cue of feedbackCuesFor(event))
-          triggerVfx(cue.key, cue.duration);
+      if (!reducedMotion) for (const cue of feedbackCuesFor(event)) triggerVfx(cue.key, cue.duration);
       for (const cue of sfxCuesFor(event)) playSfx(cue);
     }
-    const animated = events.filter(
-      (event) => event.type !== "coinPlaced" && event.type !== "coinUnplaced",
-    );
+    const animated = events.filter((event) => event.type !== "coinPlaced" && event.type !== "coinUnplaced");
     if (animated.length > 0) {
       setLocked(true);
       setQueue((pending) => [...pending, ...animated]);
     }
-    if (events.some((event) => event.type === "coinPlaced"))
-      setHintStage((stage) => (stage === 0 ? 1 : stage));
+    if (events.some((event) => event.type === "coinPlaced")) setHintStage((stage) => (stage === 0 ? 1 : stage));
     const skillUsed = events.find((event) => event.type === "skillUsed");
     if (skillUsed !== undefined) {
       setHintStage(2);
@@ -2454,8 +2163,7 @@ const CombatBoard = ({
     clearResolutionTicket();
     onTelemetryDecision(state, [legalCommand], result.state, result.events);
     if (
-      (legalCommand.type === "useFlipSkill" ||
-        legalCommand.type === "useConsumeSkill") &&
+      (legalCommand.type === "useFlipSkill" || legalCommand.type === "useConsumeSkill") &&
       legalCommand.target !== undefined
     )
       setLastAttackTarget(legalCommand.target);
@@ -2475,10 +2183,7 @@ const CombatBoard = ({
     }
     clearResolutionTicket();
     onTelemetryDecision(state, [cmd], result.state, result.events);
-    if (
-      (cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") &&
-      cmd.target !== undefined
-    )
+    if ((cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") && cmd.target !== undefined)
       setLastAttackTarget(cmd.target);
     commit(result.state, result.events);
     return true;
@@ -2497,18 +2202,12 @@ const CombatBoard = ({
       setPreserveSelection(selection);
       return true;
     }
-    const committed = runSelectedFuel(
-      preserveSelectionCommand(preserveSelection),
-      true,
-    );
+    const committed = runSelectedFuel(preserveSelectionCommand(preserveSelection), true);
     if (committed) setPreserveSelection(null);
     return committed;
   };
 
-  const runSequence = (
-    commands: readonly Command[],
-    showFeedback = false,
-  ): boolean => {
+  const runSequence = (commands: readonly Command[], showFeedback = false): boolean => {
     if (locked || commands.length === 0) {
       if (showFeedback && locked) showRejection(REJECTION_TEXT.notPlayerPhase);
       else if (showFeedback) showRejection(REJECTION_TEXT.generic);
@@ -2520,8 +2219,7 @@ const CombatBoard = ({
         const reason =
           commands
             .map((command) => rejectionReason(state, command, contentDb))
-            .find((candidate): candidate is string => candidate !== null) ??
-          REJECTION_TEXT.generic;
+            .find((candidate): candidate is string => candidate !== null) ?? REJECTION_TEXT.generic;
         showRejection(reason);
       }
       return false;
@@ -2541,21 +2239,14 @@ const CombatBoard = ({
     setSummonTargeting(null);
     if (cmd.type === "useFlipSkill") {
       const ghosts = [...(state.zones.placed[cmd.slot] ?? [])];
-      const committed =
-        cmd.chosen === undefined
-          ? runCommand(cmd, showFeedback)
-          : runSelectedFuel(cmd, showFeedback);
-      if (committed && ghosts.length > 0)
-        setResolving({ slot: Number(cmd.slot), coins: ghosts });
+      const committed = cmd.chosen === undefined ? runCommand(cmd, showFeedback) : runSelectedFuel(cmd, showFeedback);
+      if (committed && ghosts.length > 0) setResolving({ slot: Number(cmd.slot), coins: ghosts });
       return;
     }
     runCommand(cmd, showFeedback);
   };
 
-  const beginSummonTargeting = (
-    command: TargetingCommand,
-    showFeedback = true,
-  ): boolean => {
+  const beginSummonTargeting = (command: TargetingCommand, showFeedback = true): boolean => {
     if (state.summons.length === 0) {
       if (showFeedback) showRejection("선택할 소환 장비가 없다");
       return false;
@@ -2578,10 +2269,7 @@ const CombatBoard = ({
     return true;
   };
 
-  const beginTargeting = (
-    command: TargetingCommand,
-    showFeedback = true,
-  ): boolean => {
+  const beginTargeting = (command: TargetingCommand, showFeedback = true): boolean => {
     const legalTargets = legalTargetsForCommand(legal, command).filter(
       (target, index, targets) => targets.indexOf(target) === index,
     );
@@ -2589,10 +2277,7 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
     }
-    if (
-      livingEnemyTargets(state.enemies).length < 2 ||
-      legalTargets.length === 1
-    ) {
+    if (livingEnemyTargets(state.enemies).length < 2 || legalTargets.length === 1) {
       const target = legalTargets[0];
       if (target === undefined) return false;
       useSkill(withTarget(command, target), showFeedback);
@@ -2627,10 +2312,8 @@ const CombatBoard = ({
     showFeedback: boolean,
     selectedFuel = false,
   ) => {
-    if (skillRequiresSummonChoice(skill))
-      beginSummonTargeting(command, showFeedback);
-    else if (commandRequiresTargeting(command))
-      beginTargeting(command, showFeedback);
+    if (skillRequiresSummonChoice(skill)) beginSummonTargeting(command, showFeedback);
+    else if (commandRequiresTargeting(command)) beginTargeting(command, showFeedback);
     else if (selectedFuel) runSelectedFuel(command, showFeedback);
     else useSkill(command, showFeedback);
   };
@@ -2703,11 +2386,7 @@ const CombatBoard = ({
         routeSkill(skill, autoCommand, showFeedback);
       } else {
         const coins = autoSuggestCoinChoice(state, slotId, contentDb);
-        const command = coinChoiceCommand(
-          { slot: slotId, coins },
-          state,
-          contentDb,
-        );
+        const command = coinChoiceCommand({ slot: slotId, coins }, state, contentDb);
         if (command !== null) {
           routeSkill(skill, command, showFeedback);
         } else
@@ -2746,10 +2425,7 @@ const CombatBoard = ({
     const next = toggleFuel(fuelSelection, coin, state, contentDb);
     if (next === fuelSelection) {
       const slotState = state.slots[Number(fuelSelection.slot)];
-      const skill =
-        slotState === undefined
-          ? undefined
-          : contentDb.skills[String(slotState.skillId)];
+      const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
       const reason = rejectionReason(
         state,
         {
@@ -2815,28 +2491,18 @@ const CombatBoard = ({
     }
 
     const [event, ...rest] = queue;
-    const showFloat = (
-      text: string,
-      target: "player" | "enemy",
-      kind: FloatText["kind"],
-      enemy?: number,
-    ) => {
+    const showFloat = (text: string, target: "player" | "enemy", kind: FloatText["kind"], enemy?: number) => {
       const id = nextFloatId.current;
       nextFloatId.current += 1;
       setFloats((items) => [...items, { id, text, target, enemy, kind }]);
-      window.setTimeout(
-        () => setFloats((items) => items.filter((item) => item.id !== id)),
-        900,
-      );
+      window.setTimeout(() => setFloats((items) => items.filter((item) => item.id !== id)), 900);
     };
 
     const reducedMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let delay = 180;
     if (event !== undefined && !reducedMotion) {
-      for (const cue of feedbackCuesFor(event))
-        triggerVfx(cue.key, cue.duration);
+      for (const cue of feedbackCuesFor(event)) triggerVfx(cue.key, cue.duration);
     }
     if (event !== undefined) for (const cue of sfxCuesFor(event)) playSfx(cue);
     if (event?.type === "coinFlipped") {
@@ -2887,10 +2553,7 @@ const CombatBoard = ({
       delay = 460;
     } else if (event?.type === "enemyPassiveTriggered") {
       const owner = state.enemies[event.enemy];
-      const passiveDef =
-        owner === undefined
-          ? undefined
-          : contentDb.enemies[String(owner.defId)]?.passive;
+      const passiveDef = owner === undefined ? undefined : contentDb.enemies[String(owner.defId)]?.passive;
       if (passiveDef !== undefined) {
         showFloat(`★ ${passiveDef.name}`, "enemy", "status", event.enemy);
         delay = 320;
@@ -2905,14 +2568,12 @@ const CombatBoard = ({
       delay = 320;
     } else if (event?.type === "turnTriggerAdded") {
       for (const trigger of state.turnTriggers) {
-        if (trigger.trigger.id === event.trigger)
-          triggerVfx(`turn-trigger-${trigger.uid}`, 320);
+        if (trigger.trigger.id === event.trigger) triggerVfx(`turn-trigger-${trigger.uid}`, 320);
       }
       delay = 260;
     } else if (event?.type === "turnTriggerFired") {
       for (const trigger of state.turnTriggers) {
-        if (trigger.trigger.id === event.trigger)
-          triggerVfx(`turn-trigger-${trigger.uid}`, 360);
+        if (trigger.trigger.id === event.trigger) triggerVfx(`turn-trigger-${trigger.uid}`, 360);
       }
       delay = 320;
     } else if (event?.type === "turnTriggersExpired") {
@@ -2928,19 +2589,12 @@ const CombatBoard = ({
     }
 
     // reduced-motion: 연출 대기 0 — 다음 태스크로 즉시 진행 (JS 딜레이도 모션이다)
-    const timer = window.setTimeout(
-      () => setQueue(rest),
-      reducedMotion ? 0 : delay + 150,
-    );
+    const timer = window.setTimeout(() => setQueue(rest), reducedMotion ? 0 : delay + 150);
     return () => window.clearTimeout(timer);
   }, [locked, queue, resolving, state.turnTriggers]);
 
   // ---- 드래그 장전 (포인터 공통 — 마우스/터치, 6px 이하 이동은 클릭으로 취급) ----
-  const beginDrag = (
-    event: ReactPointerEvent<HTMLElement>,
-    coin: CoinUid,
-    source: DragSource,
-  ) => {
+  const beginDrag = (event: ReactPointerEvent<HTMLElement>, coin: CoinUid, source: DragSource) => {
     if (locked || drag !== null) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     setDrag({
@@ -2965,8 +2619,7 @@ const CombatBoard = ({
     if (!drag.started && Math.hypot(dx, dy) < threshold) return;
     const under = document.elementFromPoint(event.clientX, event.clientY);
     const card = under?.closest("[data-slot]") ?? null;
-    const overSlot =
-      card === null ? null : Number(card.getAttribute("data-slot"));
+    const overSlot = card === null ? null : Number(card.getAttribute("data-slot"));
     setDrag({
       ...drag,
       started: true,
@@ -2988,11 +2641,7 @@ const CombatBoard = ({
     }
     suppressClick.current = true;
     // 자기 카드 위에 놓기 = 취소 (장전 유지) — 밖으로 끌어내야 회수
-    if (
-      drag.source.kind === "socket" &&
-      drag.overCard === Number(drag.source.slot) &&
-      drag.over === null
-    ) {
+    if (drag.source.kind === "socket" && drag.overCard === Number(drag.source.slot) && drag.over === null) {
       setDrag(null);
       return;
     }
@@ -3025,12 +2674,8 @@ const CombatBoard = ({
         if (isInteractiveKeyTarget(event.target)) return;
         event.preventDefault();
         const slotState = state.slots[Number(fuelSelection.slot)];
-        const skill =
-          slotState === undefined
-            ? undefined
-            : contentDb.skills[String(slotState.skillId)];
-        if (skill !== undefined)
-          activateConsumeSkill(fuelSelection.slot, skill, undefined, true);
+        const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+        if (skill !== undefined) activateConsumeSkill(fuelSelection.slot, skill, undefined, true);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -3048,12 +2693,8 @@ const CombatBoard = ({
       if (isInteractiveKeyTarget(event.target)) return;
       event.preventDefault();
       const slotState = state.slots[Number(coinChoice.slot)];
-      const skill =
-        slotState === undefined
-          ? undefined
-          : contentDb.skills[String(slotState.skillId)];
-      if (skill !== undefined)
-        activateFlipSkill(coinChoice.slot, skill, undefined, true);
+      const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+      if (skill !== undefined) activateFlipSkill(coinChoice.slot, skill, undefined, true);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -3111,16 +2752,10 @@ const CombatBoard = ({
   };
 
   const ended = state.phase === "victory" || state.phase === "defeat";
-  const showResult =
-    ended &&
-    !locked &&
-    queue.length === 0 &&
-    resolving === null &&
-    floats.length === 0;
+  const showResult = ended && !locked && queue.length === 0 && resolving === null && floats.length === 0;
   const activeEvent = queue[0];
   const discardReceiving =
-    activeEvent?.type === "coinsDiscarded" ||
-    (activeEvent?.type === "coinCreated" && activeEvent.zone === "discard");
+    activeEvent?.type === "coinsDiscarded" || (activeEvent?.type === "coinCreated" && activeEvent.zone === "discard");
   const exhaustReceiving = activeEvent?.type === "coinsConsumed";
   const pouchReceiving = activeEvent?.type === "pileShuffled";
   const pileFlowText =
@@ -3130,8 +2765,7 @@ const CombatBoard = ({
         ? `소모 +${activeEvent.coins.length}`
         : activeEvent?.type === "pileShuffled"
           ? `버림 ${activeEvent.count} → 주머니`
-          : activeEvent?.type === "coinCreated" &&
-              activeEvent.zone === "discard"
+          : activeEvent?.type === "coinCreated" && activeEvent.zone === "discard"
             ? "임시 동전 → 버림"
             : null;
   const spritePlayKey = activeEvent?.type === "damageDealt" ? queue.length : 0;
@@ -3168,19 +2802,11 @@ const CombatBoard = ({
       data-run-phase={run.phase}
     >
       <div className="backdrop" aria-hidden="true">
-        <img
-          alt=""
-          className="backdrop-img"
-          src={bgForest}
-          onError={(event) => event.currentTarget.remove()}
-        />
+        <img alt="" className="backdrop-img" src={bgForest} onError={(event) => event.currentTarget.remove()} />
       </div>
       <RunMeta run={run} />
       {isTestEncounter ? (
-        <span
-          className="test-encounter-badge"
-          aria-label="테스트 전용 전투 진입로"
-        >
+        <span className="test-encounter-badge" aria-label="테스트 전용 전투 진입로">
           TEST duo-raiders
         </span>
       ) : null}
@@ -3196,14 +2822,10 @@ const CombatBoard = ({
           block={state.player.block}
           statuses={state.player.statuses}
           overheat={state.player.overheat}
-          weaponOutput={
-            run.character === "arcanist" ? state.player.weaponOutput : undefined
-          }
-          remiseCharges={
-            run.character === "sorcerer"
-              ? state.player.remiseCharges
-              : undefined
-          }
+          weaponOutput={run.character === "arcanist" ? state.player.weaponOutput : undefined}
+          remiseCharges={run.character === "sorcerer" ? state.player.remiseCharges : undefined}
+          bloodSwordPower={run.character === "blood-spellblade" ? state.player.bloodSwordPower : undefined}
+          bloodSwordInvestment={run.character === "blood-spellblade" ? state.player.bloodSwordInvestment : undefined}
           floats={floats}
           motion={playerMotion}
           playKey={playerMotion === "idle" ? 0 : spritePlayKey}
@@ -3213,24 +2835,12 @@ const CombatBoard = ({
         (contentDb.characters[String(run.character)]?.trait.effects ?? []).some(
           (effect) => effect.kind === "summonEquipment",
         ) ? (
-          <div
-            aria-label="소환 장비 슬롯"
-            className="summon-rail"
-            data-testid="summon-rail"
-          >
-            {summonTargeting !== null ? (
-              <span aria-live="polite">사용할 소환 장비 선택</span>
-            ) : null}
+          <div aria-label="소환 장비 슬롯" className="summon-rail" data-testid="summon-rail">
+            {summonTargeting !== null ? <span aria-live="polite">사용할 소환 장비 선택</span> : null}
             {Array.from({ length: 3 }, (_, slotIndex) => {
               const summon = state.summons[slotIndex];
               if (summon === undefined) {
-                return (
-                  <span
-                    aria-hidden="true"
-                    className="summon-slot empty"
-                    key={`empty-${slotIndex}`}
-                  />
-                );
+                return <span aria-hidden="true" className="summon-slot empty" key={`empty-${slotIndex}`} />;
               }
               const def = (contentDb.equipment ?? {})[String(summon.defId)];
               const isWard = def?.action.kind === "ward";
@@ -3251,28 +2861,15 @@ const CombatBoard = ({
                     data-testid={`summon-slot-${slotIndex}`}
                     data-selectable={summonTargeting !== null || undefined}
                     onClick={() => {
-                      if (summonTargeting !== null && !locked)
-                        confirmSummonTargeting(summon.uid);
+                      if (summonTargeting !== null && !locked) confirmSummonTargeting(summon.uid);
                     }}
-                    style={
-                      vfx.has(`summon-${summon.uid}`)
-                        ? feedbackPulse
-                        : undefined
-                    }
+                    style={vfx.has(`summon-${summon.uid}`) ? feedbackPulse : undefined}
                     type="button"
                   >
-                    {isWard ? (
-                      <ShieldIcon scale={1.6} />
-                    ) : (
-                      <SwordIcon scale={1.6} />
-                    )}
+                    {isWard ? <ShieldIcon scale={1.6} /> : <SwordIcon scale={1.6} />}
                     <em className="summon-duration">{summon.duration}</em>
-                    {summon.enhance > 0 ? (
-                      <em className="summon-enhance">+{summon.enhance}</em>
-                    ) : null}
-                    {summon.aoeUses > 0 ? (
-                      <em className="summon-enhance">전체 {summon.aoeUses}</em>
-                    ) : null}
+                    {summon.enhance > 0 ? <em className="summon-enhance">+{summon.enhance}</em> : null}
+                    {summon.aoeUses > 0 ? <em className="summon-enhance">전체 {summon.aoeUses}</em> : null}
                   </button>
                 </Keyword>
               );
@@ -3281,8 +2878,7 @@ const CombatBoard = ({
         ) : null}
         <div className="enemy-line" aria-label="적 목록">
           {state.enemies.map((enemy, index) => {
-            const targetLegal =
-              targeting?.legalTargets.includes(index) === true;
+            const targetLegal = targeting?.legalTargets.includes(index) === true;
             const targetSelected = targeting?.selected === index;
             const enemyMotion =
               activeEvent?.type === "damageDealt" &&
@@ -3308,9 +2904,7 @@ const CombatBoard = ({
                 enemyIndex={index}
                 targeting={targeting !== null && targetLegal}
                 targetSelected={targetSelected}
-                onTarget={
-                  targetLegal ? () => confirmTargeting(index) : undefined
-                }
+                onTarget={targetLegal ? () => confirmTargeting(index) : undefined}
                 attackBuff={enemy.nextAttackBonus}
                 passive={contentDb.enemies[String(enemy.defId)]?.passive}
               />
@@ -3319,30 +2913,21 @@ const CombatBoard = ({
         </div>
       </section>
 
-      <section
-        className={`skill-row ${locked ? "dimmed" : ""}`}
-        aria-label="스킬 카드"
-      >
+      <section className={`skill-row ${locked ? "dimmed" : ""}`} aria-label="스킬 카드">
         <div className="resolution-ticket-anchor" aria-live="polite">
-          {resolutionTicket !== null ? (
-            <ResolutionTicket summary={resolutionTicket} />
-          ) : null}
+          {resolutionTicket !== null ? <ResolutionTicket summary={resolutionTicket} /> : null}
         </div>
         {state.slots.map((slotState, index) => {
           const baseSkill = contentDb.skills[String(slotState.skillId)];
           // P6 D3 — 강화 슬롯은 코어와 같은 파생 정본으로 표시 (수치 이중 표기 방지)
           const upgraded = run.upgradedSlots[index] === true;
-          const skill =
-            baseSkill !== undefined && upgraded
-              ? deriveUpgradedSkill(baseSkill)
-              : baseSkill;
+          const skill = baseSkill !== undefined && upgraded ? deriveUpgradedSkill(baseSkill) : baseSkill;
+          const displaySkillName =
+            skill === undefined ? "빈 슬롯" : skillDisplayName(skill, state.player.bloodSwordPower);
           const placed = state.zones.placed[slot(index)] ?? [];
           const consumeUse = legal.find(
-            (
-              command,
-            ): command is Extract<Command, { type: "useConsumeSkill" }> =>
-              command.type === "useConsumeSkill" &&
-              command.slot === slot(index),
+            (command): command is Extract<Command, { type: "useConsumeSkill" }> =>
+              command.type === "useConsumeSkill" && command.slot === slot(index),
           );
           const flipAttempt =
             skill?.type === "flip"
@@ -3370,23 +2955,16 @@ const CombatBoard = ({
           // 프리뷰는 사용 커맨드가 합법일 때만 (§3.5 preview → Preview | null) — 부분 장전·
           // 쿨다운·전투당 1회·전투 종료 등 코어가 해결을 거부하는 모든 상태를 legalCommands가 거른다
           const preview =
-            skill?.type === "flip" &&
-            placed.length === skill.cost &&
-            use !== undefined
+            skill?.type === "flip" && placed.length === skill.cost && use !== undefined
               ? previewFlip(state, slot(index), contentDb)
               : null;
-          const consumeRequirement =
-            skill?.type === "consume"
-              ? fuelRequirement(state, slot(index), contentDb)
-              : null;
+          const consumeRequirement = skill?.type === "consume" ? fuelRequirement(state, slot(index), contentDb) : null;
           const consumeReady =
             skill?.type === "consume" &&
             (!requiresFuelSelection(state, slot(index), contentDb)
               ? consumeUse !== undefined
-              : fuelSelection?.slot === slot(index) &&
-                fuelCommand(fuelSelection, state, contentDb) !== null);
-          const selectingFuel =
-            skill?.type === "consume" && fuelSelection?.slot === slot(index);
+              : fuelSelection?.slot === slot(index) && fuelCommand(fuelSelection, state, contentDb) !== null);
+          const selectingFuel = skill?.type === "consume" && fuelSelection?.slot === slot(index);
           const useAttempt =
             skill?.type === "consume"
               ? ({
@@ -3396,13 +2974,10 @@ const CombatBoard = ({
                   target: skill.targetType === "single-enemy" ? 0 : undefined,
                 } as const)
               : flipAttempt;
-          const lockedOnce =
-            skill?.oncePerCombat === true && slotState.usedThisCombat;
+          const lockedOnce = skill?.oncePerCombat === true && slotState.usedThisCombat;
           const isResolving = resolving !== null && resolving.slot === index;
           const socketCoins = isResolving ? resolving.coins : placed;
-          const placeSelectedFromCardArt = (
-            event: ReactPointerEvent<HTMLElement>,
-          ) => {
+          const placeSelectedFromCardArt = (event: ReactPointerEvent<HTMLElement>) => {
             if (selectedCoin === null) return;
             event.preventDefault();
             event.stopPropagation();
@@ -3420,12 +2995,7 @@ const CombatBoard = ({
               className={`skill-card ${use !== undefined ? "ready" : ""} ${slotState.cooldownRemaining > 0 ? "spent" : ""} ${slotState.skillId === null ? "empty-slot" : ""} ${lockedOnce ? "combat-locked" : ""} ${placed.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
               data-slot={index}
               key={`${index}-${String(slotState.skillId)}`}
-              style={
-                vfx.has(`skill-slot-${index}`) ||
-                vfx.has(`cooldown-slot-${index}`)
-                  ? feedbackPulse
-                  : undefined
-              }
+              style={vfx.has(`skill-slot-${index}`) || vfx.has(`cooldown-slot-${index}`) ? feedbackPulse : undefined}
               ref={(element) => {
                 const anchor = skillCardRefs.current[index];
                 if (anchor !== undefined) anchor.current = element;
@@ -3455,15 +3025,9 @@ const CombatBoard = ({
                     );
                   return;
                 }
-                if (skill?.type === "consume")
-                  activateConsumeSkill(slot(index), skill, consumeUse, true);
+                if (skill?.type === "consume") activateConsumeSkill(slot(index), skill, consumeUse, true);
                 else if (skill?.type === "flip")
-                  activateFlipSkill(
-                    slot(index),
-                    skill,
-                    use?.type === "useFlipSkill" ? use : undefined,
-                    true,
-                  );
+                  activateFlipSkill(slot(index), skill, use?.type === "useFlipSkill" ? use : undefined, true);
                 else if (useAttempt !== null) runCommand(useAttempt, true);
               }}
             >
@@ -3472,102 +3036,80 @@ const CombatBoard = ({
                   사용 불가여도 포커스 가능(aria-disabled)해 카드 열람(상승)은 항상 키보드로 가능 */}
               <button
                 aria-disabled={use === undefined}
-                aria-label={`${skill?.name ?? "빈 슬롯"}${use !== undefined ? " 사용" : ""}`}
+                aria-label={`${displaySkillName}${use !== undefined ? " 사용" : ""}`}
                 className="card-title"
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   if (clickGuard()) return;
-                  if (skill?.type === "consume")
-                    activateConsumeSkill(slot(index), skill, consumeUse, true);
+                  if (skill?.type === "consume") activateConsumeSkill(slot(index), skill, consumeUse, true);
                   else if (skill?.type === "flip")
-                    activateFlipSkill(
-                      slot(index),
-                      skill,
-                      use?.type === "useFlipSkill" ? use : undefined,
-                      true,
-                    );
+                    activateFlipSkill(slot(index), skill, use?.type === "useFlipSkill" ? use : undefined, true);
                   else if (useAttempt !== null) runCommand(useAttempt, true);
                 }}
               >
-                {skill?.name ?? "빈 슬롯"}
+                {displaySkillName}
                 {upgraded ? (
                   <em aria-label="강화됨" className="upgrade-badge">
                     ＋
                   </em>
                 ) : null}
               </button>
-              {skill?.oncePerCombat === true ? (
-                <span className="once-badge">전투당 1회</span>
-              ) : null}
-              <div
-                className="sockets"
-                aria-label={`${skill?.name ?? "스킬"} 코스트 소켓`}
-              >
-                {Array.from(
-                  { length: skill?.type === "flip" ? skill.cost : 0 },
-                  (_unused, socketIndex) => {
-                    const coin = socketCoins[socketIndex];
-                    return (
-                      <button
-                        aria-label={
-                          coin === undefined
-                            ? selectedCoin !== null
-                              ? "선택한 동전 장전"
-                              : "동전 장전"
-                            : "장전된 동전 회수"
-                        }
-                        className={`socket ${coin !== undefined ? "loaded" : ""} ${coin === undefined && canPlace ? "accept" : ""}`}
-                        key={socketIndex}
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (clickGuard()) return;
-                          if (isResolving) return;
-                          if (coin !== undefined)
-                            runCommand({ type: "unplaceCoin", coin }, true);
-                          else if (selectedCoin !== null)
-                            runCommand(
-                              {
-                                type: "placeCoin",
-                                coin: selectedCoin,
-                                slot: slot(index),
-                              },
-                              true,
-                            );
-                          else showRejection(REJECTION_TEXT.generic);
-                        }}
-                        onPointerDown={(event) => {
-                          if (coin !== undefined && !isResolving)
-                            beginDrag(event, coin, {
-                              kind: "socket",
+              {skill?.oncePerCombat === true ? <span className="once-badge">전투당 1회</span> : null}
+              <div className="sockets" aria-label={`${displaySkillName} 코스트 소켓`}>
+                {Array.from({ length: skill?.type === "flip" ? skill.cost : 0 }, (_unused, socketIndex) => {
+                  const coin = socketCoins[socketIndex];
+                  return (
+                    <button
+                      aria-label={
+                        coin === undefined
+                          ? selectedCoin !== null
+                            ? "선택한 동전 장전"
+                            : "동전 장전"
+                          : "장전된 동전 회수"
+                      }
+                      className={`socket ${coin !== undefined ? "loaded" : ""} ${coin === undefined && canPlace ? "accept" : ""}`}
+                      key={socketIndex}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (clickGuard()) return;
+                        if (isResolving) return;
+                        if (coin !== undefined) runCommand({ type: "unplaceCoin", coin }, true);
+                        else if (selectedCoin !== null)
+                          runCommand(
+                            {
+                              type: "placeCoin",
+                              coin: selectedCoin,
                               slot: slot(index),
-                            });
-                        }}
-                        onPointerMove={moveDrag}
-                        onPointerUp={endDrag}
-                        onPointerCancel={cancelDrag}
-                      >
-                        {coin !== undefined ? (
-                          <CoinDisc
-                            coin={coin}
-                            face={
-                              isResolving ? coinFaces[Number(coin)] : undefined
-                            }
-                            flipping={
-                              isResolving && flipping[Number(coin)] === true
-                            }
-                            state={state}
-                            vfx={
-                              coin !== undefined &&
-                              vfx.has(`coin-${Number(coin)}`)
-                            }
-                          />
-                        ) : null}
-                      </button>
-                    );
-                  },
-                )}
+                            },
+                            true,
+                          );
+                        else showRejection(REJECTION_TEXT.generic);
+                      }}
+                      onPointerDown={(event) => {
+                        if (coin !== undefined && !isResolving)
+                          beginDrag(event, coin, {
+                            kind: "socket",
+                            slot: slot(index),
+                          });
+                      }}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={cancelDrag}
+                    >
+                      {coin !== undefined ? (
+                        <CoinDisc
+                          coin={coin}
+                          face={isResolving ? coinFaces[Number(coin)] : undefined}
+                          flipping={isResolving && flipping[Number(coin)] === true}
+                          state={state}
+                          vfx={coin !== undefined && vfx.has(`coin-${Number(coin)}`)}
+                        />
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
               {skill?.type === "consume" ? (
                 <div
@@ -3580,9 +3122,7 @@ const CombatBoard = ({
                   }`}
                   className={`consume-condition ${consumeReady ? "met" : ""} ${selectingFuel ? "selecting" : ""}`}
                 >
-                  <strong aria-hidden="true">
-                    {elementKo(skill.consume.element)}
-                  </strong>
+                  <strong aria-hidden="true">{elementKo(skill.consume.element)}</strong>
                   <span>
                     ×
                     {selectingFuel
@@ -3600,13 +3140,8 @@ const CombatBoard = ({
                   </span>
                 </div>
               ) : null}
-              <div
-                className="card-art"
-                aria-hidden="true"
-                onPointerDown={placeSelectedFromCardArt}
-              >
-                {skill !== undefined &&
-                CARD_ART[String(skill.id)] !== undefined ? (
+              <div className="card-art" aria-hidden="true" onPointerDown={placeSelectedFromCardArt}>
+                {skill !== undefined && CARD_ART[String(skill.id)] !== undefined ? (
                   <img
                     onError={(event) => event.currentTarget.remove()}
                     alt=""
@@ -3619,17 +3154,12 @@ const CombatBoard = ({
                   </span>
                 )}
               </div>
-              {skill !== undefined ? <CardEffectRows skill={skill} /> : null}
+              {skill !== undefined ? <CardEffectRows displayName={displaySkillName} skill={skill} /> : null}
               {slotState.cooldownRemaining > 0 ? (
-                <span className="spent-label">
-                  쿨 {slotState.cooldownRemaining}
-                </span>
+                <span className="spent-label">쿨 {slotState.cooldownRemaining}</span>
               ) : null}
               {skill !== undefined && skillCooldown(skill) === 0 ? (
-                <span
-                  className="repeat-label"
-                  title="반복 — 같은 턴에 코인이 남는 한 계속 사용"
-                >
+                <span className="repeat-label" title="반복 — 같은 턴에 코인이 남는 한 계속 사용">
                   반복
                 </span>
               ) : null}
@@ -3643,27 +3173,23 @@ const CombatBoard = ({
                   open
                   role="tooltip"
                 >
-                  피해 {preview.byAxis.damage.min}~{preview.byAxis.damage.max}{" "}
-                  (기대 {preview.expected.damage})
+                  피해 {preview.byAxis.damage.min}~{preview.byAxis.damage.max} (기대 {preview.expected.damage})
                   <br />
-                  방어 {preview.byAxis.block.min}~{preview.byAxis.block.max}{" "}
-                  (기대 {preview.expected.block})
+                  방어 {preview.byAxis.block.min}~{preview.byAxis.block.max} (기대 {preview.expected.block})
                   <br />
-                  <Keyword term="burn">화상</Keyword> {preview.byAxis.burn.min}~
-                  {preview.byAxis.burn.max} (기대 {preview.expected.burn})
+                  <Keyword term="burn">화상</Keyword> {preview.byAxis.burn.min}~{preview.byAxis.burn.max} (기대{" "}
+                  {preview.expected.burn})
                   {preview.byAxis.selfDamage.max > 0 ? (
                     <>
                       <br />
-                      자해 {preview.byAxis.selfDamage.min}~
-                      {preview.byAxis.selfDamage.max} (기대{" "}
+                      자해 {preview.byAxis.selfDamage.min}~{preview.byAxis.selfDamage.max} (기대{" "}
                       {preview.expected.selfDamage})
                     </>
                   ) : null}
                   {preview.byAxis.coinsCreated.max > 0 ? (
                     <>
                       <br />
-                      코인 생성 {preview.byAxis.coinsCreated.min}~
-                      {preview.byAxis.coinsCreated.max} (기대{" "}
+                      코인 생성 {preview.byAxis.coinsCreated.min}~{preview.byAxis.coinsCreated.max} (기대{" "}
                       {preview.expected.coinsCreated})
                     </>
                   ) : null}
@@ -3679,33 +3205,18 @@ const CombatBoard = ({
               : "카드 제목을 누르면 사용 · 장전된 동전을 누르면 회수"}
           </div>
         ) : null}
-        {!ended ? (
-          <TutorialStrip
-            db={contentDb}
-            fuelSelectionOpen={fuelSelection !== null}
-            state={state}
-          />
-        ) : null}
+        {!ended ? <TutorialStrip db={contentDb} fuelSelectionOpen={fuelSelection !== null} state={state} /> : null}
       </section>
 
       <section className="bottom-hud">
         {preserveSelection !== null ? (
-          <div
-            aria-label="턴 종료 동전 보존 선택"
-            className="preserve-picker"
-            role="group"
-          >
+          <div aria-label="턴 종료 동전 보존 선택" className="preserve-picker" role="group">
             <strong>
               보존 선택 {preserveSelection.coins.length - preserveSelection.locked.length}/
-              {Math.min(
-                preserveSelection.newCapacity,
-                MAX_PRESERVED_COINS - preserveSelection.locked.length,
-              )}
+              {Math.min(preserveSelection.newCapacity, MAX_PRESERVED_COINS - preserveSelection.locked.length)}
             </strong>
             <span>{PRESERVE_SELECTION_INSTRUCTIONS}</span>
-            {preserveSelection.candidates.some(
-              (coin) => !state.zones.hand.includes(coin),
-            ) ? (
+            {preserveSelection.candidates.some((coin) => !state.zones.hand.includes(coin)) ? (
               <div aria-label="장전된 동전 보존 후보" className="preserve-placed">
                 {preserveSelection.candidates
                   .filter((coin) => !state.zones.hand.includes(coin))
@@ -3721,7 +3232,8 @@ const CombatBoard = ({
                         type="button"
                         onClick={() => onPreserveCoinClick(coin)}
                       >
-                        {coinLabel(state, coin)}{preserveLocked ? " · 잠금" : ""}
+                        {coinLabel(state, coin)}
+                        {preserveLocked ? " · 잠금" : ""}
                       </button>
                     );
                   })}
@@ -3743,68 +3255,39 @@ const CombatBoard = ({
           </button>
           <span>주머니</span>
           {openPile === "draw" ? (
-            <PilePopover
-              anchorRef={drawPileButtonRef}
-              groups={pileComposition(state, "draw", contentDb)}
-              zone="draw"
-            />
+            <PilePopover anchorRef={drawPileButtonRef} groups={pileComposition(state, "draw", contentDb)} zone="draw" />
           ) : null}
         </div>
         <div className="hand-tray" aria-label="손패 동전 트레이">
           {state.zones.hand.map((coin) => {
             const fuelSelected = fuelSelection?.coins.includes(coin) === true;
             const choiceSelected = coinChoice?.coins.includes(coin) === true;
-            const preserveSelected =
-              preserveSelection?.coins.includes(coin) === true;
-            const preserveLocked =
-              preserveSelection?.locked.includes(coin) === true;
-            const emptyFuelSelection =
-              fuelSelection === null
-                ? null
-                : { slot: fuelSelection.slot, coins: [] };
+            const preserveSelected = preserveSelection?.coins.includes(coin) === true;
+            const preserveLocked = preserveSelection?.locked.includes(coin) === true;
+            const emptyFuelSelection = fuelSelection === null ? null : { slot: fuelSelection.slot, coins: [] };
             const fuelValid =
               fuelSelection !== null &&
-              (fuelSelected ||
-                toggleFuel(emptyFuelSelection!, coin, state, contentDb) !==
-                  emptyFuelSelection);
+              (fuelSelected || toggleFuel(emptyFuelSelection!, coin, state, contentDb) !== emptyFuelSelection);
             const choiceValid =
-              coinChoice !== null &&
-              coinChoiceCandidates(state, coinChoice.slot, contentDb).includes(
-                coin,
-              );
-            const preserveValid =
-              preserveSelection?.candidates.includes(coin) === true;
-            const selectingCoin =
-              fuelSelection !== null ||
-              coinChoice !== null ||
-              preserveSelection !== null;
-            const selectedForMode =
-              fuelSelected || choiceSelected || preserveSelected;
+              coinChoice !== null && coinChoiceCandidates(state, coinChoice.slot, contentDb).includes(coin);
+            const preserveValid = preserveSelection?.candidates.includes(coin) === true;
+            const selectingCoin = fuelSelection !== null || coinChoice !== null || preserveSelection !== null;
+            const selectedForMode = fuelSelected || choiceSelected || preserveSelected;
             const validForMode = fuelValid || choiceValid || preserveValid;
             return (
               <button
                 aria-disabled={preserveLocked || undefined}
                 aria-label={`${coinLabel(state, coin)} 동전 ${preserveLocked ? "보존됨 잠금" : "선택"}`}
-                aria-pressed={
-                  selectingCoin ? selectedForMode : selectedCoin === coin
-                }
+                aria-pressed={selectingCoin ? selectedForMode : selectedCoin === coin}
                 className={`coin ${coinVisualClasses(state, coin)} ${selectedCoin === coin ? "selected" : ""} ${
                   selectedForMode ? "fuel-selected" : ""
-                } ${validForMode ? "fuel-valid" : ""} ${
-                  selectingCoin && !validForMode ? "fuel-invalid" : ""
-                } ${
-                  drag !== null && drag.started && drag.coin === coin
-                    ? "drag-origin"
-                    : ""
-                } ${shakeCoin === coin ? "drag-cancel" : ""} ${
-                  vfx.has(`coin-${Number(coin)}`) ? "vfx-reveal" : ""
-                }`}
+                } ${validForMode ? "fuel-valid" : ""} ${selectingCoin && !validForMode ? "fuel-invalid" : ""} ${
+                  drag !== null && drag.started && drag.coin === coin ? "drag-origin" : ""
+                } ${shakeCoin === coin ? "drag-cancel" : ""} ${vfx.has(`coin-${Number(coin)}`) ? "vfx-reveal" : ""}`}
                 disabled={locked}
                 key={coin}
                 style={
-                  vfx.has(`coin-${Number(coin)}`)
-                    ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" }
-                    : undefined
+                  vfx.has(`coin-${Number(coin)}`) ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" } : undefined
                 }
                 type="button"
                 onClick={() => {
@@ -3815,11 +3298,7 @@ const CombatBoard = ({
                   selectCoin(selectedCoin === coin ? null : coin);
                 }}
                 onPointerDown={(event) => {
-                  if (
-                    fuelSelection === null &&
-                    coinChoice === null &&
-                    preserveSelection === null
-                  )
+                  if (fuelSelection === null && coinChoice === null && preserveSelection === null)
                     beginDrag(event, coin, { kind: "hand" });
                 }}
                 onPointerMove={moveDrag}
@@ -3893,11 +3372,7 @@ const CombatBoard = ({
 
       {dragging ? (
         <OverlayPortal layer="drag">
-          <div
-            aria-hidden="true"
-            className="drag-proxy"
-            style={{ left: drag.x, top: drag.y }}
-          >
+          <div aria-hidden="true" className="drag-proxy" style={{ left: drag.x, top: drag.y }}>
             <CoinDisc coin={drag.coin} state={state} />
           </div>
         </OverlayPortal>
@@ -3929,6 +3404,8 @@ interface UnitPanelProps {
   overheat?: boolean;
   weaponOutput?: number;
   remiseCharges?: number;
+  bloodSwordPower?: number;
+  bloodSwordInvestment?: number;
 }
 
 const UnitPanel = ({
@@ -3954,23 +3431,17 @@ const UnitPanel = ({
   overheat = false,
   weaponOutput,
   remiseCharges,
+  bloodSwordPower,
+  bloodSwordInvestment,
 }: UnitPanelProps) => (
   <div
     className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
     onClick={targeting ? onTarget : undefined}
-    style={
-      vfx.has(`heal-${unitKey}`) || vfx.has(`overheat-${unitKey}`)
-        ? feedbackPulse
-        : undefined
-    }
+    style={vfx.has(`heal-${unitKey}`) || vfx.has(`overheat-${unitKey}`) ? feedbackPulse : undefined}
   >
     <div
       className={`unit-plate ${vfx.has(`wither-${side}`) ? "vfx-wither" : ""}`}
-      style={
-        vfx.has(`frostbite-${unitKey}`) || vfx.has(`shock-${unitKey}`)
-          ? feedbackPulse
-          : undefined
-      }
+      style={vfx.has(`frostbite-${unitKey}`) || vfx.has(`shock-${unitKey}`) ? feedbackPulse : undefined}
     >
       <div className="plate-row">
         <span className="unit-name">{name}</span>
@@ -3983,20 +3454,14 @@ const UnitPanel = ({
             }}
             term="passive"
           >
-            <em
-              aria-label={`패시브: ${passive.name} — ${passive.description}`}
-              className="passive-chip"
-            >
+            <em aria-label={`패시브: ${passive.name} — ${passive.description}`} className="passive-chip">
               ★ {passive.name}
             </em>
           </Keyword>
         ) : null}
         {block > 0 ? (
           <Keyword term="block" className="chip-keyword">
-            <em
-              aria-label={`방어 ${block}`}
-              className={`block-chip ${vfx.has(`block-${unitKey}`) ? "vfx-pop" : ""}`}
-            >
+            <em aria-label={`방어 ${block}`} className={`block-chip ${vfx.has(`block-${unitKey}`) ? "vfx-pop" : ""}`}>
               <ShieldIcon scale={1.4} />
               {block}
             </em>
@@ -4015,20 +3480,14 @@ const UnitPanel = ({
         ) : null}
         {statusTurns(statuses, "frostbite") > 0 ? (
           <Keyword term="frostbite" className="chip-keyword">
-            <em
-              aria-label={`동상 ${statusTurns(statuses, "frostbite")}턴`}
-              className="frost-chip"
-            >
+            <em aria-label={`동상 ${statusTurns(statuses, "frostbite")}턴`} className="frost-chip">
               동상 {statusTurns(statuses, "frostbite")}
             </em>
           </Keyword>
         ) : null}
         {statusTurns(statuses, "shock") > 0 ? (
           <Keyword term="shock" className="chip-keyword">
-            <em
-              aria-label={`감전 ${statusTurns(statuses, "shock")}턴`}
-              className="shock-chip"
-            >
+            <em aria-label={`감전 ${statusTurns(statuses, "shock")}턴`} className="shock-chip">
               감전 {statusTurns(statuses, "shock")}
             </em>
           </Keyword>
@@ -4041,29 +3500,23 @@ const UnitPanel = ({
           </Keyword>
         ) : null}
         {weaponOutput !== undefined ? (
-          <em
-            aria-label={`병기 출력 ${weaponOutput}/5`}
-            className="passive-chip"
-          >
+          <em aria-label={`병기 출력 ${weaponOutput}/5`} className="passive-chip">
             병기 출력 {weaponOutput}/5
           </em>
         ) : null}
         {remiseCharges !== undefined ? (
-          <em
-            aria-label={
-              remiseCharges > 0 ? "르미즈 사용 가능" : "르미즈 사용됨"
-            }
-            className="passive-chip"
-          >
+          <em aria-label={remiseCharges > 0 ? "르미즈 사용 가능" : "르미즈 사용됨"} className="passive-chip">
             {remiseCharges > 0 ? "르미즈 준비" : "르미즈 사용됨"}
+          </em>
+        ) : null}
+        {bloodSwordPower !== undefined && bloodSwordInvestment !== undefined ? (
+          <em aria-label={`혈마검 ${bloodSwordPower}단계, 투자 ${bloodSwordInvestment}/30`} className="passive-chip">
+            혈마검 {bloodSwordPower}단계 · {bloodSwordInvestment}/30
           </em>
         ) : null}
         {attackBuff > 0 ? (
           <Keyword className="chip-keyword" term="attack-buff">
-            <em
-              aria-label={`버프: 다음 공격 +${attackBuff}`}
-              className="attack-buff-chip"
-            >
+            <em aria-label={`버프: 다음 공격 +${attackBuff}`} className="attack-buff-chip">
               ↑ 공격 +{attackBuff}
             </em>
           </Keyword>
@@ -4079,10 +3532,7 @@ const UnitPanel = ({
       >
         <HeartIcon scale={1.4} />
         <div className="hp-track">
-          <div
-            className="hp-fill"
-            style={{ width: `${Math.max(0, (hp / maxHp) * 100)}%` }}
-          />
+          <div className="hp-fill" style={{ width: `${Math.max(0, (hp / maxHp) * 100)}%` }} />
         </div>
         <strong className="hp-num">
           {hp}/{maxHp}
@@ -4091,20 +3541,12 @@ const UnitPanel = ({
     </div>
     {intent !== undefined ? intent : null}
     <button
-      aria-label={
-        targeting
-          ? `${name} 대상 ${targetSelected ? "선택됨" : "선택"}`
-          : `${name} 스프라이트`
-      }
+      aria-label={targeting ? `${name} 대상 ${targetSelected ? "선택됨" : "선택"}` : `${name} 스프라이트`}
       aria-pressed={targeting ? targetSelected : undefined}
       className="sprite"
       disabled={!targeting}
       type="button"
-      data-sprite-fallback={
-        sprite.fallbackFor === undefined
-          ? undefined
-          : String(sprite.fallbackFor)
-      }
+      data-sprite-fallback={sprite.fallbackFor === undefined ? undefined : String(sprite.fallbackFor)}
       onClick={(event) => {
         event.stopPropagation();
         onTarget?.();
@@ -4120,11 +3562,7 @@ const UnitPanel = ({
       />
     </button>
     {floats
-      .filter(
-        (item) =>
-          item.target === side &&
-          (side === "player" || item.enemy === enemyIndex),
-      )
+      .filter((item) => item.target === side && (side === "player" || item.enemy === enemyIndex))
       .map((item) => (
         <b className={`float-text kind-${item.kind}`} key={item.id}>
           {item.text}

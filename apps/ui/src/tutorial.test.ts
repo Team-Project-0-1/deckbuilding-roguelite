@@ -34,28 +34,54 @@ describe("activeTutorialTip", () => {
     );
     const state = { ...raw, zones: { ...raw.zones, hand: basicsOnly } };
     const seen = new Set(["basic-loop"]);
+    expect(activeTutorialTip(state, contentDb, seen, false)).toBe("turn-flow");
+    const fundamentalsSeen = new Set(["basic-loop", "turn-flow"]);
+    expect(activeTutorialTip(state, contentDb, fundamentalsSeen, false)).toBe("piles");
+    const basicsSeen = new Set(["basic-loop", "turn-flow", "piles"]);
     // 기본 코인만 든 손 + 쿨다운 없음 → 아무 팁도 없다
-    expect(activeTutorialTip(state, contentDb, seen, false)).toBeNull();
+    expect(activeTutorialTip(state, contentDb, basicsSeen, false)).toBeNull();
     // 쿨다운 진입 관찰 → cooldown 팁
     const cooled = {
       ...state,
-      slots: state.slots.map((slot, index) =>
-        index === 0 ? { ...slot, cooldownRemaining: 1 } : slot,
-      ),
+      slots: state.slots.map((slot, index) => (index === 0 ? { ...slot, cooldownRemaining: 1 } : slot)),
     };
-    expect(activeTutorialTip(cooled, contentDb, seen, false)).toBe("cooldown");
+    expect(activeTutorialTip(cooled, contentDb, basicsSeen, false)).toBe("cooldown");
+  });
+
+  it("보존된 동전이 손에 들어오면 보존 팁을 보여준다", () => {
+    const raw = freshCombat();
+    const first = raw.zones.hand[0];
+    expect(first).toBeDefined();
+    const state = {
+      ...raw,
+      coins: {
+        ...raw.coins,
+        [Number(first)]: { ...raw.coins[Number(first)]!, preserved: true },
+      },
+    };
+    const seen = new Set(["basic-loop", "turn-flow", "piles", "cooldown", "element-coin", "two-sided"]);
+    expect(activeTutorialTip(state, contentDb, seen, false)).toBe("preserve");
   });
 
   it("소비 연료 선택이 열리면 consume 팁이 뜬다", () => {
     const state = freshCombat();
-    const seen = new Set(["basic-loop", "cooldown", "element-coin", "two-sided"]);
+    const seen = new Set(["basic-loop", "turn-flow", "piles", "cooldown", "element-coin", "two-sided", "preserve"]);
     expect(activeTutorialTip(state, contentDb, seen, true)).toBe("consume");
     expect(activeTutorialTip(state, contentDb, seen, false)).toBeNull();
   });
 
   it("모든 팁을 보면 아무것도 뜨지 않는다", () => {
     const state = freshCombat();
-    const seen = new Set(["basic-loop", "cooldown", "element-coin", "two-sided", "consume"]);
+    const seen = new Set([
+      "basic-loop",
+      "turn-flow",
+      "piles",
+      "cooldown",
+      "element-coin",
+      "two-sided",
+      "preserve",
+      "consume",
+    ]);
     expect(activeTutorialTip(state, contentDb, seen, true)).toBeNull();
   });
 });

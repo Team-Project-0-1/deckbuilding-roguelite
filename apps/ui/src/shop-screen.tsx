@@ -41,6 +41,7 @@ interface ShopScreenProps {
   /** 구매 확정 대기 중인 스킬 옵션 인덱스 — 장착/교체 슬롯 선택 단계 (P7 8슬롯·빈 슬롯) */
   skillPick: number | null;
   slotLabels: string[];
+  lockedSlots: boolean[];
   onBuyCoin: (index: number) => void;
   onBuyPassive: (index: number) => void;
   onPickSkill: (index: number) => void;
@@ -60,6 +61,7 @@ export const ShopScreen = ({
   rejection,
   skillPick,
   slotLabels,
+  lockedSlots,
   onBuyCoin,
   onBuyPassive,
   onPickSkill,
@@ -113,7 +115,9 @@ export const ShopScreen = ({
               onClick={() => onBuyPassive(index)}
               type="button"
             >
-              <span aria-hidden="true" className="passive-mark">★</span>
+              <span aria-hidden="true" className="passive-mark">
+                ★
+              </span>
               <span className="shop-item-name">
                 {offer.name} <small>{offer.description}</small>
               </span>
@@ -155,20 +159,17 @@ export const ShopScreen = ({
                 <button
                   className="shop-item"
                   data-testid={`shop-replace-slot-${slot}`}
+                  disabled={lockedSlots[slot] === true}
                   onClick={() => onConfirmSkill(slot)}
                   type="button"
                 >
                   슬롯 {slot + 1} · {label}
+                  {lockedSlots[slot] === true ? " · 고유 스킬 · 교체 불가" : ""}
                 </button>
               </li>
             ))}
           </ul>
-          <button
-            className="secondary-action"
-            data-testid="shop-skill-cancel"
-            onClick={onCancelSkill}
-            type="button"
-          >
+          <button className="secondary-action" data-testid="shop-skill-cancel" onClick={onCancelSkill} type="button">
             선택 취소
           </button>
         </div>

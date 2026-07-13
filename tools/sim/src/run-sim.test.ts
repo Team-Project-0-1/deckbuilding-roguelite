@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  M6_BUILD_POLICIES,
-  resolveBuildPolicy,
-  simulateRun,
-} from './run-sim';
+import { M6_BUILD_POLICIES, resolveBuildPolicy, simulateRun } from './run-sim';
 
 describe('M5 full-run simulator', () => {
   it('produces a byte-equivalent normalized summary for the same seed', () => {
@@ -28,7 +24,7 @@ describe('M5 full-run simulator', () => {
   });
 
   it('completes the deterministic generated-graph run with boundary state intact', () => {
-    // P11 재고정 (1.5.0-p11 결속): 냉기 도적 최신 스킬·보존 규칙을 포함한 결정론 런 골든.
+    // P12 재고정 (1.6.0-blood 결속): 기본+대표 속성 전용 동전 보상 정책을 포함한 결정론 런 골든.
     // warrior 시작 셋 = jab·fist-guard·burning-fist·inner-passion + 빈 슬롯 4(null).
     // seed 42 fight-first는 10번째 전투 후 패배한다 — balance-provisional 관측치
     // (baseline 정책 우선순위가 신규 격투 스킬 ID를 모른다는 한계 포함, 백로그 보고).
@@ -59,8 +55,28 @@ describe('M5 full-run simulator', () => {
       combatsCompleted: 10,
       turnsPerCombat: [3, 3, 4, 2, 3, 3, 3, 4, 4, 3], // P10 화염 전사 시작 세트 반영 결정론 골든 (balance-provisional)
       carriedHp: 0,
-      finalBag: ["basic", "basic", "basic", "basic", "basic", "basic", "basic", "basic", "fire", "fire", "fire", "fire", "basic", "fire", "fire", "fire", "basic", "basic", "basic"],
-      finalEquippedSkills: ["jab", "fist-guard", "burning-fist", "flame-hook", "null", "null", "null", "conflagration"],
+      finalBag: [
+        'basic',
+        'basic',
+        'basic',
+        'basic',
+        'basic',
+        'basic',
+        'basic',
+        'basic',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire',
+        'fire'
+      ],
+      finalEquippedSkills: ['jab', 'fist-guard', 'burning-fist', 'flame-hook', 'null', 'null', 'null', 'conflagration'],
       encounterOrder: [
         ['raider'],
         ['gatekeeper'],
@@ -81,17 +97,11 @@ describe('M5 full-run simulator', () => {
 describe('build policy resolution regressions', () => {
   it('keeps legacy variant coin priority when no explicit build is given (M6 byte invariance)', () => {
     // basic-first가 fire-build로 흡수되면 M6 CRN 의미가 깨진다 — variant 우선순위 보존
-    expect([
-      ...resolveBuildPolicy('warrior', 'basic-first').coinRewardPriority,
-    ]).toEqual(['basic', 'mana', 'fire']);
+    expect([...resolveBuildPolicy('warrior', 'basic-first').coinRewardPriority]).toEqual(['basic', 'mana', 'fire']);
     // baseline은 fire-build와 완전 동일 (레거시 바이트 불변)
-    expect(resolveBuildPolicy('warrior', 'baseline')).toEqual(
-      M6_BUILD_POLICIES['fire-build'],
-    );
+    expect(resolveBuildPolicy('warrior', 'baseline')).toEqual(M6_BUILD_POLICIES['fire-build']);
     // 명시 지정이 항상 이긴다
-    expect(resolveBuildPolicy('guardian', 'baseline', 'fire-build').id).toBe(
-      'fire-build',
-    );
+    expect(resolveBuildPolicy('guardian', 'baseline', 'fire-build').id).toBe('fire-build');
     expect(resolveBuildPolicy('guardian', 'baseline').id).toBe('mana-build');
     expect(resolveBuildPolicy('sorcerer', 'baseline').id).toBe('lightning-build');
     expect(resolveBuildPolicy('frost-knight', 'baseline').id).toBe('frost-build');
@@ -106,9 +116,7 @@ describe('build policy resolution regressions', () => {
       expect(manaCount).toBeGreaterThan(2);
     } else {
       // 시드가 조기 패배하면 회귀 검증력이 없다 — 시드를 바꿔야 한다
-      expect.fail(
-        `seed GUARDIAN-BUILD-REG finished only ${summary.combatsCompleted} combats — pick a longer-surviving seed`,
-      );
+      expect.fail(`seed GUARDIAN-BUILD-REG finished only ${summary.combatsCompleted} combats — pick a longer-surviving seed`);
     }
   });
 });

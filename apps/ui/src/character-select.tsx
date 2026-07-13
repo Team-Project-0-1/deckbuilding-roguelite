@@ -1,10 +1,4 @@
-import type {
-  CharacterDef,
-  CharacterId,
-  CoinDefId,
-  ContentDb,
-  EffectAtom,
-} from "@game/core";
+import type { CharacterDef, CharacterId, CoinDefId, ContentDb, EffectAtom } from "@game/core";
 import { AtlasSprite } from "./AtlasSprite";
 import type { SpriteManifest } from "./AtlasSprite";
 
@@ -24,9 +18,7 @@ const elementKo = (element: string): string => {
 
 const coinName = (coin: CoinDefId, db: ContentDb): string => {
   const element = db.coins[String(coin)]?.element;
-  return element === null || element === undefined
-    ? "기본"
-    : elementKo(element);
+  return element === null || element === undefined ? "기본" : elementKo(element);
 };
 
 const describeEffect = (effect: EffectAtom, db: ContentDb): string => {
@@ -34,12 +26,7 @@ const describeEffect = (effect: EffectAtom, db: ContentDb): string => {
   if (effect.kind === "block") return `방어 ${effect.amount}`;
   if (effect.kind === "selfDamage") return `자신 피해 ${effect.amount}`;
   if (effect.kind === "addCoin") {
-    const zone =
-      effect.zone === "draw"
-        ? "드로우 더미"
-        : effect.zone === "discard"
-          ? "버림 더미"
-          : "손";
+    const zone = effect.zone === "draw" ? "드로우 더미" : effect.zone === "discard" ? "버림 더미" : "손";
     // 특성이 만드는 코인은 임시(이번 전투 한정) — 발동 시점·수명을 함께 명시한다
     return `${zone}에 임시 ${coinName(effect.coin, db)} 코인 ${effect.count}개 추가`;
   }
@@ -48,14 +35,11 @@ const describeEffect = (effect: EffectAtom, db: ContentDb): string => {
     return `${target}에게 ${effect.status} ${effect.stacks}`;
   }
   if (effect.kind === "addTurnTrigger") return "턴 트리거 추가";
-  if (effect.kind === "grantElement")
-    return `기본 코인을 ${elementKo(effect.element)} 코인으로 취급`;
+  if (effect.kind === "grantElement") return `기본 코인을 ${elementKo(effect.element)} 코인으로 취급`;
   // P6 — 소환/참조 원자 (마도기사 등)
   if (effect.kind === "summonEquipment") {
     const name =
-      effect.equipment === "chosen"
-        ? "선택 장비"
-        : (db.equipment ?? {})[String(effect.equipment)]?.name ?? "장비";
+      effect.equipment === "chosen" ? "선택 장비" : ((db.equipment ?? {})[String(effect.equipment)]?.name ?? "장비");
     return `${name} 소환 (지속 ${effect.duration})`;
   }
   if (effect.kind === "empowerSummons") return `소환 장비 강화 +${effect.amount}`;
@@ -70,10 +54,7 @@ const describeEffect = (effect: EffectAtom, db: ContentDb): string => {
   return "효과";
 };
 
-export const characterTraitDescription = (
-  character: CharacterDef,
-  db: ContentDb,
-): string => {
+export const characterTraitDescription = (character: CharacterDef, db: ContentDb): string => {
   const timing = character.trait.hook === "combatStart" ? "전투 시작 시 " : "매 턴 시작 시 ";
   if (character.trait.mechanic === "remise") {
     return "매 턴 첫 플립 스킬의 첫 동전이 앞면이면 재플립합니다. 다시 앞면이면 같은 스킬을 비용 없이 한 번 재사용합니다.";
@@ -81,18 +62,15 @@ export const characterTraitDescription = (
   if (character.trait.mechanic === "preserveHand") {
     return "턴 종료 시 손의 동전 1개를 다음 턴까지 보존합니다.";
   }
+  if (character.trait.mechanic === "bloodSword") {
+    return "전투 시작 시 체력 1을 혈마검에 투자합니다. 투자량은 런 동안 유지되며 5단계까지 성장합니다.";
+  }
   return character.trait.effects.length === 0
     ? "효과 없음"
-    : timing +
-        character.trait.effects
-          .map((effect) => describeEffect(effect, db))
-          .join(" · ");
+    : timing + character.trait.effects.map((effect) => describeEffect(effect, db)).join(" · ");
 };
 
-const bagSummary = (
-  character: CharacterDef,
-  db: ContentDb,
-): { coin: CoinDefId; name: string; count: number }[] => {
+const bagSummary = (character: CharacterDef, db: ContentDb): { coin: CoinDefId; name: string; count: number }[] => {
   const counts = new Map<string, { coin: CoinDefId; name: string; count: number }>();
   for (const coin of character.startingBag) {
     const id = String(coin);
@@ -114,13 +92,7 @@ interface CharacterSelectProps {
   onSelect: (character: CharacterId) => void;
 }
 
-export const CharacterSelect = ({
-  artByCharacter,
-  characters,
-  contentDb,
-  seed,
-  onSelect,
-}: CharacterSelectProps) => (
+export const CharacterSelect = ({ artByCharacter, characters, contentDb, seed, onSelect }: CharacterSelectProps) => (
   <section
     aria-label="캐릭터 선택"
     aria-modal="true"
@@ -180,9 +152,7 @@ export const CharacterSelect = ({
                   <b>시작 스킬</b>
                   <span className="character-skills">
                     {character.startingSkills.map((skill) => (
-                      <i key={String(skill)}>
-                        {contentDb.skills[String(skill)]?.name ?? String(skill)}
-                      </i>
+                      <i key={String(skill)}>{contentDb.skills[String(skill)]?.name ?? String(skill)}</i>
                     ))}
                   </span>
                 </span>

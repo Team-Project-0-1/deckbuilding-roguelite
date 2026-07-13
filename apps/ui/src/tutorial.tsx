@@ -8,24 +8,24 @@ import { effectiveElements } from "@game/core";
 export const TUTORIAL_STORAGE_KEY = "deckbuilding-roguelite.tutorial.v1";
 
 export type TutorialTipId =
-  | "basic-loop"
-  | "cooldown"
-  | "element-coin"
-  | "two-sided"
-  | "consume";
+  "basic-loop" | "turn-flow" | "piles" | "cooldown" | "element-coin" | "two-sided" | "preserve" | "consume";
 
 // 순서 = 우선순위 (한 번에 하나만 노출)
 const TIP_COPY: Record<TutorialTipId, string> = {
   "basic-loop":
-    "코인을 눌러 고르고 스킬 카드에 장전한 뒤, 카드 제목을 누르면 사용합니다. 코인이 남는 한 계속 쓸 수 있어요.",
+    "턴이 시작되면 동전 5개를 뽑습니다. 코스트만큼 동전을 장전하고 스킬 제목을 누르면 각 동전이 플립됩니다.",
+  "turn-flow": "원하는 때에 턴을 끝낼 수 있습니다. 턴 종료 후 적은 미리 표시한 의도에 따라 행동합니다.",
+  piles:
+    "사용한 동전과 턴 종료 때 남은 동전은 버림 더미로 갑니다. 뽑을 더미가 부족하면 버림 더미를 섞어 계속 뽑습니다.",
   cooldown:
     "사용한 스킬은 쿨다운 동안 대기합니다 — 배지의 '쿨 N'이 남은 턴 수. '반복' 기본기는 같은 턴에도 계속, '전투당 1회'는 다음 전투에 돌아옵니다.",
   "element-coin":
     "속성 코인은 앞면과 뒷면에 서로 다른 효과가 있습니다. 스킬에 장전해 플립하면 나온 면의 효과가 추가로 발동해요.",
   "two-sided":
     "속성 효과의 대상: 공격형은 선택한 적에게, 전체 공격은 모든 적에게 적용됩니다. 방어·회복은 항상 나에게 적용돼요.",
-  consume:
-    "소비 스킬은 속성 동전을 플립하지 않고 즉시 소비합니다. 이때 면 보너스와 속성 효과는 발동하지 않아요.",
+  preserve:
+    "보존된 동전은 턴 종료 때 버리지 않고 다음 턴까지 손패에 남습니다. 사용하면 다른 동전처럼 버림 더미로 이동해요.",
+  consume: "소비 스킬은 속성 동전을 플립하지 않고 즉시 소비합니다. 이때 면 보너스와 속성 효과는 발동하지 않아요.",
 };
 
 const readSeen = (): ReadonlySet<string> => {
@@ -82,12 +82,9 @@ export const activeTutorialTip = (
 ): TutorialTipId | null => {
   const candidates: [TutorialTipId, boolean][] = [
     ["basic-loop", true],
-    [
-      "cooldown",
-      state.slots.some(
-        (slot) => slot.cooldownRemaining > 0 || slot.usedThisCombat,
-      ),
-    ],
+    ["turn-flow", true],
+    ["piles", true],
+    ["cooldown", state.slots.some((slot) => slot.cooldownRemaining > 0 || slot.usedThisCombat)],
     [
       "element-coin",
       state.zones.hand.some((coin) => {
@@ -104,6 +101,7 @@ export const activeTutorialTip = (
         }),
       ),
     ],
+    ["preserve", state.zones.hand.some((coin) => state.coins[Number(coin)]?.preserved === true)],
     ["consume", fuelSelectionOpen],
   ];
   for (const [tip, active] of candidates) {
@@ -112,11 +110,7 @@ export const activeTutorialTip = (
   return null;
 };
 
-export function TutorialStrip(props: {
-  state: CombatState;
-  db: ContentDb;
-  fuelSelectionOpen: boolean;
-}) {
+export function TutorialStrip(props: { state: CombatState; db: ContentDb; fuelSelectionOpen: boolean }) {
   const seenKey = useSyncExternalStore(subscribe, snapshot, () => "");
   void seenKey;
   const seen = loadCache();
@@ -128,12 +122,7 @@ export function TutorialStrip(props: {
   return (
     <div aria-live="polite" className="tutorial-strip" data-testid={`tutorial-${tip}`}>
       <span className="tutorial-copy">{TIP_COPY[tip]}</span>
-      <button
-        aria-label="안내 닫기"
-        className="tutorial-dismiss"
-        type="button"
-        onClick={dismiss}
-      >
+      <button aria-label="안내 닫기" className="tutorial-dismiss" type="button" onClick={dismiss}>
         확인
       </button>
     </div>

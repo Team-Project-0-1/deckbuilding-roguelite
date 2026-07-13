@@ -3,6 +3,7 @@ import {
   RUN_ENCOUNTERS,
   RUN_SAVE_VERSION,
   chooseCoinReward,
+  chooseRunNode,
   createRun,
   settleRunCombat,
   startRunCombat,
@@ -25,15 +26,9 @@ const CONTENT_VERSION = CURRENT_CONTENT_VERSION;
 const LEGACY_CONTENT_VERSION = "0.5.0-m5";
 const P10_CONTENT_VERSION = "1.4.0-p10";
 const STARTING_BAG = [...(contentDb.characters.warrior?.startingBag ?? [])];
-const STARTING_SKILLS = [
-  ...(contentDb.characters.warrior?.startingSkills ?? []),
-];
-const GUARDIAN_STARTING_BAG = [
-  ...(contentDb.characters.guardian?.startingBag ?? []),
-];
-const GUARDIAN_STARTING_SKILLS = [
-  ...(contentDb.characters.guardian?.startingSkills ?? []),
-];
+const STARTING_SKILLS = [...(contentDb.characters.warrior?.startingSkills ?? [])];
+const GUARDIAN_STARTING_BAG = [...(contentDb.characters.guardian?.startingBag ?? [])];
+const GUARDIAN_STARTING_SKILLS = [...(contentDb.characters.guardian?.startingSkills ?? [])];
 
 // P7 D2 — 세이브 v7: 장착 슬롯 8 고정 (null = 빈 슬롯), 강화 플래그 8칸
 const MAX_SLOTS = 8;
@@ -90,7 +85,7 @@ const rewardsSave = (): RunSave => ({
   attempt: 0,
   phase: "rewards",
   pendingRewards: {
-    coinOptions: ["basic", "fire", "mana"] as never,
+    coinOptions: ["basic", "fire"] as never,
     coinChoiceResolved: false,
     coinRemovalResolved: false,
     skillOptions: ["fire-infusion", "furnace"] as never,
@@ -106,7 +101,7 @@ const combatOneRewardsSave = (): RunSave => ({
   attempt: 0,
   phase: "rewards",
   pendingRewards: {
-    coinOptions: ["basic", "mana", "fire"] as never,
+    coinOptions: ["basic", "fire"] as never,
     coinChoiceResolved: false,
     coinRemovalResolved: false,
     skillOptions: [],
@@ -146,8 +141,7 @@ class MemoryStorage implements StorageLike {
   }
 }
 
-const rawWith = (overrides: Record<string, unknown>): string =>
-  JSON.stringify({ ...readySave(), ...overrides });
+const rawWith = (overrides: Record<string, unknown>): string => JSON.stringify({ ...readySave(), ...overrides });
 const legacyRawWith = (overrides: Record<string, unknown>): string => {
   const legacy = { ...readySave() } as Record<string, unknown>;
   delete legacy.graph;
@@ -158,17 +152,13 @@ const legacyRawWith = (overrides: Record<string, unknown>): string => {
   delete legacy.upgradedSlots;
   return JSON.stringify({ ...legacy, ...overrides });
 };
-const parse = (raw: string): RunSave | null =>
-  parseRunSave(raw, CONTENT_VERSION, contentDb);
+const parse = (raw: string): RunSave | null => parseRunSave(raw, CONTENT_VERSION, contentDb);
 const serialize = (save: RunSave): string => serializeRunSave(save, contentDb);
 
 const exhaustedSkillContext = {
   ...contentDb,
   skills: Object.fromEntries(
-    [...new Set([...STARTING_SKILLS.map(String), "smash"])].map((skill) => [
-      skill,
-      contentDb.skills[skill]!,
-    ]),
+    [...new Set([...STARTING_SKILLS.map(String), "smash"])].map((skill) => [skill, contentDb.skills[skill]!]),
   ),
 };
 
@@ -183,7 +173,7 @@ const fallbackRewardsSave = (
   attempt: 0,
   phase: "rewards",
   pendingRewards: {
-    coinOptions: ["mana", "basic", "fire"] as never,
+    coinOptions: ["basic", "fire"] as never,
     ...flags,
     skillOptions: [],
     skillChoiceResolved: true,
@@ -242,9 +232,7 @@ describe("run save serialization boundary", () => {
       zones: { hand: [1, 2, 3] },
       extraFunction: () => undefined,
     }) as RunSave;
-    const reordered = Object.fromEntries(
-      Object.entries(save).reverse(),
-    ) as unknown as RunSave;
+    const reordered = Object.fromEntries(Object.entries(save).reverse()) as unknown as RunSave;
     const serialized = serialize(save);
 
     expect(serialize(reordered)).toBe(serialized);
@@ -304,9 +292,7 @@ describe("run save serialization boundary", () => {
     expect(parse("{broken")).toBeNull();
     expect(parse(rawWith({ version: RUN_SAVE_VERSION + 1 }))).toBeNull();
     expect(parse(rawWith({ contentVersion: "old-content" }))).toBeNull();
-    expect(
-      parseRunSave(serialize(readySave()), "future-content", contentDb),
-    ).toBeNull();
+    expect(parseRunSave(serialize(readySave()), "future-content", contentDb)).toBeNull();
 
     const unavailable: StorageLike = {
       getItem: () => {
@@ -315,9 +301,7 @@ describe("run save serialization boundary", () => {
       setItem: () => undefined,
       removeItem: () => undefined,
     };
-    expect(() =>
-      loadRun(unavailable, CONTENT_VERSION, contentDb),
-    ).not.toThrow();
+    expect(() => loadRun(unavailable, CONTENT_VERSION, contentDb)).not.toThrow();
     expect(loadRun(unavailable, CONTENT_VERSION, contentDb)).toBeNull();
   });
 
@@ -349,7 +333,7 @@ describe("run save serialization boundary", () => {
     expect(parse(JSON.stringify({ ...p10, contentVersion: CONTENT_VERSION }))).toBeNull();
   });
 
-  it("migrates v3, v2, and v1 saves explicitly to v7 and rejects unknown versions", () => {
+  it("migrates v3, v2, and v1 saves explicitly to the current version and rejects unknown versions", () => {
     // v1 → v2 → v3 → … → v7: 선형 5전투 저장을 레거시 그래프로 감싸고 슬롯 8칸으로 패딩한다
     // (증거 계약 §2 — 명시 마이그레이션). 구세대 저장은 null 슬롯·강화 8칸이 없다.
     // 0.6.0-p3.2 레거시 콘텐츠 버전도 안전 로드 + 현 버전 정규화 (p3.3 가산 확장 — 공허 엣지 근거는 content index 주석)
@@ -379,13 +363,148 @@ describe("run save serialization boundary", () => {
     expect(parse(rawWith({ version: RUN_SAVE_VERSION + 1 }))).toBeNull();
   });
 
+  it("migrates a v7 Blood Spellblade save to v8 with zero Blood Sword investment", () => {
+    const bloodRun = createRun(
+      {
+        contentVersion: CONTENT_VERSION,
+        runSeed: "STORAGE-BLOOD-V7",
+        character: "blood-spellblade" as never,
+      },
+      contentDb,
+    );
+    const legacy = { ...bloodRun, version: 7 } as Record<string, unknown>;
+    delete legacy.bloodSwordInvestment;
+    const migrated = parse(JSON.stringify(legacy));
+    expect(migrated).toMatchObject({
+      version: RUN_SAVE_VERSION,
+      character: "blood-spellblade",
+      bloodSwordInvestment: 0,
+    });
+  });
+
+  it("rejects current-generation off-pool pending rewards and shop offers", () => {
+    const rewardRun = createRun(
+      {
+        contentVersion: CONTENT_VERSION,
+        runSeed: "STORAGE-STRICT-REWARD",
+        character: "warrior" as never,
+      },
+      contentDb,
+    );
+    const started = startRunCombat(rewardRun, contentDb);
+    const rewards = settleRunCombat(started.run, wonCombat(started.combat, started.combat.player.hp), contentDb);
+    expect(parse(serialize(rewards))).toEqual(rewards);
+    expect(
+      parse(
+        JSON.stringify({
+          ...rewards,
+          pendingRewards: {
+            ...rewards.pendingRewards!,
+            coinOptions: ["mana"],
+          },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parse(
+        JSON.stringify({
+          ...rewards,
+          graph: { layers: rewards.graph.layers },
+          pendingRewards: {
+            ...rewards.pendingRewards!,
+            coinOptions: ["mana"],
+          },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parse(
+        JSON.stringify({
+          ...rewards,
+          pendingRewards: {
+            ...rewards.pendingRewards!,
+            skillOptions: ["warding-strike"],
+            skillChoiceResolved: false,
+          },
+        }),
+      ),
+    ).toBeNull();
+
+    let shopRun: RunSave | undefined;
+    for (let attempt = 0; attempt < 100 && shopRun === undefined; attempt += 1) {
+      const candidate = createRun(
+        {
+          contentVersion: CONTENT_VERSION,
+          runSeed: `STORAGE-STRICT-SHOP-${attempt}`,
+          character: "warrior" as never,
+        },
+        contentDb,
+      );
+      const combat = startRunCombat(candidate, contentDb);
+      const settled = settleRunCombat(combat.run, wonCombat(combat.combat, combat.combat.player.hp), contentDb);
+      const choice = chooseCoinReward(settled, null, contentDb);
+      if (choice.phase !== "choose-node") continue;
+      const shopIndex = choice.graph.layers[choice.combatIndex]?.findIndex((node) => node.kind === "shop");
+      if (shopIndex !== undefined && shopIndex >= 0) {
+        shopRun = chooseRunNode(choice, shopIndex, contentDb);
+      }
+    }
+    if (shopRun === undefined || shopRun.pendingShop === undefined) throw new Error("failed to find a generated shop");
+    expect(parse(serialize(shopRun))).toEqual(shopRun);
+    expect(
+      parse(
+        JSON.stringify({
+          ...shopRun,
+          pendingShop: {
+            ...shopRun.pendingShop,
+            coinOptions: ["mana"],
+            coinPrices: [70],
+          },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parse(
+        JSON.stringify({
+          ...shopRun,
+          pendingShop: {
+            ...shopRun.pendingShop,
+            skillOptions: ["warding-strike"],
+            skillPrices: [50],
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a save that removes the Blood Spellblade's locked unique skill", () => {
+    const bloodRun = createRun(
+      {
+        contentVersion: CONTENT_VERSION,
+        runSeed: "STORAGE-BLOOD-LOCK",
+        character: "blood-spellblade" as never,
+      },
+      contentDb,
+    );
+    const offeringSlot = bloodRun.equippedSkills.findIndex((skill) => String(skill) === "blood-offering-skill");
+    expect(offeringSlot).toBeGreaterThanOrEqual(0);
+    const equippedSkills = [...bloodRun.equippedSkills];
+    equippedSkills[offeringSlot] = null;
+
+    expect(
+      parse(
+        JSON.stringify({
+          ...bloodRun,
+          equippedSkills,
+          shopPurchasedSkills: 1,
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("keeps non-combat layers from inflating bag and skill bounds", () => {
     const graph = {
-      layers: [
-        legacyGraph().layers[0]!,
-        [{ id: "shop-1", kind: "shop" as const }],
-        legacyGraph().layers[1]!,
-      ],
+      layers: [legacyGraph().layers[0]!, [{ id: "shop-1", kind: "shop" as const }], legacyGraph().layers[1]!],
     };
     const save: RunSave = {
       ...readySave(),
@@ -399,11 +518,7 @@ describe("run save serialization boundary", () => {
       restUpgrades: 0,
       combatIndex: 2,
       bag: [...STARTING_BAG, "fire", "mana"] as never,
-      equippedSkills: padSkills([
-        ...STARTING_SKILLS,
-        "smash",
-        "furnace",
-      ]) as never,
+      equippedSkills: padSkills([...STARTING_SKILLS, "smash", "furnace"]) as never,
     };
     expect(parse(JSON.stringify(save))).toBeNull();
     expect(
@@ -436,8 +551,8 @@ describe("run save serialization boundary", () => {
       phase: "shop",
       equippedSkills: [...PADDED_STARTING_SKILLS] as never,
       pendingShop: {
-        coinOptions: ["basic", "fire", "mana"] as never,
-        coinPrices: [25, 50, 70],
+        coinOptions: ["basic", "fire"] as never,
+        coinPrices: [25, 50],
         skillOptions: ["smash", "furnace", "conflagration"] as never,
         skillPrices: [50, 80, 120],
       },
@@ -447,7 +562,7 @@ describe("run save serialization boundary", () => {
       parse(
         JSON.stringify({
           ...shopSave,
-          pendingShop: { ...shopSave.pendingShop!, coinPrices: [25, 25, 70] },
+          pendingShop: { ...shopSave.pendingShop!, coinPrices: [25, 25] },
         }),
       ),
     ).toBeNull();
@@ -455,7 +570,10 @@ describe("run save serialization boundary", () => {
       parse(
         JSON.stringify({
           ...shopSave,
-          pendingShop: { ...shopSave.pendingShop!, coinOptions: ["basic", "basic"] },
+          pendingShop: {
+            ...shopSave.pendingShop!,
+            coinOptions: ["basic", "basic"],
+          },
         }),
       ),
     ).toBeNull();
@@ -466,23 +584,13 @@ describe("run save serialization boundary", () => {
   it("accepts an exhausted shared-pool save even when exclusive skills exist", () => {
     // 감시자 발견 회귀: 검증기가 exclusiveTo를 무시하면 전용 스킬을 가용으로 오판해
     // 공용 풀 소진(B2 fallback) 저장을 거부한다 — 코어와 같은 술어를 공유해야 한다
-    const shared = [
-      ...(contentDb.characters.warrior?.startingSkills ?? []).map(String),
-      "smash",
-    ];
-    const exclusiveIds = [
-      "warding-strike",
-      "mana-bulwark",
-      "shield-reprisal",
-      "mana-well",
-    ];
+    const shared = [...(contentDb.characters.warrior?.startingSkills ?? []).map(String), "smash"];
+    const exclusiveIds = ["warding-strike", "mana-bulwark", "shield-reprisal", "mana-well"];
     const context = {
       coins: contentDb.coins,
       characters: contentDb.characters,
       enemies: contentDb.enemies,
-      skills: Object.fromEntries(
-        [...shared, ...exclusiveIds].map((id) => [id, contentDb.skills[id]]),
-      ),
+      skills: Object.fromEntries([...shared, ...exclusiveIds].map((id) => [id, contentDb.skills[id]])),
     } as typeof contentDb;
     const save = fallbackRewardsSave({
       coinChoiceResolved: false,
@@ -490,18 +598,13 @@ describe("run save serialization boundary", () => {
     });
     // 공용 미보유 = smash 1종뿐 (<2) → fallback 단계가 정상 수용돼야 한다.
     // 전용 4종이 섞여도 판정이 달라지면(가용 5종 오판 → 정상 스킬 단계 요구) 회귀다.
-    expect(
-      parseRunSave(serializeRunSave(save, context), CONTENT_VERSION, context),
-    ).toEqual(save);
+    expect(parseRunSave(serializeRunSave(save, context), CONTENT_VERSION, context)).toEqual(save);
   });
 
   it.each([
     ["unknown character", { character: "mage" }],
     ["unknown bag coin", { bag: [...readySave().bag, "ash"] }],
-    [
-      "unknown equipped skill",
-      { equippedSkills: padSkills([...STARTING_SKILLS, "meteor"]) },
-    ],
+    ["unknown equipped skill", { equippedSkills: padSkills([...STARTING_SKILLS, "meteor"]) }],
     [
       "unknown coin offer",
       {
@@ -531,27 +634,10 @@ describe("run save serialization boundary", () => {
   });
 
   it.each([
-    [
-      "duplicate coin offers",
-      ["basic", "fire", "fire"],
-      ["fire-infusion", "furnace"],
-    ],
-    ["two coin offers", ["basic", "fire"], ["fire-infusion", "furnace"]],
-    [
-      "four coin offers",
-      ["basic", "fire", "mana", "basic"],
-      ["fire-infusion", "furnace"],
-    ],
-    [
-      "duplicate skill offers",
-      ["basic", "fire", "mana"],
-      ["furnace", "furnace"],
-    ],
-    [
-      "three skill offers",
-      ["basic", "fire", "mana"],
-      ["fire-infusion", "furnace", "ignite"],
-    ],
+    ["duplicate coin offers", ["basic", "fire", "fire"], ["fire-infusion", "furnace"]],
+    ["four coin offers", ["basic", "fire", "mana", "basic"], ["fire-infusion", "furnace"]],
+    ["duplicate skill offers", ["basic", "fire", "mana"], ["furnace", "furnace"]],
+    ["three skill offers", ["basic", "fire", "mana"], ["fire-infusion", "furnace", "ignite"]],
   ])("rejects %s", (_label, coinOptions, skillOptions) => {
     expect(
       parse(
@@ -580,10 +666,7 @@ describe("run save serialization boundary", () => {
     ["zero max HP", { maxHp: 0 }],
     ["empty bag", { bag: [] }],
     ["implausibly small bag", { bag: ["basic"] }],
-    [
-      "implausibly large bag",
-      { bag: Array.from({ length: 20 }, () => "basic") },
-    ],
+    ["implausibly large bag", { bag: Array.from({ length: 20 }, () => "basic") }],
     ["invalid bag entry", { bag: ["basic", ""] }],
     // P7 D2 — 장착 배열은 8칸 고정 (짧은 배열은 v7 저장으로 무효)
     ["wrong equipped skill count", { equippedSkills: ["jab"] }],
@@ -611,13 +694,16 @@ describe("run save serialization boundary", () => {
     ["missing graph", { graph: undefined }],
     ["empty graph", { graph: { layers: [] } }],
     ["empty graph layer", { graph: { layers: [[], [], [], [], []] } }],
-    ["duplicate graph node id", {
-      graph: {
-        layers: legacyGraph().layers.map((layer, index) => [
-          { ...layer[0]!, id: index < 2 ? "duplicate" : layer[0]!.id },
-        ]),
+    [
+      "duplicate graph node id",
+      {
+        graph: {
+          layers: legacyGraph().layers.map((layer, index) => [
+            { ...layer[0]!, id: index < 2 ? "duplicate" : layer[0]!.id },
+          ]),
+        },
       },
-    }],
+    ],
     ["missing node choices", { nodeChoices: undefined }],
     ["short node choices", { nodeChoices: [0, 0, 0, 0] }],
     ["out-of-range node choice", { nodeChoices: [0, 1, 0, 0, 0] }],
@@ -647,9 +733,7 @@ describe("run save serialization boundary", () => {
       "combat node with empty encounter",
       {
         graph: {
-          layers: legacyGraph().layers.map((layer, index) =>
-            index === 0 ? [{ ...layer[0]!, encounter: [] }] : layer,
-          ),
+          layers: legacyGraph().layers.map((layer, index) => (index === 0 ? [{ ...layer[0]!, encounter: [] }] : layer)),
         },
       },
     ],
@@ -667,9 +751,7 @@ describe("run save serialization boundary", () => {
       "event node without eventId",
       {
         graph: {
-          layers: legacyGraph().layers.map((layer, index) =>
-            index === 1 ? [{ id: "evt-1", kind: "event" }] : layer,
-          ),
+          layers: legacyGraph().layers.map((layer, index) => (index === 1 ? [{ id: "evt-1", kind: "event" }] : layer)),
         },
       },
     ],
@@ -697,9 +779,7 @@ describe("run save serialization boundary", () => {
       {
         graph: {
           layers: legacyGraph().layers.map((layer, index) =>
-            index === 1
-              ? [{ id: "shop-1", kind: "shop", encounter: ["raider"] }]
-              : layer,
+            index === 1 ? [{ id: "shop-1", kind: "shop", encounter: ["raider"] }] : layer,
           ),
         },
       },
@@ -734,15 +814,9 @@ describe("run save serialization boundary", () => {
     ["victory before final encounter", { combatIndex: 3, phase: "victory" }],
     ["negative attempt", { attempt: -1 }],
     ["unsafe attempt", { attempt: Number.MAX_SAFE_INTEGER + 1 }],
-    [
-      "nonzero reward attempt",
-      { phase: "rewards", pendingRewards: rewardsSave().pendingRewards },
-    ],
+    ["nonzero reward attempt", { phase: "rewards", pendingRewards: rewardsSave().pendingRewards }],
     ["unknown phase", { phase: "paused" }],
-    [
-      "pending rewards outside reward phase",
-      { pendingRewards: rewardsSave().pendingRewards },
-    ],
+    ["pending rewards outside reward phase", { pendingRewards: rewardsSave().pendingRewards }],
   ])("rejects %s", (_label, overrides) => {
     expect(parse(rawWith(overrides))).toBeNull();
   });
@@ -881,12 +955,7 @@ describe("run save serialization boundary", () => {
         coinRemovalResolved: true,
       },
     };
-    for (const save of [
-      initial,
-      afterCoin,
-      afterRemoval,
-      combatOneRewardsSave(),
-    ]) {
+    for (const save of [initial, afterCoin, afterRemoval, combatOneRewardsSave()]) {
       expect(parse(JSON.stringify(save))).toEqual(save);
     }
   });
@@ -910,20 +979,13 @@ describe("run save serialization boundary", () => {
       ...selectedFallback,
       bag: [...STARTING_BAG, "basic", "fire"] as never,
     };
-    for (const save of [
-      initial,
-      afterNormalCoin,
-      fallbackCoin,
-      skippedFallback,
-    ]) {
+    for (const save of [initial, afterNormalCoin, fallbackCoin, skippedFallback]) {
       const serialized = serializeRunSave(save, exhaustedSkillContext);
-      expect(
-        parseRunSave(serialized, CONTENT_VERSION, exhaustedSkillContext),
-      ).toEqual(save);
+      expect(parseRunSave(serialized, CONTENT_VERSION, exhaustedSkillContext)).toEqual(save);
     }
-    expect(() =>
-      serializeRunSave(selectedFallback, exhaustedSkillContext),
-    ).toThrow("cannot serialize an invalid run save");
+    expect(() => serializeRunSave(selectedFallback, exhaustedSkillContext)).toThrow(
+      "cannot serialize an invalid run save",
+    );
   });
 
   // P6 보상 신스펙: 제거/폴백 단계는 코어가 새 런에서 더 이상 만들지 않는다
@@ -939,19 +1001,11 @@ describe("run save serialization boundary", () => {
       exhaustedSkillContext,
     );
     const first = startRunCombat(created, exhaustedSkillContext);
-    const rewardsStage = settleRunCombat(
-      first.run,
-      wonCombat(first.combat, 64),
-      exhaustedSkillContext,
-    );
+    const rewardsStage = settleRunCombat(first.run, wonCombat(first.combat, 64), exhaustedSkillContext);
     expect(rewardsStage.phase).toBe("rewards");
     expect(rewardsStage.pendingRewards?.coinRemovalResolved).toBe(true);
     expect(
-      parseRunSave(
-        serializeRunSave(rewardsStage, exhaustedSkillContext),
-        CONTENT_VERSION,
-        exhaustedSkillContext,
-      ),
+      parseRunSave(serializeRunSave(rewardsStage, exhaustedSkillContext), CONTENT_VERSION, exhaustedSkillContext),
     ).toEqual(rewardsStage);
 
     const offered = rewardsStage.pendingRewards?.coinOptions[0];
@@ -963,16 +1017,12 @@ describe("run save serialization boundary", () => {
       expect(save.phase).not.toBe("rewards");
       expect(save.pendingRewards).toBeUndefined();
       expect(
-        parseRunSave(
-          serializeRunSave(save, exhaustedSkillContext),
-          CONTENT_VERSION,
-          exhaustedSkillContext,
-        ),
+        parseRunSave(serializeRunSave(save, exhaustedSkillContext), CONTENT_VERSION, exhaustedSkillContext),
       ).toEqual(save);
     }
   });
 
-  it("migrates v5 saves to v7 with P6 defaults + 8-slot padding and round-trips (레거시 단일 막 래핑)", () => {
+  it("migrates v5 saves to the current version with P6 defaults + 8-slot padding and round-trips (레거시 단일 막 래핑)", () => {
     // P6 D1: v5 그래프는 acts 부재 = 단일 레거시 막으로 감싸 진행 중 런을 보존하고,
     // 신규 필드(강화 슬롯·패시브·카운터)는 기본값으로 승격한다.
     // P7 D2: 구세대 장착 배열(null 슬롯 없음)은 v7에서 8칸으로 패딩된다.
@@ -997,13 +1047,13 @@ describe("run save serialization boundary", () => {
     expect(migrated?.treasureOpened).toBe(0);
     expect(migrated?.restHeals).toBe(0);
     expect(migrated?.restUpgrades).toBe(0);
-    // 마이그레이션 결과는 v7 저장으로 라운드트립한다
+    // 마이그레이션 결과는 현재 저장 형식으로 라운드트립한다.
     if (migrated === null) throw new Error("v5 migration failed");
     expect(parse(serialize(migrated))).toEqual(migrated);
   });
 
   // P7 D2 — v6 → v7: 필드 의미 불변, 장착/강화 배열만 8칸 패딩
-  it("migrates v6 saves to v7 by padding slot arrays only", () => {
+  it("migrates v6 saves to the current version by padding slot arrays only", () => {
     const v6 = {
       ...readySave(),
       version: 6,
@@ -1022,13 +1072,7 @@ describe("run save serialization boundary", () => {
       coinChoiceResolved: true,
       coinRemovalResolved: true,
     });
-    expect(
-      parseRunSave(
-        JSON.stringify(invalidFlags),
-        CONTENT_VERSION,
-        exhaustedSkillContext,
-      ),
-    ).toBeNull();
+    expect(parseRunSave(JSON.stringify(invalidFlags), CONTENT_VERSION, exhaustedSkillContext)).toBeNull();
     const duplicateOffers = {
       ...fallbackRewardsSave({
         coinChoiceResolved: false,
@@ -1040,13 +1084,7 @@ describe("run save serialization boundary", () => {
         coinRemovalResolved: true,
       },
     } as RunSave;
-    expect(
-      parseRunSave(
-        JSON.stringify(duplicateOffers),
-        CONTENT_VERSION,
-        exhaustedSkillContext,
-      ),
-    ).toBeNull();
+    expect(parseRunSave(JSON.stringify(duplicateOffers), CONTENT_VERSION, exhaustedSkillContext)).toBeNull();
   });
 
   it("rejects a semantically invalid character context", () => {
@@ -1057,13 +1095,7 @@ describe("run save serialization boundary", () => {
         warrior: { ...contentDb.characters.warrior!, maxHp: 0 },
       },
     };
-    expect(
-      parseRunSave(
-        JSON.stringify(readySave()),
-        CONTENT_VERSION,
-        invalidContext,
-      ),
-    ).toBeNull();
+    expect(parseRunSave(JSON.stringify(readySave()), CONTENT_VERSION, invalidContext)).toBeNull();
 
     const unknownStartCoin = {
       ...contentDb,
@@ -1075,13 +1107,7 @@ describe("run save serialization boundary", () => {
         },
       },
     };
-    expect(
-      parseRunSave(
-        JSON.stringify(readySave()),
-        CONTENT_VERSION,
-        unknownStartCoin,
-      ),
-    ).toBeNull();
+    expect(parseRunSave(JSON.stringify(readySave()), CONTENT_VERSION, unknownStartCoin)).toBeNull();
 
     const duplicateStartSkill = {
       ...contentDb,
@@ -1093,24 +1119,15 @@ describe("run save serialization boundary", () => {
         },
       },
     };
-    expect(
-      parseRunSave(
-        JSON.stringify(readySave()),
-        CONTENT_VERSION,
-        duplicateStartSkill,
-      ),
-    ).toBeNull();
+    expect(parseRunSave(JSON.stringify(readySave()), CONTENT_VERSION, duplicateStartSkill)).toBeNull();
   });
 
   it("refuses to serialize semantic-invalid runtime data", () => {
-    expect(() =>
-      serializeRunSave({ ...readySave(), currentHp: Number.NaN }, contentDb),
-    ).toThrow("cannot serialize an invalid run save");
-    expect(() =>
-      serializeRunSave(
-        { ...readySave(), character: "mage" as never },
-        contentDb,
-      ),
-    ).toThrow("cannot serialize an invalid run save");
+    expect(() => serializeRunSave({ ...readySave(), currentHp: Number.NaN }, contentDb)).toThrow(
+      "cannot serialize an invalid run save",
+    );
+    expect(() => serializeRunSave({ ...readySave(), character: "mage" as never }, contentDb)).toThrow(
+      "cannot serialize an invalid run save",
+    );
   });
 });

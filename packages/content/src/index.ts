@@ -4,8 +4,21 @@ import type { CharacterDef, CoinDef, ContentDb, EnemyDef, EquipmentDef, EventDef
 
 // P3.2 승격: 수호자·마나 스킬·exclusiveTo 시대. m5 콘텐츠는 현 버전의 부분집합이고
 // 기존 수치가 불변이므로 m5 저장은 안전하게 로드(마이그레이션)할 수 있다.
-export const CONTENT_VERSION = '1.5.0-p11';
-export const LEGACY_CONTENT_VERSIONS: readonly string[] = ['1.4.0-p10', '1.3.0-p9', '1.2.0-p7', '1.1.0-p6', '1.0.0-rc.1', '0.10.0-p4.4', '0.9.0-p4', '0.8.0-p3.4', '0.7.0-p3.3', '0.6.0-p3.2', '0.5.0-m5'];
+export const CONTENT_VERSION = '1.6.0-blood';
+export const LEGACY_CONTENT_VERSIONS: readonly string[] = [
+  '1.5.0-p11',
+  '1.4.0-p10',
+  '1.3.0-p9',
+  '1.2.0-p7',
+  '1.1.0-p6',
+  '1.0.0-rc.1',
+  '0.10.0-p4.4',
+  '0.9.0-p4',
+  '0.8.0-p3.4',
+  '0.7.0-p3.3',
+  '0.6.0-p3.2',
+  '0.5.0-m5'
+];
 // p4→p4.4 호환 근거: 이벤트 4종 가산·기존 플레이어/전투 콘텐츠 수치 불변.
 // p3.4→p4 호환 근거: 몬스터 6종 가산뿐(플레이어 콘텐츠·기존 수치 불변)이라 기존 저장의
 // 모든 참조가 유효하다. 신규 적은 신규 조우(P4.2+ 그래프)에서만 등장한다.
@@ -99,7 +112,12 @@ export const skills = {
   'burning-strike': {
     id: skill('burning-strike'),
     name: '불타는 일격',
-    upgrade: { name: '여열', description: '사용 시 임시 화염 코인 1개를 추가로 만든다', patch: { kind: 'addCoinOnUse', coin: coin('fire'), zone: 'discard', count: 1 } },
+    exclusiveTo: character('warrior'),
+    upgrade: {
+      name: '여열',
+      description: '사용 시 임시 화염 코인 1개를 추가로 만든다',
+      patch: { kind: 'addCoinOnUse', coin: coin('fire'), zone: 'discard', count: 1 }
+    },
     type: 'flip',
     rarity: 'common',
     tags: ['attack'],
@@ -114,6 +132,7 @@ export const skills = {
   ignite: {
     id: skill('ignite'),
     name: '점화',
+    exclusiveTo: character('warrior'),
     upgrade: { name: '들불', description: '뒷면 피해 +3 효과 추가', patch: { kind: 'addFaceEffect', face: 'tails', effect: { kind: 'damage', amount: 3 } } },
     type: 'flip',
     rarity: 'common',
@@ -127,6 +146,7 @@ export const skills = {
   'ignite-sword': {
     id: skill('ignite-sword'),
     name: '점화권',
+    exclusiveTo: character('warrior'),
     upgrade: { name: '작열권', description: '피해 +3', patch: { kind: 'baseAmount', index: 0, delta: 3 } },
     type: 'consume',
     rarity: 'advanced',
@@ -141,6 +161,7 @@ export const skills = {
   'flame-rampage': {
     id: skill('flame-rampage'),
     name: '화염 폭주',
+    exclusiveTo: character('warrior'),
     upgrade: { name: '연쇄 폭주', description: '전투당 1회 제한 해제', patch: { kind: 'removeOncePerCombat' } },
     type: 'flip',
     rarity: 'rare',
@@ -155,6 +176,7 @@ export const skills = {
   'flame-sword': {
     id: skill('flame-sword'),
     name: '화염 붕대',
+    exclusiveTo: character('warrior'),
     type: 'consume',
     rarity: 'advanced',
     // 셋업 버프 스킬 — attack 태그면 onAttackSkillResolved가 self 대상으로 발동해
@@ -178,6 +200,7 @@ export const skills = {
   'heart-of-flame': {
     id: skill('heart-of-flame'),
     name: '불의 심장',
+    exclusiveTo: character('warrior'),
     type: 'consume',
     rarity: 'rare',
     tags: ['utility'],
@@ -198,6 +221,7 @@ export const skills = {
   conflagration: {
     id: skill('conflagration'),
     name: '대화재',
+    exclusiveTo: character('warrior'),
     type: 'flip',
     rarity: 'rare',
     tags: ['attack', 'ultimate'],
@@ -226,6 +250,7 @@ export const skills = {
   'fire-infusion': {
     id: skill('fire-infusion'),
     name: '화염 주입',
+    exclusiveTo: character('warrior'),
     type: 'flip',
     rarity: 'advanced',
     tags: ['attack', 'utility'],
@@ -238,6 +263,7 @@ export const skills = {
   furnace: {
     id: skill('furnace'),
     name: '용광로',
+    exclusiveTo: character('warrior'),
     type: 'flip',
     rarity: 'advanced',
     tags: ['attack', 'utility'],
@@ -296,8 +322,7 @@ export const skills = {
     cost: 1,
     base: [{ kind: 'addCoin', coin: coin('mana'), zone: 'discard', count: 1 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 4 }] }
-  }
-  ,
+  },
   // ---- P3.4 술사 전용 (감전·연계 폭딜) — 수치는 기준표 안 임시값, balance-provisional ----
   'spark-strike': {
     id: skill('spark-strike'),
@@ -351,95 +376,230 @@ export const skills = {
   },
   // ── P11 냉기 도적: 보존 동전과 냉기 밀수 빌드 ──
   'ice-claw': {
-    id: skill('ice-claw'), name: '얼음 발톱', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 2,
-    base: [{ kind: 'damage', amount: 8 }, { kind: 'applyStatus', status: 'frostbite', stacks: 2, to: 'target' }],
+    id: skill('ice-claw'),
+    name: '얼음 발톱',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
+    base: [
+      { kind: 'damage', amount: 8 },
+      { kind: 'applyStatus', status: 'frostbite', stacks: 2, to: 'target' }
+    ],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
-    upgrade: { name: '빙점 발톱', description: '코스트 1, 앞면 피해 +5', patch: { kind: 'multi', patches: [
-      { kind: 'costDelta', delta: -1 },
-      { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'damage', amount: 5 } }
-    ] } }
+    upgrade: {
+      name: '빙점 발톱',
+      description: '코스트 1, 앞면 피해 +5',
+      patch: {
+        kind: 'multi',
+        patches: [
+          { kind: 'costDelta', delta: -1 },
+          { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'damage', amount: 5 } }
+        ]
+      }
+    }
   },
   'ice-sleight': {
-    id: skill('ice-sleight'), name: '얼음 밑장빼기', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['utility'], targetType: 'self', cooldown: 2, cost: 2,
+    id: skill('ice-sleight'),
+    name: '얼음 밑장빼기',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 2,
+    cost: 2,
     base: [{ kind: 'nextTurnDraw', count: 1 }],
     heads: { mode: 'any', effects: [{ kind: 'addCoin', coin: coin('frost'), zone: 'draw', count: 1 }] },
-    upgrade: { name: '깊은 밑장', description: '다음 턴 뽑기 +2', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'nextTurnDraw', count: 2 } } }
+    upgrade: {
+      name: '깊은 밑장',
+      description: '다음 턴 뽑기 +2',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'nextTurnDraw', count: 2 } }
+    }
   },
   'frost-mark': {
-    id: skill('frost-mark'), name: '서리 표식', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['attack', 'utility'], targetType: 'single-enemy', cooldown: 1, cost: 1,
-    base: [{ kind: 'damage', amount: 3 }, { kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1 }],
+    id: skill('frost-mark'),
+    name: '서리 표식',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack', 'utility'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
+    base: [
+      { kind: 'damage', amount: 3 },
+      { kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1 }
+    ],
     heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }] },
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
-    upgrade: { name: '남겨진 표식', description: '앞면이면 버림 더미에 임시 냉기 동전 1개', patch: { kind: 'addFaceEffect', face: 'heads', effect: { kind: 'addCoin', coin: coin('frost'), zone: 'discard', count: 1 } } }
+    upgrade: {
+      name: '남겨진 표식',
+      description: '앞면이면 버림 더미에 임시 냉기 동전 1개',
+      patch: { kind: 'addFaceEffect', face: 'heads', effect: { kind: 'addCoin', coin: coin('frost'), zone: 'discard', count: 1 } }
+    }
   },
   'frost-fur-cloak': {
-    id: skill('frost-fur-cloak'), name: '서리털 망토', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('frost-fur-cloak'),
+    name: '서리털 망토',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     base: [{ kind: 'block', amount: 5 }],
     heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }] },
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
     upgrade: { name: '두꺼운 서리털', description: '기본 방어 7', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
   },
   'freezing-incision': {
-    id: skill('freezing-incision'), name: '빙점 절개', exclusiveTo: character('frost-knight'),
-    type: 'consume', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 2,
-    consume: { element: 'frost', count: 3, mode: 'upTo' }, effects: [{ kind: 'damageByConsumed', base: 5, perCoin: 5 }],
-    upgrade: { name: '예리한 빙점', description: '냉기 동전당 피해 6', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damageByConsumed', base: 5, perCoin: 6 } } }
+    id: skill('freezing-incision'),
+    name: '빙점 절개',
+    exclusiveTo: character('frost-knight'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    consume: { element: 'frost', count: 3, mode: 'upTo' },
+    effects: [{ kind: 'damageByConsumed', base: 5, perCoin: 5 }],
+    upgrade: {
+      name: '예리한 빙점',
+      description: '냉기 동전당 피해 6',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damageByConsumed', base: 5, perCoin: 6 } }
+    }
   },
   'emergency-ice-pouch': {
-    id: skill('emergency-ice-pouch'), name: '비상용 얼음주머니', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', oncePerCombat: true, cooldown: 3, cost: 1,
-    base: [{ kind: 'addCoin', coin: coin('frost'), zone: 'hand', count: 2 }, { kind: 'increasePreserveCapacity', count: 1 }],
+    id: skill('emergency-ice-pouch'),
+    name: '비상용 얼음주머니',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    oncePerCombat: true,
+    cooldown: 3,
+    cost: 1,
+    base: [
+      { kind: 'addCoin', coin: coin('frost'), zone: 'hand', count: 2 },
+      { kind: 'increasePreserveCapacity', count: 1 }
+    ],
     upgrade: { name: '재사용 주머니', description: '일회성 제거, 코스트 2, 쿨타임 3', patch: { kind: 'removeOncePerCombat', cooldown: 3, costDelta: 1 } }
   },
   'freeze-dry': {
-    id: skill('freeze-dry'), name: '동결 건조', exclusiveTo: character('frost-knight'),
-    type: 'consume', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'single-enemy', cooldown: 3,
-    consume: { element: 'frost', count: 3, mode: 'all' }, effects: [{ kind: 'damageByConsumed', base: 0, perCoin: 8, frostbittenBonusPerCoin: 2 }],
+    id: skill('freeze-dry'),
+    name: '동결 건조',
+    exclusiveTo: character('frost-knight'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'single-enemy',
+    cooldown: 3,
+    consume: { element: 'frost', count: 3, mode: 'all' },
+    effects: [{ kind: 'damageByConsumed', base: 0, perCoin: 8, frostbittenBonusPerCoin: 2 }],
     upgrade: { name: '급속 건조', description: '최소 소비 3 → 2', patch: { kind: 'costDelta', delta: -1 } }
   },
   'preserved-pickpocket': {
-    id: skill('preserved-pickpocket'), name: '보존품 소매치기', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('preserved-pickpocket'),
+    name: '보존품 소매치기',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     treatPreservedBasicAsElement: 'frost',
-    base: [{ kind: 'damage', amount: 4 }], heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] }, tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
+    base: [{ kind: 'damage', amount: 4 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
     preservedBonus: [{ kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1 }],
-    upgrade: { name: '노련한 소매치기', description: '앞면 피해 +4', patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'damage', amount: 4 } } }
+    upgrade: {
+      name: '노련한 소매치기',
+      description: '앞면 피해 +4',
+      patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'damage', amount: 4 } }
+    }
   },
   'hidden-inner-pocket': {
-    id: skill('hidden-inner-pocket'), name: '숨은 안주머니', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'common', tags: ['defense', 'utility'], targetType: 'single-enemy', cooldown: 2, cost: 1,
-    base: [{ kind: 'block', amount: 3 }, { kind: 'preserveChosenCoin', count: 1 }],
+    id: skill('hidden-inner-pocket'),
+    name: '숨은 안주머니',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense', 'utility'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    cost: 1,
+    base: [
+      { kind: 'block', amount: 3 },
+      { kind: 'preserveChosenCoin', count: 1 }
+    ],
     heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }] },
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
     upgrade: { name: '빈틈없는 안주머니', description: '코스트 0', patch: { kind: 'costDelta', delta: -1 } }
   },
   'trackless-raid': {
-    id: skill('trackless-raid'), name: '발자국 없는 습격', exclusiveTo: character('frost-knight'),
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 2,
-    base: [{ kind: 'damage', amount: 6 }, { kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }],
-    preservedBonus: [{ kind: 'damage', amount: 4 }, { kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }],
-    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] }, tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
+    id: skill('trackless-raid'),
+    name: '발자국 없는 습격',
+    exclusiveTo: character('frost-knight'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
+    base: [
+      { kind: 'damage', amount: 6 },
+      { kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }
+    ],
+    preservedBonus: [
+      { kind: 'damage', amount: 4 },
+      { kind: 'applyStatus', status: 'frostbite', stacks: 1, to: 'target' }
+    ],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] },
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
     upgrade: { name: '흔적 소거', description: '코스트 1', patch: { kind: 'costDelta', delta: -1 } }
   },
   'loot-swap': {
-    id: skill('loot-swap'), name: '장물 바꿔치기', exclusiveTo: character('frost-knight'),
-    type: 'consume', rarity: 'advanced', tags: ['defense', 'utility'], targetType: 'self', cooldown: 2,
-    consume: { element: 'frost', count: 1 }, effects: [{ kind: 'block', amount: 5 }, { kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1, preserve: true }],
+    id: skill('loot-swap'),
+    name: '장물 바꿔치기',
+    exclusiveTo: character('frost-knight'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['defense', 'utility'],
+    targetType: 'self',
+    cooldown: 2,
+    consume: { element: 'frost', count: 1 },
+    effects: [
+      { kind: 'block', amount: 5 },
+      { kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1, preserve: true }
+    ],
     preservedBonus: [{ kind: 'block', amount: 3 }],
     upgrade: { name: '값비싼 교환', description: '기본 방어 8', patch: { kind: 'baseAmount', index: 0, delta: 3 } }
   },
   'subzero-perfect-crime': {
-    id: skill('subzero-perfect-crime'), name: '영하의 완전범죄', exclusiveTo: character('frost-knight'),
-    type: 'consume', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'single-enemy', cooldown: 3,
-    consume: { element: 'frost', count: 1 }, effects: [{ kind: 'damageByTargetFrostbite', base: 6, multiplier: 3, cap: 24 }],
+    id: skill('subzero-perfect-crime'),
+    name: '영하의 완전범죄',
+    exclusiveTo: character('frost-knight'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'single-enemy',
+    cooldown: 3,
+    consume: { element: 'frost', count: 1 },
+    effects: [{ kind: 'damageByTargetFrostbite', base: 6, multiplier: 3, cap: 24 }],
     preservedBonus: [{ kind: 'drawSpecific', coins: [coin('basic'), coin('frost')], count: 1, preserve: true }],
-    upgrade: { name: '완벽한 알리바이', description: '동상 배수 4, 상한 30', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damageByTargetFrostbite', base: 6, multiplier: 4, cap: 30 } } }
-  }
-  ,
+    upgrade: {
+      name: '완벽한 알리바이',
+      description: '동상 배수 4, 상한 30',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damageByTargetFrostbite', base: 6, multiplier: 4, cap: 30 } }
+    }
+  },
   // ---- P3.4 후속: 비시작 전용 보상 스킬 (도달성 게이트 — 각 캐릭터 보상 풀에 최소 1종) ----
   // 수치는 기준표 안 임시값, balance-provisional
   overload: {
@@ -459,50 +619,106 @@ export const skills = {
   },
   // ── P9 번개 결투사: 르미즈 5종 + 감전 처형 5종 ──
   attaque: {
-    id: skill('attaque'), name: '아따끄', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('attaque'),
+    name: '아따끄',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     base: [{ kind: 'damage', amount: 6 }]
   },
   parade: {
-    id: skill('parade'), name: '빠라드', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'common', tags: ['defense', 'utility'], targetType: 'self', cooldown: 2, cost: 2,
+    id: skill('parade'),
+    name: '빠라드',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense', 'utility'],
+    targetType: 'self',
+    cooldown: 2,
+    cost: 2,
     base: [{ kind: 'block', amount: 6 }],
     heads: { mode: 'per', effects: [{ kind: 'draw', count: 1 }] },
     tails: { mode: 'per', effects: [{ kind: 'addCoin', coin: coin('lightning'), zone: 'draw', count: 1 }] }
   },
   fente: {
-    id: skill('fente'), name: '팡트', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('fente'),
+    name: '팡트',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     base: [{ kind: 'damage', amount: 5 }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
     tails: { mode: 'any', effects: [{ kind: 'damage', amount: 1 }] },
     remise: { returnFirstCoinOnReuse: true }
   },
   'parade-riposte': {
-    id: skill('parade-riposte'), name: '파라드-리포스트', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'common', tags: ['attack', 'defense'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('parade-riposte'),
+    name: '파라드-리포스트',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack', 'defense'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     base: [{ kind: 'block', amount: 5 }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] }
   },
   redoublement: {
-    id: skill('redoublement'), name: '레두블망', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 3, cost: 2,
+    id: skill('redoublement'),
+    name: '레두블망',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 3,
+    cost: 2,
     base: [{ kind: 'readyRemise' }],
     heads: { mode: 'any', effects: [{ kind: 'draw', count: 1 }] },
     tails: { mode: 'any', effects: [{ kind: 'addCoin', coin: coin('lightning'), zone: 'discard', count: 1 }] },
-    upgrade: { name: '강화', description: '추가 르미즈 기회 +1 → +2', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'readyRemise', amount: 2 } } }
+    upgrade: {
+      name: '강화',
+      description: '추가 르미즈 기회 +1 → +2',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'readyRemise', amount: 2 } }
+    }
   },
   fleche: {
-    id: skill('fleche'), name: '플레슈', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 2, cost: 2,
-    base: [{ kind: 'damage', amount: 8 }, { kind: 'damageIfReused', amount: 4 }],
+    id: skill('fleche'),
+    name: '플레슈',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    cost: 2,
+    base: [
+      { kind: 'damage', amount: 8 },
+      { kind: 'damageIfReused', amount: 4 }
+    ],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
     tails: { mode: 'any', effects: [{ kind: 'draw', count: 1 }] }
   },
   'attaque-composee': {
-    id: skill('attaque-composee'), name: '아타크 콩포제', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'single-enemy', cooldown: 4, cost: 3,
+    id: skill('attaque-composee'),
+    name: '아타크 콩포제',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'single-enemy',
+    cooldown: 4,
+    cost: 3,
     base: [{ kind: 'damage', amount: 10 }],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
     tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] },
@@ -510,37 +726,80 @@ export const skills = {
     upgrade: { name: '강화', description: '재사용 후 임시 번개 코인 1개 → 2개', patch: { kind: 'setRemiseLightningCount', count: 2 } }
   },
   'charge-mark': {
-    id: skill('charge-mark'), name: '전하 각인', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    id: skill('charge-mark'),
+    name: '전하 각인',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     base: [{ kind: 'damage', amount: 3 }],
     heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'shock', stacks: 1, to: 'target' }] },
     tails: { mode: 'any', effects: [{ kind: 'damageIfTargetShocked', amount: 2 }] },
-    upgrade: { name: '강화', description: '앞면 감전 1 → 2', patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'applyStatus', status: 'shock', stacks: 2, to: 'target' } } }
+    upgrade: {
+      name: '강화',
+      description: '앞면 감전 1 → 2',
+      patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'applyStatus', status: 'shock', stacks: 2, to: 'target' } }
+    }
   },
   'capacitor-shield': {
-    id: skill('capacitor-shield'), name: '축전 방패', exclusiveTo: character('sorcerer'),
-    type: 'consume', rarity: 'common', tags: ['defense'], targetType: 'single-enemy', cooldown: 2,
-    consume: { element: 'lightning', count: 1 }, effects: [{ kind: 'blockPerTargetShock', base: 7, cap: 5 }],
-    upgrade: { name: '강화', description: '기본 방어 7 → 8, 감전 상한 5 → 8', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'blockPerTargetShock', base: 8, cap: 8 } } }
+    id: skill('capacitor-shield'),
+    name: '축전 방패',
+    exclusiveTo: character('sorcerer'),
+    type: 'consume',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    consume: { element: 'lightning', count: 1 },
+    effects: [{ kind: 'blockPerTargetShock', base: 7, cap: 5 }],
+    upgrade: {
+      name: '강화',
+      description: '기본 방어 7 → 8, 감전 상한 5 → 8',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'blockPerTargetShock', base: 8, cap: 8 } }
+    }
   },
   superconduct: {
-    id: skill('superconduct'), name: '과전도', exclusiveTo: character('sorcerer'),
-    type: 'consume', rarity: 'advanced', tags: ['utility'], targetType: 'single-enemy', oncePerCombat: true,
-    consume: { element: 'lightning', count: 2 }, effects: [{ kind: 'doubleTargetShock' }],
+    id: skill('superconduct'),
+    name: '과전도',
+    exclusiveTo: character('sorcerer'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'single-enemy',
+    oncePerCombat: true,
+    consume: { element: 'lightning', count: 2 },
+    effects: [{ kind: 'doubleTargetShock' }],
     upgrade: { name: '강화', description: '일회성 제거, 쿨타임 4', patch: { kind: 'removeOncePerCombat', cooldown: 4 } }
   },
   'overload-flurry': {
-    id: skill('overload-flurry'), name: '과부하 연격', exclusiveTo: character('sorcerer'),
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 2, cost: 2,
+    id: skill('overload-flurry'),
+    name: '과부하 연격',
+    exclusiveTo: character('sorcerer'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    cost: 2,
     base: [{ kind: 'damage', amount: 4 }],
     heads: { mode: 'any', effects: [{ kind: 'applyStatus', status: 'shock', stacks: 2, to: 'target' }] },
     tails: { mode: 'per', effects: [{ kind: 'damageIfTargetShocked', amount: 2 }] },
     upgrade: { name: '강화', description: '기본 피해 4 → 6', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
   },
   'thunder-execution': {
-    id: skill('thunder-execution'), name: '뇌정 처형', exclusiveTo: character('sorcerer'),
-    type: 'consume', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'single-enemy', oncePerCombat: true,
-    consume: { element: 'lightning', count: 3 }, effects: [{ kind: 'executeOrDischargeShock' }],
+    id: skill('thunder-execution'),
+    name: '뇌정 처형',
+    exclusiveTo: character('sorcerer'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'single-enemy',
+    oncePerCombat: true,
+    consume: { element: 'lightning', count: 3 },
+    effects: [{ kind: 'executeOrDischargeShock' }],
     upgrade: { name: '강화', description: '번개 코인 소비 3개 → 2개', patch: { kind: 'costDelta', delta: -1 } }
   },
   'aegis-surge': {
@@ -558,7 +817,12 @@ export const skills = {
   jab: {
     id: skill('jab'),
     name: '정권',
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 0, cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 0,
+    cost: 1,
     exclusiveTo: character('warrior'),
     base: [{ kind: 'damage', amount: 4 }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] },
@@ -567,7 +831,12 @@ export const skills = {
   'fist-guard': {
     id: skill('fist-guard'),
     name: '가드',
-    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'self', cooldown: 0, cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'self',
+    cooldown: 0,
+    cost: 1,
     exclusiveTo: character('warrior'),
     base: [{ kind: 'block', amount: 4 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
@@ -576,34 +845,54 @@ export const skills = {
   'burning-fist': {
     id: skill('burning-fist'),
     name: '불꽃 스트레이트',
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cost: 2,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 2,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'damage', amount: 8 },
       { kind: 'addCoin', coin: coin('fire'), zone: 'discard', count: 1 }
     ],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 3 }] },
-    upgrade: { name: '불꽃 원투', description: '사용 시 임시 화염 코인 1개 추가 생성', patch: { kind: 'addCoinOnUse', coin: coin('fire'), zone: 'discard', count: 1 } }
+    upgrade: {
+      name: '불꽃 원투',
+      description: '사용 시 임시 화염 코인 1개 추가 생성',
+      patch: { kind: 'addCoinOnUse', coin: coin('fire'), zone: 'discard', count: 1 }
+    }
   },
   'flame-hook': {
     id: skill('flame-hook'),
     name: '불씨권',
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 1,
     exclusiveTo: character('warrior'),
-    base: [
-      { kind: 'damage', amount: 5 }
-    ],
-    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }, { kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }] },
+    base: [{ kind: 'damage', amount: 5 }],
+    heads: {
+      mode: 'any',
+      effects: [
+        { kind: 'damage', amount: 2 },
+        { kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }
+      ]
+    },
     elementFaces: [
       { element: 'fire', face: 'heads', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] },
       { element: 'fire', face: 'tails', effects: [{ kind: 'applyStatus', status: 'burn', stacks: 1, to: 'target' }] }
-    ],
+    ]
     // P10: 최신 통합안에서 강화 수치는 미정이다.
   },
   'ember-weave': {
     id: skill('ember-weave'),
     name: '잿불 위빙',
-    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'self', cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'self',
+    cost: 1,
     exclusiveTo: character('warrior'),
     base: [{ kind: 'block', amount: 4 }],
     heads: { mode: 'any', effects: [{ kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 1 }] },
@@ -612,12 +901,21 @@ export const skills = {
       { element: 'fire', face: 'heads', effects: [{ kind: 'block', amount: 1 }] },
       { element: 'fire', face: 'tails', effects: [{ kind: 'block', amount: 1 }] }
     ],
-    upgrade: { name: '흐르는 위빙', description: '앞면 임시 화염 코인 1개 → 2개', patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 2 } } }
+    upgrade: {
+      name: '흐르는 위빙',
+      description: '앞면 임시 화염 코인 1개 → 2개',
+      patch: { kind: 'replaceEffect', section: 'heads', index: 0, effect: { kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 2 } }
+    }
   },
   'second-wind': {
     id: skill('second-wind'),
     name: '들숨 고르기',
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', oncePerCombat: true, cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    oncePerCombat: true,
+    cost: 1,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'block', amount: 4 },
@@ -628,7 +926,12 @@ export const skills = {
   'warrior-flame-rampage': {
     id: skill('warrior-flame-rampage'),
     name: '화염 폭주',
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'all-enemies', oncePerCombat: true, cost: 2,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'all-enemies',
+    oncePerCombat: true,
+    cost: 2,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'addCoin', coin: coin('fire'), zone: 'hand', count: 2 },
@@ -643,7 +946,11 @@ export const skills = {
   'fire-flurry': {
     id: skill('fire-flurry'),
     name: '회전 연화각',
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'all-enemies', cost: 2,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'all-enemies',
+    cost: 2,
     exclusiveTo: character('warrior'),
     base: [{ kind: 'damage', amount: 3 }],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
@@ -654,7 +961,11 @@ export const skills = {
   'burnout-blow': {
     id: skill('burnout-blow'),
     name: '폭렬권',
-    type: 'consume', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'single-enemy', oncePerCombat: true,
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'single-enemy',
+    oncePerCombat: true,
     exclusiveTo: character('warrior'),
     consume: { element: 'fire', count: 3 },
     effects: [
@@ -667,18 +978,28 @@ export const skills = {
   'inner-passion': {
     id: skill('inner-passion'),
     name: '내면의 열정',
-    type: 'flip', rarity: 'common', tags: ['utility'], targetType: 'single-enemy', cooldown: 3, cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'single-enemy',
+    cooldown: 3,
+    cost: 1,
     exclusiveTo: character('warrior'),
     requiredElement: 'fire',
     base: [{ kind: 'enterOverheat' }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 5 }] },
-    tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
     // P10: 기존 임시 강화안은 폐기됐으며 대체 강화안은 미정이다.
   },
   'fire-fist': {
     id: skill('fire-fist'),
     name: '화격권',
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 2,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'addCoin', coin: coin('fire'), zone: 'draw', count: 1 },
@@ -688,12 +1009,21 @@ export const skills = {
     // 화염 코인 앞면은 일반 앞면 +1과 합산해 +2 (v1.3 표기 그대로)
     elementFaces: [{ element: 'fire', face: 'heads', effects: [{ kind: 'damage', amount: 1 }] }],
     overheatBonus: [{ kind: 'damage', amount: 4 }],
-    upgrade: { name: '단조 정권', description: '과열 피해 14 → 16', patch: { kind: 'replaceEffect', section: 'overheat', index: 0, effect: { kind: 'damage', amount: 6 } } }
+    upgrade: {
+      name: '단조 정권',
+      description: '과열 피해 14 → 16',
+      patch: { kind: 'replaceEffect', section: 'overheat', index: 0, effect: { kind: 'damage', amount: 6 } }
+    }
   },
   'overheat-strike': {
     id: skill('overheat-strike'),
     name: '과열권',
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 1,
     exclusiveTo: character('warrior'),
     base: [{ kind: 'damage', amount: 4 }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
@@ -703,7 +1033,12 @@ export const skills = {
   'overheat-vent': {
     id: skill('overheat-vent'),
     name: '배기 폭발',
-    type: 'flip', rarity: 'rare', tags: ['attack'], targetType: 'single-enemy', oncePerCombat: true, cost: 2,
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    oncePerCombat: true,
+    cost: 2,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'damage', amount: 8 },
@@ -716,7 +1051,12 @@ export const skills = {
   'comet-blow': {
     id: skill('comet-blow'),
     name: '낙성권',
-    type: 'flip', rarity: 'rare', tags: ['attack'], targetType: 'single-enemy', cooldown: 2, cost: 4,
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 2,
+    cost: 4,
     exclusiveTo: character('warrior'),
     base: [
       { kind: 'damage', amount: 16 },
@@ -730,7 +1070,12 @@ export const skills = {
   'arcane-charge': {
     id: skill('arcane-charge'),
     name: '마력 충전',
-    type: 'flip', rarity: 'common', tags: ['utility'], targetType: 'self', cooldown: 0, cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 0,
+    cost: 1,
     exclusiveTo: character('arcanist'),
     base: [
       { kind: 'summonEquipment', equipment: 'chosen', duration: 2, durationPerTails: 1 },
@@ -741,7 +1086,12 @@ export const skills = {
   'arcane-command': {
     id: skill('arcane-command'),
     name: '명령',
-    type: 'flip', rarity: 'common', tags: ['utility'], targetType: 'self', cooldown: 0, cost: 2,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 0,
+    cost: 2,
     exclusiveTo: character('arcanist'),
     base: [
       { kind: 'commandChosenSummon', bonusPerTails: 1 },
@@ -752,7 +1102,11 @@ export const skills = {
   'aegis-pulse': {
     id: skill('aegis-pulse'),
     name: '완충 방벽',
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cost: 2,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 2,
     exclusiveTo: character('arcanist'),
     base: [
       { kind: 'block', amount: 4 },
@@ -761,46 +1115,97 @@ export const skills = {
     upgrade: { name: '공명 방벽', description: '기본 방어 +2', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
   },
   'armor-counter': {
-    id: skill('armor-counter'), name: '마력 반격', exclusiveTo: character('arcanist'),
-    type: 'flip', rarity: 'common', tags: ['attack', 'defense'], targetType: 'single-enemy', cooldown: 1, cost: 2,
+    id: skill('armor-counter'),
+    name: '마력 반격',
+    exclusiveTo: character('arcanist'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack', 'defense'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
     base: [{ kind: 'damage', amount: 8 }],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 3 }] },
     tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] },
-    upgrade: { name: '강화', description: '뒷면 방어 +2 → +3', patch: { kind: 'replaceEffect', section: 'tails', index: 0, effect: { kind: 'block', amount: 3 } } }
+    upgrade: {
+      name: '강화',
+      description: '뒷면 방어 +2 → +3',
+      patch: { kind: 'replaceEffect', section: 'tails', index: 0, effect: { kind: 'block', amount: 3 } }
+    }
   },
   'armor-compression': {
-    id: skill('armor-compression'), name: '갑주 축압', exclusiveTo: character('arcanist'),
-    type: 'flip', rarity: 'common', tags: ['defense', 'utility'], targetType: 'self', cooldown: 1, cost: 2,
+    id: skill('armor-compression'),
+    name: '갑주 축압',
+    exclusiveTo: character('arcanist'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense', 'utility'],
+    targetType: 'self',
+    cooldown: 1,
+    cost: 2,
     base: [{ kind: 'block', amount: 7 }],
     heads: { mode: 'per', effects: [{ kind: 'prepareNextAttackDamage', amount: 2 }] },
     tails: { mode: 'per', effects: [{ kind: 'block', amount: 3 }] },
-    upgrade: { name: '강화', description: '앞면과 뒷면이 모두 나오면 임시 마나 코인 1개를 손에 추가', patch: { kind: 'addMixedFaceEffect', effect: { kind: 'addCoin', coin: coin('mana'), zone: 'hand', count: 1 } } }
+    upgrade: {
+      name: '강화',
+      description: '앞면과 뒷면이 모두 나오면 임시 마나 코인 1개를 손에 추가',
+      patch: { kind: 'addMixedFaceEffect', effect: { kind: 'addCoin', coin: coin('mana'), zone: 'hand', count: 1 } }
+    }
   },
   'mana-amplification': {
-    id: skill('mana-amplification'), name: '마력 증폭막', exclusiveTo: character('arcanist'),
-    type: 'consume', rarity: 'advanced', tags: ['defense'], targetType: 'self', cooldown: 1,
+    id: skill('mana-amplification'),
+    name: '마력 증폭막',
+    exclusiveTo: character('arcanist'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['defense'],
+    targetType: 'self',
+    cooldown: 1,
     consume: { element: 'mana', count: 2 },
     effects: [{ kind: 'blockFromCurrent', cap: 10 }],
     upgrade: { name: '강화', description: '마나 코인 소비 2개 → 1개', patch: { kind: 'costDelta', delta: -1 } }
   },
   'armor-smash': {
-    id: skill('armor-smash'), name: '갑주 강타', exclusiveTo: character('arcanist'),
-    type: 'consume', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cooldown: 1,
+    id: skill('armor-smash'),
+    name: '갑주 강타',
+    exclusiveTo: character('arcanist'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
     consume: { element: 'mana', count: 2 },
     effects: [{ kind: 'damagePlusBlock', base: 6, cap: 10 }],
-    upgrade: { name: '강화', description: '방어 추가 피해 상한 10 → 14', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damagePlusBlock', base: 6, cap: 14 } } }
+    upgrade: {
+      name: '강화',
+      description: '방어 추가 피해 상한 10 → 14',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damagePlusBlock', base: 6, cap: 14 } }
+    }
   },
   'arcane-armor-release': {
-    id: skill('arcane-armor-release'), name: '마도 갑주 해방', exclusiveTo: character('arcanist'),
-    type: 'consume', rarity: 'rare', tags: ['defense', 'ultimate'], targetType: 'self', oncePerCombat: true,
+    id: skill('arcane-armor-release'),
+    name: '마도 갑주 해방',
+    exclusiveTo: character('arcanist'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['defense', 'ultimate'],
+    targetType: 'self',
+    oncePerCombat: true,
     consume: { element: 'mana', count: 3 },
-    effects: [{ kind: 'block', amount: 10 }, { kind: 'scheduleEndTurnBlockAoe', cap: 18 }],
+    effects: [
+      { kind: 'block', amount: 10 },
+      { kind: 'scheduleEndTurnBlockAoe', cap: 18 }
+    ],
     upgrade: { name: '강화', description: '전투당 1회 제한 제거', patch: { kind: 'removeOncePerCombat', cooldown: 1 } }
   },
   'shield-summon': {
     id: skill('shield-summon'),
     name: '방패 전개',
-    type: 'flip', rarity: 'common', tags: ['defense'], targetType: 'self', cost: 1,
+    type: 'flip',
+    rarity: 'common',
+    tags: ['defense'],
+    targetType: 'self',
+    cost: 1,
     exclusiveTo: character('arcanist'),
     base: [{ kind: 'summonEquipment', equipment: equip('mana-shield'), duration: 2 }],
     tails: { mode: 'any', effects: [{ kind: 'block', amount: 2 }] },
@@ -810,15 +1215,26 @@ export const skills = {
   'mirror-plate': {
     id: skill('mirror-plate'),
     name: '마력 반사판',
-    type: 'flip', rarity: 'advanced', tags: ['attack'], targetType: 'single-enemy', cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cost: 1,
     exclusiveTo: character('arcanist'),
     base: [{ kind: 'damagePerBlock', amountPerBlock: 1 }],
-    upgrade: { name: '집속 반사판', description: '앞면 피해 +4 효과 추가', patch: { kind: 'addFaceEffect', face: 'heads', effect: { kind: 'damage', amount: 4 } } }
+    upgrade: {
+      name: '집속 반사판',
+      description: '앞면 피해 +4 효과 추가',
+      patch: { kind: 'addFaceEffect', face: 'heads', effect: { kind: 'damage', amount: 4 } }
+    }
   },
   'bulwark-charge': {
     id: skill('bulwark-charge'),
     name: '성채 돌진',
-    type: 'consume', rarity: 'rare', tags: ['attack'], targetType: 'single-enemy',
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack'],
+    targetType: 'single-enemy',
     exclusiveTo: character('arcanist'),
     consume: { element: 'mana', count: 2 },
     effects: [
@@ -831,7 +1247,11 @@ export const skills = {
   'weapon-tuning': {
     id: skill('weapon-tuning'),
     name: '병기 조율',
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cost: 1,
     exclusiveTo: character('arcanist'),
     base: [
       { kind: 'empowerSummons', amount: 1 },
@@ -843,7 +1263,12 @@ export const skills = {
   'twin-armory': {
     id: skill('twin-armory'),
     name: '쌍병기 전개',
-    type: 'flip', rarity: 'rare', tags: ['utility'], targetType: 'self', oncePerCombat: true, cost: 2,
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['utility'],
+    targetType: 'self',
+    oncePerCombat: true,
+    cost: 2,
     exclusiveTo: character('arcanist'),
     base: [
       { kind: 'summonEquipment', equipment: equip('mana-sword'), duration: 2 },
@@ -854,7 +1279,12 @@ export const skills = {
   'arsenal-barrage': {
     id: skill('arsenal-barrage'),
     name: '병기 일제 전개',
-    type: 'flip', rarity: 'rare', tags: ['utility'], targetType: 'self', cooldown: 2, cost: 4,
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 2,
+    cost: 4,
     exclusiveTo: character('arcanist'),
     // P7 D3 — 4비용 대표: 병기 2 전개 + 즉시 드로우 (고비용 턴 실구성 표적)
     base: [
@@ -867,60 +1297,395 @@ export const skills = {
   },
   // P9 마도기사 병기 출력 빌드
   'alchemy-slash': {
-    id: skill('alchemy-slash'), name: '연성 참격', exclusiveTo: character('arcanist'),
-    type: 'flip', rarity: 'common', tags: ['attack'], targetType: 'single-enemy', cooldown: 1, cost: 2,
+    id: skill('alchemy-slash'),
+    name: '연성 참격',
+    exclusiveTo: character('arcanist'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
     base: [{ kind: 'damage', amount: 8 }],
     heads: { mode: 'per', effects: [{ kind: 'damage', amount: 3 }] },
     tails: { mode: 'any', effects: [{ kind: 'increaseWeaponOutput', amount: 1 }] },
     upgrade: { name: '강화', description: '뒷면 하나라도 +1 → 뒷면마다 +1', patch: { kind: 'setFaceMode', face: 'tails', mode: 'per' } }
   },
   'diffusion-mark': {
-    id: skill('diffusion-mark'), name: '확산 각인', exclusiveTo: character('arcanist'),
-    type: 'flip', rarity: 'common', tags: ['utility'], targetType: 'self', cooldown: 1, cost: 2,
+    id: skill('diffusion-mark'),
+    name: '확산 각인',
+    exclusiveTo: character('arcanist'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 1,
+    cost: 2,
     base: [{ kind: 'grantChosenSummonAoe', uses: 1, usesPerHeads: 1 }],
     tails: { mode: 'per', effects: [{ kind: 'extendChosenSummon', amount: 1 }] },
-    upgrade: { name: '강화', description: '앞면과 뒷면이 모두 나오면 임시 마나 코인 1개를 손에 추가', patch: { kind: 'addMixedFaceEffect', effect: { kind: 'addCoin', coin: coin('mana'), zone: 'hand', count: 1 } } }
+    upgrade: {
+      name: '강화',
+      description: '앞면과 뒷면이 모두 나오면 임시 마나 코인 1개를 손에 추가',
+      patch: { kind: 'addMixedFaceEffect', effect: { kind: 'addCoin', coin: coin('mana'), zone: 'hand', count: 1 } }
+    }
   },
   'reactor-overdrive': {
-    id: skill('reactor-overdrive'), name: '마력로 과급', exclusiveTo: character('arcanist'),
-    type: 'consume', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 2,
-    consume: { element: 'mana', count: 2 }, effects: [{ kind: 'increaseWeaponOutput', amount: 2 }, { kind: 'extendAllSummons', amount: 1 }],
+    id: skill('reactor-overdrive'),
+    name: '마력로 과급',
+    exclusiveTo: character('arcanist'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 2,
+    consume: { element: 'mana', count: 2 },
+    effects: [
+      { kind: 'increaseWeaponOutput', amount: 2 },
+      { kind: 'extendAllSummons', amount: 1 }
+    ],
     upgrade: { name: '강화', description: '마나 코인 소비 2개 → 1개', patch: { kind: 'costDelta', delta: -1 } }
   },
   'arcane-duplicate': {
-    id: skill('arcane-duplicate'), name: '마도식 복제', exclusiveTo: character('arcanist'),
-    type: 'consume', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 2,
-    consume: { element: 'mana', count: 2 }, effects: [{ kind: 'cloneChosenSummon', duration: 2, fullCapExtension: 2 }],
-    upgrade: { name: '강화', description: '복제 지속 2 → 3, 소환 한도에서는 지속 +3', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'cloneChosenSummon', duration: 3, fullCapExtension: 3 } } }
+    id: skill('arcane-duplicate'),
+    name: '마도식 복제',
+    exclusiveTo: character('arcanist'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 2,
+    consume: { element: 'mana', count: 2 },
+    effects: [{ kind: 'cloneChosenSummon', duration: 2, fullCapExtension: 2 }],
+    upgrade: {
+      name: '강화',
+      description: '복제 지속 2 → 3, 소환 한도에서는 지속 +3',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'cloneChosenSummon', duration: 3, fullCapExtension: 3 } }
+    }
   },
   'azure-armory-open': {
-    id: skill('azure-armory-open'), name: '청람 병장개문', exclusiveTo: character('arcanist'),
-    type: 'flip', rarity: 'rare', tags: ['attack', 'ultimate'], targetType: 'all-enemies', oncePerCombat: true, cost: 3,
+    id: skill('azure-armory-open'),
+    name: '청람 병장개문',
+    exclusiveTo: character('arcanist'),
+    type: 'flip',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'all-enemies',
+    oncePerCombat: true,
+    cost: 3,
     base: [{ kind: 'virtualManaSwordVolley', baseDamage: 3 }],
-    upgrade: { name: '강화', description: '임시 마나 검 기본 수 3 → 4', patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'virtualManaSwordVolley', baseDamage: 3, baseCount: 4 } } }
+    upgrade: {
+      name: '강화',
+      description: '임시 마나 검 기본 수 3 → 4',
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'virtualManaSwordVolley', baseDamage: 3, baseCount: 4 } }
+    }
+  },
+  // ── 혈액 마검사: 시작 세트 + 흡혈 순환 + 혈마검 각성 ──
+  'blood-offering-skill': {
+    id: skill('blood-offering-skill'),
+    name: '혈액 공양',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    oncePerCombat: true,
+    bloodOffering: true,
+    consume: { element: 'blood', count: 5, mode: 'upTo' },
+    effects: [{ kind: 'bloodOffering' }]
+  },
+  sacrifice: {
+    id: skill('sacrifice'),
+    name: '재물',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 1,
+    cost: 0,
+    base: [
+      { kind: 'payHp', amount: 3 },
+      { kind: 'addCoin', coin: coin('blood'), zone: 'discard', count: 2 }
+    ],
+    upgrade: {
+      name: '풍성한 재물',
+      description: '임시 혈액 동전 2개 → 3개',
+      patch: {
+        kind: 'addCoinOnUse',
+        coin: coin('blood'),
+        zone: 'discard',
+        count: 1
+      }
+    }
+  },
+  'bloodsucking-slash': {
+    id: skill('bloodsucking-slash'),
+    name: '흡혈참',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 0,
+    cost: 1,
+    base: [{ kind: 'damage', amount: 4 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
+    tails: { mode: 'any', effects: [{ kind: 'lifesteal', amount: 2 }] },
+    upgrade: {
+      name: '깊은 흡혈',
+      description: '뒷면 흡혈 2 → 3',
+      patch: {
+        kind: 'replaceEffect',
+        section: 'tails',
+        index: 0,
+        effect: { kind: 'lifesteal', amount: 3 }
+      }
+    }
+  },
+  'blood-circulation': {
+    id: skill('blood-circulation'),
+    name: '혈액 순환',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 1,
+    cost: 1,
+    requiredCoin: coin('basic'),
+    base: [
+      { kind: 'returnDiscardCoin', coin: coin('blood'), count: 1 },
+      { kind: 'heal', amount: 2 }
+    ],
+    upgrade: {
+      name: '무비용 순환',
+      description: '코스트 1 → 0',
+      patch: { kind: 'costDelta', delta: -1 }
+    }
+  },
+  feast: {
+    id: skill('feast'),
+    name: '포식',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    consume: { element: 'blood', count: 3, mode: 'upTo' },
+    effects: [
+      { kind: 'damageByConsumed', base: 0, perCoin: 5 },
+      { kind: 'lifestealByConsumed', amountPerCoin: 2 }
+    ]
+  },
+  'bloodflow-reversal': {
+    id: skill('bloodflow-reversal'),
+    name: '혈류 역전',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
+    base: [{ kind: 'damage', amount: 6 }],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
+    tails: { mode: 'per', effects: [{ kind: 'lifesteal', amount: 2 }] },
+    returnUsedElementToDrawTop: { element: 'blood', count: 1, minimumUsed: 2 },
+    upgrade: {
+      name: '역류 격화',
+      description: '기본 피해 6 → 8',
+      patch: { kind: 'baseAmount', index: 0, delta: 2 }
+    }
+  },
+  'blood-reincarnation': {
+    id: skill('blood-reincarnation'),
+    name: '혈액 윤회',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'all-enemies',
+    oncePerCombat: true,
+    consume: { element: 'blood', count: 3 },
+    effects: [
+      { kind: 'damage', amount: 9 },
+      { kind: 'lifesteal', amount: 6 },
+      { kind: 'addCoin', coin: coin('blood'), zone: 'discard', count: 2 }
+    ],
+    upgrade: {
+      name: '끝없는 윤회',
+      description: '일회성 제거, 재사용 대기 3턴',
+      patch: { kind: 'removeOncePerCombat', cooldown: 3 }
+    }
+  },
+  'blood-feeding': {
+    id: skill('blood-feeding'),
+    name: '혈식',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 0,
+    bloodSword: true,
+    consume: { element: 'blood', count: 1 },
+    effects: [{ kind: 'investBloodSword' }, { kind: 'damageByBloodSword', base: 4, multiplier: 1 }],
+    upgrade: {
+      name: '탐식',
+      description: '기본 피해 4 → 6',
+      patch: {
+        kind: 'replaceEffect',
+        section: 'base',
+        index: 1,
+        effect: { kind: 'damageByBloodSword', base: 6, multiplier: 1 }
+      }
+    }
+  },
+  'blood-sword-draw': {
+    id: skill('blood-sword-draw'),
+    name: '혈마 발도',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'common',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 0,
+    cost: 1,
+    bloodSword: true,
+    base: [{ kind: 'damageByBloodSword', base: 3, multiplier: 1 }],
+    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
+    tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
+    upgrade: {
+      name: '예리한 발도',
+      description: '앞면 피해 2 → 3, 뒷면 방어 3 → 4',
+      patch: {
+        kind: 'multi',
+        patches: [
+          {
+            kind: 'replaceEffect',
+            section: 'heads',
+            index: 0,
+            effect: { kind: 'damage', amount: 3 }
+          },
+          {
+            kind: 'replaceEffect',
+            section: 'tails',
+            index: 0,
+            effect: { kind: 'block', amount: 4 }
+          }
+        ]
+      }
+    }
+  },
+  'blood-sword-combo': {
+    id: skill('blood-sword-combo'),
+    name: '혈마 연참',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'advanced',
+    tags: ['attack'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    bloodSword: true,
+    consume: { element: 'blood', count: 2 },
+    effects: [{ kind: 'investBloodSword' }, { kind: 'damageByBloodSword', base: 8, multiplier: 2 }],
+    upgrade: {
+      name: '난무',
+      description: '기본 피해 8 → 11',
+      patch: {
+        kind: 'replaceEffect',
+        section: 'base',
+        index: 1,
+        effect: { kind: 'damageByBloodSword', base: 11, multiplier: 2 }
+      }
+    }
+  },
+  'blood-sword-counter': {
+    id: skill('blood-sword-counter'),
+    name: '혈마 반격',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['attack', 'defense'],
+    targetType: 'single-enemy',
+    cooldown: 1,
+    cost: 2,
+    bloodSword: true,
+    base: [
+      { kind: 'damageByBloodSword', base: 2, multiplier: 1 },
+      { kind: 'block', amount: 5 }
+    ],
+    heads: { mode: 'per', effects: [{ kind: 'damage', amount: 2 }] },
+    tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] },
+    upgrade: {
+      name: '견고한 반격',
+      description: '기본 방어 5 → 7',
+      patch: { kind: 'baseAmount', index: 1, delta: 2 }
+    }
+  },
+  'true-blood-sword-slash': {
+    id: skill('true-blood-sword-slash'),
+    name: '진·혈마참',
+    exclusiveTo: character('blood-spellblade'),
+    type: 'consume',
+    rarity: 'rare',
+    tags: ['attack', 'ultimate'],
+    targetType: 'all-enemies',
+    oncePerCombat: true,
+    bloodSword: true,
+    consume: { element: 'blood', count: 3 },
+    effects: [{ kind: 'investBloodSword' }, { kind: 'damageByBloodSword', base: 8, multiplier: 4 }],
+    upgrade: {
+      name: '진·혈마참 극',
+      description: '혈마검 위력 배율 4 → 5',
+      patch: {
+        kind: 'replaceEffect',
+        section: 'base',
+        index: 1,
+        effect: { kind: 'damageByBloodSword', base: 8, multiplier: 5 }
+      }
+    }
   },
   // ── P7 D3 — 공용 드로우/쿨다운 유틸리티 (고비용 턴 셋업 지원) ──
   'battle-focus': {
     id: skill('battle-focus'),
     name: '전투 집중',
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 2, cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 2,
+    cost: 1,
     base: [{ kind: 'draw', count: 2 }],
     heads: { mode: 'any', effects: [{ kind: 'nextTurnDraw', count: 1 }] },
-    upgrade: { name: '보급 집중', description: '사용 시 임시 기본 코인 1개를 손에 만든다', patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'hand', count: 1 } }
+    upgrade: {
+      name: '보급 집중',
+      description: '사용 시 임시 기본 코인 1개를 손에 만든다',
+      patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'hand', count: 1 }
+    }
   },
-  'regroup': {
+  regroup: {
     id: skill('regroup'),
     name: '재정비',
-    type: 'flip', rarity: 'advanced', tags: ['utility'], targetType: 'self', cooldown: 3, cost: 1,
+    type: 'flip',
+    rarity: 'advanced',
+    tags: ['utility'],
+    targetType: 'self',
+    cooldown: 3,
+    cost: 1,
     // 쿨다운 감소는 자기 슬롯 제외(P7 D1) — 반복·전투당 1회 스킬은 구조적으로 비대상
     base: [
       { kind: 'reduceCooldown', amount: 1 },
       { kind: 'draw', count: 1 }
     ],
-    upgrade: { name: '신속 재정비', description: '사용 시 임시 기본 코인 1개를 뽑기 더미에 만든다', patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'draw', count: 1 } }
+    upgrade: {
+      name: '신속 재정비',
+      description: '사용 시 임시 기본 코인 1개를 뽑기 더미에 만든다',
+      patch: { kind: 'addCoinOnUse', coin: coin('basic'), zone: 'draw', count: 1 }
+    }
   }
 } satisfies Record<string, SkillDef>;
-
 
 export const enemies = {
   raider: {
@@ -1123,12 +1888,7 @@ export const characters = {
     maxHp: 70,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('fire'), coin('fire')],
     // P7 D2 — 시작 4스킬: 반복 기본기 2 + 캐릭터 스킬 2 (버닝 스트라이크 + 과열 인에이블러)
-    startingSkills: [
-      skill('jab'),
-      skill('fist-guard'),
-      skill('burning-fist'),
-      skill('flame-hook')
-    ],
+    startingSkills: [skill('jab'), skill('fist-guard'), skill('burning-fist'), skill('flame-hook')],
     trait: {
       id: 'ember-pouch',
       name: '불씨 주머니',
@@ -1141,32 +1901,21 @@ export const characters = {
     name: '수호자',
     maxHp: 70,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('mana'), coin('mana')],
-    startingSkills: [
-      skill('slash'),
-      skill('guard'),
-      skill('warding-strike'),
-      skill('mana-bulwark')
-    ],
+    startingSkills: [skill('slash'), skill('guard'), skill('warding-strike'), skill('mana-bulwark')],
     trait: {
       id: 'quiet-spring',
       name: '고요한 샘',
       hook: 'combatStart',
       effects: [{ kind: 'addCoin', coin: coin('mana'), zone: 'draw', count: 1 }]
     }
-  }
-  ,
+  },
   // P3.4 — 술사·냉기 기사 (PRD 캐릭터 표 263~264행, 수치는 기준표 규격 그대로)
   sorcerer: {
     id: character('sorcerer'),
     name: '번개 결투사',
     maxHp: 70,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('lightning'), coin('lightning')],
-    startingSkills: [
-      skill('slash'),
-      skill('guard'),
-      skill('attaque'),
-      skill('parade')
-    ],
+    startingSkills: [skill('slash'), skill('guard'), skill('attaque'), skill('parade')],
     trait: {
       id: 'remise',
       name: '르미즈',
@@ -1180,12 +1929,7 @@ export const characters = {
     name: '냉기 도적',
     maxHp: 70,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('frost'), coin('frost')],
-    startingSkills: [
-      skill('slash'),
-      skill('guard'),
-      skill('ice-claw'),
-      skill('ice-sleight')
-    ],
+    startingSkills: [skill('slash'), skill('guard'), skill('ice-claw'), skill('ice-sleight')],
     trait: {
       id: 'double-pocket',
       name: '이중 주머니',
@@ -1193,8 +1937,7 @@ export const characters = {
       effects: [],
       mechanic: 'preserveHand'
     }
-  }
-  ,
+  },
   // P6 D6 — 마도기사 (guardian과 별도 신규 — 기존 빌드 보존 우선, 마나 속성 공유 첫 사례)
   arcanist: {
     id: character('arcanist'),
@@ -1202,17 +1945,26 @@ export const characters = {
     maxHp: 65,
     startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('mana'), coin('mana')],
     // P7 D2 — 시작 4스킬: 기본기 2 + 마력 충전 + 명령
-    startingSkills: [
-      skill('slash'),
-      skill('guard'),
-      skill('arcane-charge'),
-      skill('arcane-command')
-    ],
+    startingSkills: [skill('slash'), skill('guard'), skill('arcane-charge'), skill('arcane-command')],
     trait: {
       id: 'arcane-atelier',
       name: '마도 공방',
       hook: 'turnStart',
       effects: [{ kind: 'summonEquipment', equipment: equip('mana-sword'), duration: 1 }]
+    }
+  },
+  'blood-spellblade': {
+    id: character('blood-spellblade'),
+    name: '혈액 마검사',
+    maxHp: 68,
+    startingBag: [...Array.from({ length: 8 }, () => coin('basic')), coin('blood'), coin('blood')],
+    startingSkills: [skill('slash'), skill('guard'), skill('blood-offering-skill'), skill('sacrifice')],
+    trait: {
+      id: 'blood-sword',
+      name: '혈마검',
+      hook: 'combatStart',
+      effects: [],
+      mechanic: 'bloodSword'
     }
   }
 } satisfies Record<string, CharacterDef>;
@@ -1237,157 +1989,392 @@ export const equipment = {
 export const passives = {
   // ── 화염 격투가: 무속성 5 (방어/생존 보조) ──
   'iron-body': {
-    id: passive('iron-body'), name: '강철 피부', description: '전투 시작 시 방어 5를 얻는다',
-    exclusiveTo: character('warrior'), element: null, hook: 'combatStart',
-    effects: [{ kind: 'block', amount: 5 }], price: 70
+    id: passive('iron-body'),
+    name: '강철 피부',
+    description: '전투 시작 시 방어 5를 얻는다',
+    exclusiveTo: character('warrior'),
+    element: null,
+    hook: 'combatStart',
+    effects: [{ kind: 'block', amount: 5 }],
+    price: 70
   },
   'steady-breath': {
-    id: passive('steady-breath'), name: '방패 숙련', description: '방어 스킬로 얻는 방어가 1 증가한다',
-    exclusiveTo: character('warrior'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'shieldMastery', price: 90
+    id: passive('steady-breath'),
+    name: '방패 숙련',
+    description: '방어 스킬로 얻는 방어가 1 증가한다',
+    exclusiveTo: character('warrior'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'shieldMastery',
+    price: 90
   },
   'reserve-coin': {
-    id: passive('reserve-coin'), name: '빈틈없는 대비', description: '턴 종료 시 남은 동전 1개당 방어 1을 얻는다. 최대 2',
-    exclusiveTo: character('warrior'), element: null, hook: 'combatStart',
-    effects: [], mechanic: 'preparedStance', price: 60
+    id: passive('reserve-coin'),
+    name: '빈틈없는 대비',
+    description: '턴 종료 시 남은 동전 1개당 방어 1을 얻는다. 최대 2',
+    exclusiveTo: character('warrior'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'preparedStance',
+    price: 60
   },
   'opening-stance': {
-    id: passive('opening-stance'), name: '불굴의 투지', description: '매 턴 처음 받는 피해를 1 감소시킨다',
-    exclusiveTo: character('warrior'), element: null, hook: 'combatStart',
-    effects: [], mechanic: 'indomitableSpirit', price: 70
+    id: passive('opening-stance'),
+    name: '불굴의 투지',
+    description: '매 턴 처음 받는 피해를 1 감소시킨다',
+    exclusiveTo: character('warrior'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'indomitableSpirit',
+    price: 70
   },
   'thick-hide': {
-    id: passive('thick-hide'), name: '전투 호흡', description: '전투마다 처음 체력이 50% 이하가 되면 체력을 3 회복한다',
-    exclusiveTo: character('warrior'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'combatBreathing', price: 80
+    id: passive('thick-hide'),
+    name: '전투 호흡',
+    description: '전투마다 처음 체력이 50% 이하가 되면 체력을 3 회복한다',
+    exclusiveTo: character('warrior'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'combatBreathing',
+    price: 80
   },
   // ── 화염 격투가: 화염 3 (화상 보조) ──
   'ember-stock': {
-    id: passive('ember-stock'), name: '발화 본능', description: '매 턴 처음 적에게 부여하는 화상이 1 증가한다',
-    exclusiveTo: character('warrior'), element: 'fire', hook: 'combatStart',
-    effects: [], mechanic: 'ignitionInstinct', price: 80
+    id: passive('ember-stock'),
+    name: '발화 본능',
+    description: '매 턴 처음 적에게 부여하는 화상이 1 증가한다',
+    exclusiveTo: character('warrior'),
+    element: 'fire',
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'ignitionInstinct',
+    price: 80
   },
   'kindling-rhythm': {
-    id: passive('kindling-rhythm'), name: '잔불 칼날', description: '공격에 사용한 화염 동전이 뒷면이면 대상에게 화상 1을 부여한다',
-    exclusiveTo: character('warrior'), element: 'fire', hook: 'turnStart',
-    effects: [], mechanic: 'emberBlade', price: 90
+    id: passive('kindling-rhythm'),
+    name: '잔불 칼날',
+    description: '공격에 사용한 화염 동전이 뒷면이면 대상에게 화상 1을 부여한다',
+    exclusiveTo: character('warrior'),
+    element: 'fire',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'emberBlade',
+    price: 90
   },
   'flame-opening': {
-    id: passive('flame-opening'), name: '뜨거운 방벽', description: '화상을 부여한 턴 종료 시 방어 2를 얻는다',
-    exclusiveTo: character('warrior'), element: 'fire', hook: 'turnStart',
-    effects: [], mechanic: 'hotBarrier', price: 100
+    id: passive('flame-opening'),
+    name: '뜨거운 방벽',
+    description: '화상을 부여한 턴 종료 시 방어 2를 얻는다',
+    exclusiveTo: character('warrior'),
+    element: 'fire',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'hotBarrier',
+    price: 100
   },
   // ── 마도기사: 마력 갑주 2 + 마나 병기 2 ──
   'armor-memory': {
-    id: passive('armor-memory'), name: '전개 예습', description: '전투 중 처음 소환하는 장비의 소환 +1',
-    exclusiveTo: character('arcanist'), element: null, hook: 'combatStart',
-    effects: [], mechanic: 'previewDeployment', price: 70
+    id: passive('armor-memory'),
+    name: '전개 예습',
+    description: '전투 중 처음 소환하는 장비의 소환 +1',
+    exclusiveTo: character('arcanist'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'previewDeployment',
+    price: 70
   },
   'drill-discipline': {
-    id: passive('drill-discipline'), name: '역상 방호식', description: '턴당 1회, 하나의 스킬에서 뒷면이 2개 이상 나오면 방어 3',
-    exclusiveTo: character('arcanist'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'inverseGuard', price: 80
+    id: passive('drill-discipline'),
+    name: '역상 방호식',
+    description: '턴당 1회, 하나의 스킬에서 뒷면이 2개 이상 나오면 방어 3',
+    exclusiveTo: character('arcanist'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'inverseGuard',
+    price: 80
   },
   'overcharge-core': {
-    id: passive('overcharge-core'), name: '교차 연산', description: '매 턴 처음 앞면과 뒷면이 함께 나오면 임시 기본 동전 1개를 손에 추가한다',
-    exclusiveTo: character('arcanist'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'crossCalculation', price: 100
+    id: passive('overcharge-core'),
+    name: '교차 연산',
+    description: '매 턴 처음 앞면과 뒷면이 함께 나오면 임시 기본 동전 1개를 손에 추가한다',
+    exclusiveTo: character('arcanist'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'crossCalculation',
+    price: 100
   },
   'mana-reserve': {
-    id: passive('mana-reserve'), name: '잔류식 재구축', description: '장비가 소멸하면 재구축을 얻습니다. 다음에 소환하는 장비의 소환 +1',
-    exclusiveTo: character('arcanist'), element: null, hook: 'combatStart',
-    effects: [], mechanic: 'residualRebuild', price: 80
+    id: passive('mana-reserve'),
+    name: '잔류식 재구축',
+    description: '장비가 소멸하면 재구축을 얻습니다. 다음에 소환하는 장비의 소환 +1',
+    exclusiveTo: character('arcanist'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'residualRebuild',
+    price: 80
   },
   'command-preservation': {
-    id: passive('command-preservation'), name: '명령 보존식', description: '턴당 1회, 장비를 즉시 행동시킬 때 감소하는 소환 1을 무효로 합니다',
-    exclusiveTo: character('arcanist'), element: null, hook: 'turnStart', effects: [], mechanic: 'commandPreservation', price: 90
+    id: passive('command-preservation'),
+    name: '명령 보존식',
+    description: '턴당 1회, 장비를 즉시 행동시킬 때 감소하는 소환 1을 무효로 합니다',
+    exclusiveTo: character('arcanist'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'commandPreservation',
+    price: 90
   },
   'mana-membrane': {
-    id: passive('mana-membrane'), name: '마나 피막', description: '마나 동전 뒷면마다 방어 1을 얻는다. 턴당 최대 3',
-    exclusiveTo: character('arcanist'), element: 'mana', hook: 'turnStart', effects: [], mechanic: 'manaMembrane', price: 80
+    id: passive('mana-membrane'),
+    name: '마나 피막',
+    description: '마나 동전 뒷면마다 방어 1을 얻는다. 턴당 최대 3',
+    exclusiveTo: character('arcanist'),
+    element: 'mana',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'manaMembrane',
+    price: 80
   },
   'blue-circuit': {
-    id: passive('blue-circuit'), name: '청색 순환로', description: '턴당 1회, 한 스킬로 마나 동전을 2개 이상 소비하면 버림 더미에 임시 마나 동전 1개를 생성합니다',
-    exclusiveTo: character('arcanist'), element: 'mana', hook: 'turnStart', effects: [], mechanic: 'blueCircuit', price: 90
+    id: passive('blue-circuit'),
+    name: '청색 순환로',
+    description: '턴당 1회, 한 스킬로 마나 동전을 2개 이상 소비하면 버림 더미에 임시 마나 동전 1개를 생성합니다',
+    exclusiveTo: character('arcanist'),
+    element: 'mana',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'blueCircuit',
+    price: 90
   },
   'armament-resonance': {
-    id: passive('armament-resonance'), name: '병장 공명로', description: '마나 동전을 누적 3개 소비할 때마다 병기 출력 +1',
-    exclusiveTo: character('arcanist'), element: 'mana', hook: 'combatStart', effects: [], mechanic: 'armamentResonance', price: 110
+    id: passive('armament-resonance'),
+    name: '병장 공명로',
+    description: '마나 동전을 누적 3개 소비할 때마다 병기 출력 +1',
+    exclusiveTo: character('arcanist'),
+    element: 'mana',
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'armamentResonance',
+    price: 110
   },
   // P9 번개 결투사 전용 패시브 8종. 조건부 mechanic은 전투 엔진에서
   // 설명과 동일한 타이밍·횟수 제한으로 직접 처리한다.
   'duelist-reserve-coin': {
-    id: passive('duelist-reserve-coin'), name: '예비 주화', description: '전투 시작 시 임시 기본 동전 1개를 손에 추가한다',
-    exclusiveTo: character('sorcerer'), element: null, hook: 'combatStart',
-    effects: [{ kind: 'addCoin', coin: coin('basic'), zone: 'hand', count: 1 }], price: 70
+    id: passive('duelist-reserve-coin'),
+    name: '예비 주화',
+    description: '전투 시작 시 임시 기본 동전 1개를 손에 추가한다',
+    exclusiveTo: character('sorcerer'),
+    element: null,
+    hook: 'combatStart',
+    effects: [{ kind: 'addCoin', coin: coin('basic'), zone: 'hand', count: 1 }],
+    price: 70
   },
   'continuous-motion': {
-    id: passive('continuous-motion'), name: '연속 동작', description: '매 턴 첫 무료 재사용 후 동전 1개를 뽑는다',
-    exclusiveTo: character('sorcerer'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'continuousMotion', price: 80
+    id: passive('continuous-motion'),
+    name: '연속 동작',
+    description: '매 턴 첫 무료 재사용 후 동전 1개를 뽑는다',
+    exclusiveTo: character('sorcerer'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'continuousMotion',
+    price: 80
   },
   'retrieval-habit': {
-    id: passive('retrieval-habit'), name: '회수 습관', description: '매 턴 첫 재플립 동전을 뽑을 더미 위로 돌려보낸다',
-    exclusiveTo: character('sorcerer'), element: null, hook: 'combatStart',
-    effects: [], mechanic: 'retrievalHabit', price: 80
+    id: passive('retrieval-habit'),
+    name: '회수 습관',
+    description: '매 턴 첫 재플립 동전을 뽑을 더미 위로 돌려보낸다',
+    exclusiveTo: character('sorcerer'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'retrievalHabit',
+    price: 80
   },
   'balance-sense': {
-    id: passive('balance-sense'), name: '균형 감각', description: '매 턴 처음 앞면과 뒷면이 함께 나오면 방어 3을 얻는다',
-    exclusiveTo: character('sorcerer'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'balanceSense', price: 70
+    id: passive('balance-sense'),
+    name: '균형 감각',
+    description: '매 턴 처음 앞면과 뒷면이 함께 나오면 방어 3을 얻는다',
+    exclusiveTo: character('sorcerer'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'balanceSense',
+    price: 70
   },
   'last-move': {
-    id: passive('last-move'), name: '마지막 한 수', description: '마지막 손패 동전으로 쓴 스킬의 피해 또는 방어가 2 증가한다',
-    exclusiveTo: character('sorcerer'), element: null, hook: 'turnStart',
-    effects: [], mechanic: 'lastMove', price: 80
+    id: passive('last-move'),
+    name: '마지막 한 수',
+    description: '마지막 손패 동전으로 쓴 스킬의 피해 또는 방어가 2 증가한다',
+    exclusiveTo: character('sorcerer'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'lastMove',
+    price: 80
   },
   'residual-charge': {
-    id: passive('residual-charge'), name: '잔류 전하', description: '매 턴 처음 쓴 번개 동전을 버리지 않고 뽑을 더미 위로 보낸다',
-    exclusiveTo: character('sorcerer'), element: 'lightning', hook: 'combatStart',
-    effects: [], mechanic: 'residualCharge', price: 90
+    id: passive('residual-charge'),
+    name: '잔류 전하',
+    description: '매 턴 처음 쓴 번개 동전을 버리지 않고 뽑을 더미 위로 보낸다',
+    exclusiveTo: character('sorcerer'),
+    element: 'lightning',
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'residualCharge',
+    price: 90
   },
   overcurrent: {
-    id: passive('overcurrent'), name: '과전류', description: '번개 동전을 쓴 첫 무료 재사용 공격은 피해 2와 감전 1을 추가한다',
-    exclusiveTo: character('sorcerer'), element: 'lightning', hook: 'turnStart',
-    effects: [], mechanic: 'overcurrent', price: 100
+    id: passive('overcurrent'),
+    name: '과전류',
+    description: '번개 동전을 쓴 첫 무료 재사용 공격은 피해 2와 감전 1을 추가한다',
+    exclusiveTo: character('sorcerer'),
+    element: 'lightning',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'overcurrent',
+    price: 100
   },
   'discharge-suppression': {
-    id: passive('discharge-suppression'), name: '방전 억제', description: '턴 종료 시 감전이 가장 높은 적의 감전이 감소하지 않는다',
-    exclusiveTo: character('sorcerer'), element: 'lightning', hook: 'combatStart',
-    effects: [], mechanic: 'dischargeSuppression', price: 100
+    id: passive('discharge-suppression'),
+    name: '방전 억제',
+    description: '턴 종료 시 감전이 가장 높은 적의 감전이 감소하지 않는다',
+    exclusiveTo: character('sorcerer'),
+    element: 'lightning',
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'dischargeSuppression',
+    price: 100
   },
   // ── P11 냉기 도적: 범용 5 + 냉기 3 ──
   'coin-appraiser': {
-    id: passive('coin-appraiser'), name: '감별사의 엄지', description: '전투 시작 시 냉기 동전 1개를 뽑는다. 없으면 기본 동전을 뽑는다',
-    exclusiveTo: character('frost-knight'), element: null, hook: 'combatStart', effects: [], mechanic: 'coinAppraiser', price: 80
+    id: passive('coin-appraiser'),
+    name: '감별사의 엄지',
+    description: '전투 시작 시 냉기 동전 1개를 뽑는다. 없으면 기본 동전을 뽑는다',
+    exclusiveTo: character('frost-knight'),
+    element: null,
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'coinAppraiser',
+    price: 80
   },
   'small-change-insurance': {
-    id: passive('small-change-insurance'), name: '잔돈 보험', description: '매 턴 첫 뒷면에 방어 2를 얻는다',
-    exclusiveTo: character('frost-knight'), element: null, hook: 'turnStart', effects: [], mechanic: 'smallChangeInsurance', price: 70
+    id: passive('small-change-insurance'),
+    name: '잔돈 보험',
+    description: '매 턴 첫 뒷면에 방어 2를 얻는다',
+    exclusiveTo: character('frost-knight'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'smallChangeInsurance',
+    price: 70
   },
   'double-entry-ledger': {
-    id: passive('double-entry-ledger'), name: '양면 장부', description: '한 턴에 앞면과 뒷면이 나오면 기본 동전 1개를 뽑는다. 턴당 1회',
-    exclusiveTo: character('frost-knight'), element: null, hook: 'turnStart', effects: [], mechanic: 'doubleEntry', price: 90
+    id: passive('double-entry-ledger'),
+    name: '양면 장부',
+    description: '한 턴에 앞면과 뒷면이 나오면 기본 동전 1개를 뽑는다. 턴당 1회',
+    exclusiveTo: character('frost-knight'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'doubleEntry',
+    price: 90
   },
   'matured-hand': {
-    id: passive('matured-hand'), name: '숙성된 패', description: '매 턴 첫 보존 동전 스킬의 기존 피해와 방어가 2 증가한다',
-    exclusiveTo: character('frost-knight'), element: null, hook: 'turnStart', effects: [], mechanic: 'maturedHand', price: 90
+    id: passive('matured-hand'),
+    name: '숙성된 패',
+    description: '매 턴 첫 보존 동전 스킬의 기존 피해와 방어가 2 증가한다',
+    exclusiveTo: character('frost-knight'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'maturedHand',
+    price: 90
   },
   'profit-settlement': {
-    id: passive('profit-settlement'), name: '손익 정산', description: '매 턴 첫 동전 소비 후 다음 턴 뽑기 +1',
-    exclusiveTo: character('frost-knight'), element: null, hook: 'turnStart', effects: [], mechanic: 'profitSettlement', price: 80
+    id: passive('profit-settlement'),
+    name: '손익 정산',
+    description: '매 턴 첫 동전 소비 후 다음 턴 뽑기 +1',
+    exclusiveTo: character('frost-knight'),
+    element: null,
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'profitSettlement',
+    price: 80
   },
   'cold-hands': {
-    id: passive('cold-hands'), name: '차가운 손버릇', description: '매 턴 첫 보존 냉기 동전 사용/소비 시 현재 대상에게 동상 1',
-    exclusiveTo: character('frost-knight'), element: 'frost', hook: 'turnStart', effects: [], mechanic: 'coldHands', price: 90
+    id: passive('cold-hands'),
+    name: '차가운 손버릇',
+    description: '매 턴 첫 보존 냉기 동전 사용/소비 시 현재 대상에게 동상 1',
+    exclusiveTo: character('frost-knight'),
+    element: 'frost',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'coldHands',
+    price: 90
   },
   'frost-compound': {
-    id: passive('frost-compound'), name: '서리 복리', description: '매 턴 처음 동상인 적에게 주는 공격 피해 +3',
-    exclusiveTo: character('frost-knight'), element: 'frost', hook: 'turnStart', effects: [], mechanic: 'frostCompound', price: 100
+    id: passive('frost-compound'),
+    name: '서리 복리',
+    description: '매 턴 처음 동상인 적에게 주는 공격 피해 +3',
+    exclusiveTo: character('frost-knight'),
+    element: 'frost',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'frostCompound',
+    price: 100
   },
   'refrozen-loot': {
-    id: passive('refrozen-loot'), name: '되얼린 장물', description: '냉기 동전을 한 번에 2개 이상 소비하면 손에 임시 냉기 동전 1개. 턴당 1회',
-    exclusiveTo: character('frost-knight'), element: 'frost', hook: 'turnStart', effects: [], mechanic: 'refrozenLoot', price: 100
+    id: passive('refrozen-loot'),
+    name: '되얼린 장물',
+    description: '냉기 동전을 한 번에 2개 이상 소비하면 손에 임시 냉기 동전 1개. 턴당 1회',
+    exclusiveTo: character('frost-knight'),
+    element: 'frost',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'refrozenLoot',
+    price: 100
+  },
+  'concentrated-blood-orb': {
+    id: passive('concentrated-blood-orb'),
+    name: '농축 혈구',
+    description: '매 턴 처음 플립한 혈액 동전의 고유 효과가 1 증가한다',
+    exclusiveTo: character('blood-spellblade'),
+    element: 'blood',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'concentratedBlood',
+    price: 80
+  },
+  'sword-dividend': {
+    id: passive('sword-dividend'),
+    name: '검의 배당',
+    description: '혈액 동전을 혈마검에 투자하면 실제 투자량만큼 방어를 얻는다. 최대 5',
+    exclusiveTo: character('blood-spellblade'),
+    element: 'blood',
+    hook: 'combatStart',
+    effects: [],
+    mechanic: 'bloodSwordDividend',
+    price: 100
+  },
+  'red-reflux': {
+    id: passive('red-reflux'),
+    name: '붉은 환류',
+    description: '매 턴 처음 동전을 소비하면 임시 혈액 동전 1개를 버림 더미에 추가한다',
+    exclusiveTo: character('blood-spellblade'),
+    element: 'blood',
+    hook: 'turnStart',
+    effects: [],
+    mechanic: 'redReflux',
+    price: 110
   }
 } satisfies Record<string, PassiveDef>;
 

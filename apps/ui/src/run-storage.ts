@@ -4,6 +4,10 @@ import {
   RUN_SAVE_VERSION,
   MAX_SKILL_SLOTS,
   completedCombatCount,
+  isCoinEligibleForCharacter,
+  isLockedSkill,
+  isRewardSkillEligibleForCharacter,
+  isSkillEligibleForCharacter,
   nodeGoldReward,
   rolledEventIdFor,
   signatureElement,
@@ -27,11 +31,11 @@ export const RUN_SAVE_BACKUP_KEY = `${RUN_SAVE_KEY}.backup`;
 export const RUN_SAVE_QUARANTINE_KEY = `${RUN_SAVE_KEY}.quarantine`;
 
 export type LoadRunStatus =
-  | "missing"      // 저장 없음
-  | "loaded"       // 주 저장 정상
-  | "recovered"    // 주 손상 → 백업으로 복구 (주 원문은 격리)
-  | "corrupt"      // 주·백업 모두 파싱 불가 (원문 격리, 사용자 결정 대기)
-  | "unsupported"  // 형식은 유효하나 미지 버전/콘텐츠 (원문 격리, 사용자 결정 대기)
+  | "missing" // 저장 없음
+  | "loaded" // 주 저장 정상
+  | "recovered" // 주 손상 → 백업으로 복구 (주 원문은 격리)
+  | "corrupt" // 주·백업 모두 파싱 불가 (원문 격리, 사용자 결정 대기)
+  | "unsupported" // 형식은 유효하나 미지 버전/콘텐츠 (원문 격리, 사용자 결정 대기)
   | "unavailable"; // 저장소 접근 자체가 불가
 
 export interface LoadRunResult {
@@ -53,17 +57,14 @@ export type RunValidationContext = Pick<
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0;
+const isNonEmptyString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every(isNonEmptyString);
+const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isNonEmptyString);
 
 const isNonNegativeSafeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const isPositiveSafeInteger = (value: unknown): value is number =>
-  isNonNegativeSafeInteger(value) && value > 0;
+const isPositiveSafeInteger = (value: unknown): value is number => isNonNegativeSafeInteger(value) && value > 0;
 
 const isRunPhase = (value: unknown): value is RunPhase =>
   value === "ready" ||
@@ -77,9 +78,7 @@ const isRunPhase = (value: unknown): value is RunPhase =>
   value === "victory" ||
   value === "defeat";
 
-const isRunNodeKind = (
-  value: unknown,
-): value is RunSave["graph"]["layers"][number][number]["kind"] =>
+const isRunNodeKind = (value: unknown): value is RunSave["graph"]["layers"][number][number]["kind"] =>
   value === "combat" ||
   value === "elite" ||
   value === "shop" ||
@@ -88,24 +87,16 @@ const isRunNodeKind = (
   value === "treasure" ||
   value === "boss";
 
-const hasUniqueStrings = (values: readonly string[]): boolean =>
-  new Set(values).size === values.length;
+const hasUniqueStrings = (values: readonly string[]): boolean => new Set(values).size === values.length;
 
-const sameStrings = (
-  left: readonly unknown[],
-  right: readonly unknown[],
-): boolean =>
-  left.length === right.length &&
-  left.every((value, index) => String(value) === String(right[index]));
+const sameStrings = (left: readonly unknown[], right: readonly unknown[]): boolean =>
+  left.length === right.length && left.every((value, index) => String(value) === String(right[index]));
 
 const isSkillSlotArray = (value: unknown): value is (string | null)[] =>
-  Array.isArray(value) &&
-  value.every((entry) => entry === null || typeof entry === "string");
+  Array.isArray(value) && value.every((entry) => entry === null || typeof entry === "string");
 
-const isKnownCoin = (value: string, context: RunValidationContext): boolean =>
-  context.coins[value] !== undefined;
-const isKnownSkill = (value: string, context: RunValidationContext): boolean =>
-  context.skills[value] !== undefined;
+const isKnownCoin = (value: string, context: RunValidationContext): boolean => context.coins[value] !== undefined;
+const isKnownSkill = (value: string, context: RunValidationContext): boolean => context.skills[value] !== undefined;
 
 // P11 냉기 도적 리워크: P10까지 저장된 냉기 기사 스킬 ID를 새 역할에 가장 가까운
 // 확정 스킬로 승격한다. 현 콘텐츠 버전의 알 수 없는 ID는 계속 손상으로 거부한다.
@@ -117,20 +108,21 @@ const RETIRED_COLD_SKILL_REPLACEMENTS: Readonly<Record<string, string>> = {
   "winters-grasp": "frost-fur-cloak",
 };
 
-const migrateRetiredColdSkills = (
-  value: Record<string, unknown>,
-): Record<string, unknown> => {
+const migrateRetiredColdSkills = (value: Record<string, unknown>): Record<string, unknown> => {
   const mapSkill = (candidate: unknown): unknown =>
-    typeof candidate === "string"
-      ? (RETIRED_COLD_SKILL_REPLACEMENTS[candidate] ?? candidate)
-      : candidate;
-  const mapSkills = (candidate: unknown): unknown =>
-    Array.isArray(candidate) ? candidate.map(mapSkill) : candidate;
+    typeof candidate === "string" ? (RETIRED_COLD_SKILL_REPLACEMENTS[candidate] ?? candidate) : candidate;
+  const mapSkills = (candidate: unknown): unknown => (Array.isArray(candidate) ? candidate.map(mapSkill) : candidate);
   const pendingRewards = isRecord(value.pendingRewards)
-    ? { ...value.pendingRewards, skillOptions: mapSkills(value.pendingRewards.skillOptions) }
+    ? {
+        ...value.pendingRewards,
+        skillOptions: mapSkills(value.pendingRewards.skillOptions),
+      }
     : value.pendingRewards;
   const pendingShop = isRecord(value.pendingShop)
-    ? { ...value.pendingShop, skillOptions: mapSkills(value.pendingShop.skillOptions) }
+    ? {
+        ...value.pendingShop,
+        skillOptions: mapSkills(value.pendingShop.skillOptions),
+      }
     : value.pendingShop;
   return {
     ...value,
@@ -153,14 +145,10 @@ const legacyGraphForSave = (): RunSave["graph"] => ({
 // P7 D2 — v7 공통 패딩: 장착 8칸(null=빈 슬롯) / 강화 8칸(false)
 const MAX_SLOTS = MAX_SKILL_SLOTS;
 
-const paddedToV7 = (value: Record<string, unknown>): Record<string, unknown> => {
-  const equipped = Array.isArray(value.equippedSkills)
-    ? [...(value.equippedSkills as unknown[])]
-    : [];
+const paddedToCurrent = (value: Record<string, unknown>): Record<string, unknown> => {
+  const equipped = Array.isArray(value.equippedSkills) ? [...(value.equippedSkills as unknown[])] : [];
   while (equipped.length < MAX_SLOTS) equipped.push(null);
-  const upgraded = Array.isArray(value.upgradedSlots)
-    ? [...(value.upgradedSlots as unknown[])]
-    : [];
+  const upgraded = Array.isArray(value.upgradedSlots) ? [...(value.upgradedSlots as unknown[])] : [];
   while (upgraded.length < MAX_SLOTS) upgraded.push(false);
   return {
     ...value,
@@ -170,16 +158,16 @@ const paddedToV7 = (value: Record<string, unknown>): Record<string, unknown> => 
   };
 };
 
-const migratedLegacySave = (
-  value: Record<string, unknown>,
-): Record<string, unknown> | null => {
+const migratedLegacySave = (value: Record<string, unknown>): Record<string, unknown> | null => {
   if (value.version === RUN_SAVE_VERSION) return value;
+  // P12 v7 -> v8: the character validation below initializes Blood Sword investment to zero.
+  if (value.version === 7) return paddedToCurrent(value);
   // P7 D2 — v6 → v7: 장착/강화 배열을 8칸 패딩(빈 슬롯 null / false)만 — 필드 의미 불변.
-  if (value.version === 6) return paddedToV7(value);
+  if (value.version === 6) return paddedToCurrent(value);
   // v5 → v6 (P6 D1): 기존 그래프는 acts 부재 = 단일 레거시 막으로 해석되고,
   // 신규 필드는 기본값. 진행 중 런은 기존 규칙(actOfLayer=0, 스케일 ×1)으로 완주한다.
   if (value.version === 5)
-    return paddedToV7({
+    return paddedToCurrent({
       ...value,
       upgradedSlots: [false, false, false, false, false, false],
       acquiredPassives: [],
@@ -190,7 +178,7 @@ const migratedLegacySave = (
       pendingTreasure: undefined,
     });
   if (value.version === 4)
-    return paddedToV7({
+    return paddedToCurrent({
       ...value,
       pendingEvent: undefined,
       pendingEventCombat: undefined,
@@ -206,7 +194,7 @@ const migratedLegacySave = (
       pendingTreasure: undefined,
     });
   if (value.version === 3)
-    return paddedToV7({
+    return paddedToCurrent({
       ...value,
       pendingShop: undefined,
       shopPurchasedCoins: 0,
@@ -226,7 +214,7 @@ const migratedLegacySave = (
     });
   if (value.version !== 1 && value.version !== 2) return null;
   const graph = legacyGraphForSave();
-  return paddedToV7({
+  return paddedToCurrent({
     ...value,
     graph,
     nodeChoices: Array.from({ length: graph.layers.length }, () => 0),
@@ -249,23 +237,14 @@ const migratedLegacySave = (
   });
 };
 
-const coinShopPrice = (
-  coin: string,
-  character: string,
-  context: RunValidationContext,
-): number | null => {
+const coinShopPrice = (coin: string, character: string, context: RunValidationContext): number | null => {
   const element = context.coins[coin]?.element;
   if (element === undefined) return null;
   if (element === null) return 25;
-  return element === signatureElement(context as ContentDb, character as CharacterId)
-    ? 50
-    : 70;
+  return element === signatureElement(context as ContentDb, character as CharacterId) ? 50 : 70;
 };
 
-const skillShopPrice = (
-  skill: string,
-  context: RunValidationContext,
-): number | null => {
+const skillShopPrice = (skill: string, context: RunValidationContext): number | null => {
   const rarity = context.skills[skill]?.rarity;
   if (rarity === undefined) return null;
   if (rarity === "common") return 50;
@@ -273,41 +252,31 @@ const skillShopPrice = (
   return 120;
 };
 
-const parseRunGraph = (
-  value: unknown,
-  context: RunValidationContext,
-): RunSave["graph"] | null => {
+const isPassiveEligibleForCharacter = (passive: string, character: string, context: RunValidationContext): boolean => {
+  const definition = (context.passives ?? {})[passive];
+  return (
+    definition !== undefined && (definition.exclusiveTo === undefined || String(definition.exclusiveTo) === character)
+  );
+};
+
+const parseRunGraph = (value: unknown, context: RunValidationContext): RunSave["graph"] | null => {
   if (!isRecord(value) || !Array.isArray(value.layers)) return null;
   const ids = new Set<string>();
   const layers = value.layers.map((layer) => {
     if (!Array.isArray(layer) || layer.length === 0) return null;
     const nodes = layer.map((node) => {
-      if (
-        !isRecord(node) ||
-        !isNonEmptyString(node.id) ||
-        !isRunNodeKind(node.kind) ||
-        ids.has(node.id)
-      ) {
+      if (!isRecord(node) || !isNonEmptyString(node.id) || !isRunNodeKind(node.kind) || ids.has(node.id)) {
         return null;
       }
       ids.add(node.id);
       const encounter =
-        node.encounter === undefined
-          ? undefined
-          : isStringArray(node.encounter)
-            ? node.encounter
-            : null;
+        node.encounter === undefined ? undefined : isStringArray(node.encounter) ? node.encounter : null;
       if (encounter === null) return null;
       // 노드 종류별 payload 계약 (통합 감사): combat/elite/boss = 비어있지 않은
       // encounter 필수(전부 콘텐츠 사전에 존재)·eventId 금지, event/shop = 정적 payload 금지.
-      if (
-        node.kind === "combat" ||
-        node.kind === "elite" ||
-        node.kind === "boss"
-      ) {
+      if (node.kind === "combat" || node.kind === "elite" || node.kind === "boss") {
         if (encounter === undefined || encounter.length === 0) return null;
-        if (!encounter.every((id) => context.enemies[id] !== undefined))
-          return null;
+        if (!encounter.every((id) => context.enemies[id] !== undefined)) return null;
         if (node.eventId !== undefined) return null;
       } else if (node.kind === "event") {
         if (node.eventId !== undefined || encounter !== undefined) return null;
@@ -319,8 +288,7 @@ const parseRunGraph = (
     });
     return nodes.every((node) => node !== null) ? nodes : null;
   });
-  if (layers.length === 0 || layers.some((layer) => layer === null))
-    return null;
+  if (layers.length === 0 || layers.some((layer) => layer === null)) return null;
   // acts 메타 (P6 D1) — 부재 = 레거시 단일 막. 존재하면 오름차순·범위·0 시작 검증.
   if (value.acts !== undefined) {
     if (!Array.isArray(value.acts) || value.acts.length === 0) return null;
@@ -333,19 +301,17 @@ const parseRunGraph = (
     if ((value.acts[0] as { start: number }).start !== 0) return null;
     return {
       layers: layers as RunSave["graph"]["layers"],
-      acts: value.acts.map((act) => ({ start: (act as { start: number }).start })),
+      acts: value.acts.map((act) => ({
+        start: (act as { start: number }).start,
+      })),
     };
   }
   return { layers: layers as RunSave["graph"]["layers"] };
 };
 
-const validCharacterContext = (
-  characterId: string,
-  context: RunValidationContext,
-): boolean => {
+const validCharacterContext = (characterId: string, context: RunValidationContext): boolean => {
   const character = context.characters[characterId];
-  if (character === undefined || !isPositiveSafeInteger(character.maxHp))
-    return false;
+  if (character === undefined || !isPositiveSafeInteger(character.maxHp)) return false;
   const startingBag = character.startingBag.map(String);
   const startingSkills = character.startingSkills.map(String);
   return (
@@ -359,21 +325,19 @@ const validCharacterContext = (
   );
 };
 
-// P6 D1 보상 신스펙 검증: 동전 3택 + (엘리트 1|이벤트 희귀 2) 스킬 + 보스 패시브 ≤3.
+// P12 보상 검증: 현재 정의 수에 따라 기본+대표 속성 1~3택 +
+// (엘리트 1|이벤트 희귀 2) 스킬 + 보스 패시브 ≤3.
 // 레거시(acts 부재) v5 저장의 옛 흐름(3전투째 스킬 2택·제거 단계)도 구조 검증으로 수용 —
 // 코어의 v5 커맨드(resolveCoinRemoval 등)가 남아 있어 흐름이 완주 가능하다.
 const parsePendingRewards = (
   value: unknown,
+  character: string,
   equippedSkills: readonly (string | null)[],
   acquiredPassives: readonly string[],
   context: RunValidationContext,
+  allowLegacyOffers = false,
 ): PendingRewards | null => {
-  if (
-    !isRecord(value) ||
-    !isStringArray(value.coinOptions) ||
-    !isStringArray(value.skillOptions)
-  )
-    return null;
+  if (!isRecord(value) || !isStringArray(value.coinOptions) || !isStringArray(value.skillOptions)) return null;
   if (
     typeof value.coinChoiceResolved !== "boolean" ||
     typeof value.coinRemovalResolved !== "boolean" ||
@@ -385,9 +349,14 @@ const parsePendingRewards = (
   const coinOptions = value.coinOptions;
   const skillOptions = value.skillOptions;
   if (
-    coinOptions.length !== 3 ||
+    coinOptions.length < 1 ||
+    coinOptions.length > 3 ||
     !hasUniqueStrings(coinOptions) ||
-    !coinOptions.every((coin) => isKnownCoin(coin, context))
+    !coinOptions.every((coin) =>
+      allowLegacyOffers
+        ? isKnownCoin(coin, context)
+        : isCoinEligibleForCharacter(context as ContentDb, character as CharacterId, coin as CoinDefId),
+    )
   ) {
     return null;
   }
@@ -396,7 +365,11 @@ const parsePendingRewards = (
     skillOptions.length > 2 ||
     !hasUniqueStrings(skillOptions) ||
     !skillOptions.every(
-      (skill) => isKnownSkill(skill, context) && !equipped.has(skill),
+      (skill) =>
+        (allowLegacyOffers
+          ? isKnownSkill(skill, context)
+          : isRewardSkillEligibleForCharacter(context as ContentDb, character as CharacterId, skill as SkillId)) &&
+        !equipped.has(skill),
     )
   ) {
     return null;
@@ -404,11 +377,7 @@ const parsePendingRewards = (
   if (skillOptions.length === 0 && !value.skillChoiceResolved) return null;
 
   const passiveOptions =
-    value.passiveOptions === undefined
-      ? undefined
-      : isStringArray(value.passiveOptions)
-        ? value.passiveOptions
-        : null;
+    value.passiveOptions === undefined ? undefined : isStringArray(value.passiveOptions) ? value.passiveOptions : null;
   if (passiveOptions === null) return null;
   const owned = new Set(acquiredPassives);
   if (passiveOptions !== undefined) {
@@ -416,18 +385,12 @@ const parsePendingRewards = (
       passiveOptions.length > 3 ||
       !hasUniqueStrings(passiveOptions) ||
       !passiveOptions.every(
-        (passive) =>
-          (context.passives ?? {})[passive] !== undefined && !owned.has(passive),
+        (passive) => isPassiveEligibleForCharacter(passive, character, context) && !owned.has(passive),
       )
     )
       return null;
-    if (
-      value.passiveChoiceResolved !== undefined &&
-      typeof value.passiveChoiceResolved !== "boolean"
-    )
-      return null;
-    if (passiveOptions.length === 0 && value.passiveChoiceResolved === false)
-      return null;
+    if (value.passiveChoiceResolved !== undefined && typeof value.passiveChoiceResolved !== "boolean") return null;
+    if (passiveOptions.length === 0 && value.passiveChoiceResolved === false) return null;
   }
   const passiveChoiceResolved =
     passiveOptions === undefined
@@ -461,6 +424,7 @@ const parsePendingShop = (
   value: unknown,
   character: string,
   context: RunValidationContext,
+  allowLegacyOffers = false,
 ): PendingShop | null => {
   if (
     !isRecord(value) ||
@@ -482,29 +446,29 @@ const parsePendingShop = (
     skillOptions.length !== skillPrices.length ||
     !hasUniqueStrings(coinOptions) ||
     !hasUniqueStrings(skillOptions) ||
-    !coinOptions.every((coin) => isKnownCoin(coin, context)) ||
-    !skillOptions.every((skill) => isKnownSkill(skill, context)) ||
+    !coinOptions.every((coin) =>
+      allowLegacyOffers
+        ? isKnownCoin(coin, context)
+        : isCoinEligibleForCharacter(context as ContentDb, character as CharacterId, coin as CoinDefId),
+    ) ||
+    !skillOptions.every((skill) =>
+      allowLegacyOffers
+        ? isKnownSkill(skill, context)
+        : isRewardSkillEligibleForCharacter(context as ContentDb, character as CharacterId, skill as SkillId),
+    ) ||
     !coinPrices.every(isPositiveSafeInteger) ||
     !skillPrices.every(isPositiveSafeInteger)
   ) {
     return null;
   }
   if (
-    !coinOptions.every(
-      (coin, index) => coinPrices[index] === coinShopPrice(coin, character, context),
-    ) ||
-    !skillOptions.every(
-      (skill, index) => skillPrices[index] === skillShopPrice(skill, context),
-    )
+    !coinOptions.every((coin, index) => coinPrices[index] === coinShopPrice(coin, character, context)) ||
+    !skillOptions.every((skill, index) => skillPrices[index] === skillShopPrice(skill, context))
   ) {
     return null;
   }
   const passiveOptions =
-    value.passiveOptions === undefined
-      ? undefined
-      : isStringArray(value.passiveOptions)
-        ? value.passiveOptions
-        : null;
+    value.passiveOptions === undefined ? undefined : isStringArray(value.passiveOptions) ? value.passiveOptions : null;
   if (passiveOptions === null) return null;
   let passivePrices: number[] | undefined;
   if (passiveOptions !== undefined) {
@@ -515,9 +479,8 @@ const parsePendingShop = (
       !value.passivePrices.every(isPositiveSafeInteger) ||
       !passiveOptions.every(
         (passive, index) =>
-          (context.passives ?? {})[passive] !== undefined &&
-          (value.passivePrices as number[])[index] ===
-            (context.passives ?? {})[passive]!.price,
+          isPassiveEligibleForCharacter(passive, character, context) &&
+          (value.passivePrices as number[])[index] === (context.passives ?? {})[passive]!.price,
       )
     )
       return null;
@@ -536,10 +499,7 @@ const parsePendingShop = (
   return parsed;
 };
 
-const parsePendingEvent = (
-  value: unknown,
-  context: RunValidationContext,
-): { eventId: EventDefId } | null => {
+const parsePendingEvent = (value: unknown, context: RunValidationContext): { eventId: EventDefId } | null => {
   if (!isRecord(value) || !isNonEmptyString(value.eventId)) return null;
   if ((context.events ?? {})[value.eventId] === undefined) return null;
   return { eventId: value.eventId as EventDefId };
@@ -557,53 +517,47 @@ const normalizeRunSave = (
   if (migrated === null || migrated.version !== RUN_SAVE_VERSION) return null;
   if (!isNonEmptyString(migrated.contentVersion)) return null;
   const isLegacyContent = LEGACY_CONTENT_VERSIONS.includes(migrated.contentVersion);
+  const migratedFromLegacySave = rawValue.version !== RUN_SAVE_VERSION;
+  const allowLegacyOffers = migratedFromLegacySave || isLegacyContent;
   const value = isLegacyContent ? migrateRetiredColdSkills(migrated) : migrated;
   // 레거시 콘텐츠 버전(m5)은 현 콘텐츠의 부분집합·수치 불변이라 안전 마이그레이션 —
   // 반환 저장의 contentVersion은 현 버전으로 정규화되어 다음 저장부터 새 표기를 쓴다.
-  const contentVersionAccepted =
-    value.contentVersion === expectedContentVersion ||
-    isLegacyContent;
+  const contentVersionAccepted = value.contentVersion === expectedContentVersion || isLegacyContent;
   if (!contentVersionAccepted) return null;
-  if (!isNonEmptyString(value.runSeed) || !isNonEmptyString(value.character))
-    return null;
+  if (!isNonEmptyString(value.runSeed) || !isNonEmptyString(value.character)) return null;
   if (!isRunPhase(value.phase)) return null;
   if (!validCharacterContext(value.character, context)) return null;
 
   const character = context.characters[value.character];
   if (character === undefined) return null;
-  if (!isPositiveSafeInteger(value.maxHp) || value.maxHp !== character.maxHp)
-    return null;
+  const bloodSwordInvestment =
+    value.bloodSwordInvestment === undefined
+      ? character.trait.mechanic === "bloodSword"
+        ? 0
+        : undefined
+      : value.bloodSwordInvestment;
   if (
-    !isNonNegativeSafeInteger(value.currentHp) ||
-    value.currentHp > value.maxHp
+    character.trait.mechanic === "bloodSword"
+      ? !isNonNegativeSafeInteger(bloodSwordInvestment) || bloodSwordInvestment > 30
+      : bloodSwordInvestment !== undefined
   )
     return null;
-  if (value.phase === "defeat" ? value.currentHp !== 0 : value.currentHp === 0)
-    return null;
+  const normalizedBloodSwordInvestment = typeof bloodSwordInvestment === "number" ? bloodSwordInvestment : undefined;
+  if (!isPositiveSafeInteger(value.maxHp) || value.maxHp !== character.maxHp) return null;
+  if (!isNonNegativeSafeInteger(value.currentHp) || value.currentHp > value.maxHp) return null;
+  if (value.phase === "defeat" ? value.currentHp !== 0 : value.currentHp === 0) return null;
 
   const graph = parseRunGraph(value.graph, context);
   if (graph === null) return null;
-  if (
-    !isNonNegativeSafeInteger(value.combatIndex) ||
-    value.combatIndex >= graph.layers.length
-  )
-    return null;
+  if (!isNonNegativeSafeInteger(value.combatIndex) || value.combatIndex >= graph.layers.length) return null;
   if (!Array.isArray(value.nodeChoices)) return null;
   if (value.nodeChoices.length !== graph.layers.length) return null;
   const nodeChoices = value.nodeChoices;
-  if (
-    !nodeChoices.every(
-      (choice, index) =>
-        isNonNegativeSafeInteger(choice) && choice < graph.layers[index]!.length,
-    )
-  ) {
+  if (!nodeChoices.every((choice, index) => isNonNegativeSafeInteger(choice) && choice < graph.layers[index]!.length)) {
     return null;
   }
   if (!isNonNegativeSafeInteger(value.shopRemovals)) return null;
-  if (
-    !isNonNegativeSafeInteger(value.shopPurchasedCoins) ||
-    !isNonNegativeSafeInteger(value.shopPurchasedSkills)
-  )
+  if (!isNonNegativeSafeInteger(value.shopPurchasedCoins) || !isNonNegativeSafeInteger(value.shopPurchasedSkills))
     return null;
   if (
     !isNonNegativeSafeInteger(value.eventCombats) ||
@@ -630,36 +584,20 @@ const normalizeRunSave = (
     !value.acquiredPassives.every((passive) => {
       const def = (context.passives ?? {})[passive];
       return (
-        def !== undefined &&
-        (def.exclusiveTo === undefined ||
-          String(def.exclusiveTo) === String(value.character))
+        def !== undefined && (def.exclusiveTo === undefined || String(def.exclusiveTo) === String(value.character))
       );
     })
   )
     return null;
   if (value.phase === "rewards" && value.combatIndex === 0) return null;
-  if (value.phase === "victory" && value.combatIndex !== graph.layers.length - 1)
-    return null;
-  if (
-    value.phase === "choose-node" &&
-    (graph.layers[value.combatIndex]?.length ?? 0) < 2
-  )
-    return null;
+  if (value.phase === "victory" && value.combatIndex !== graph.layers.length - 1) return null;
+  if (value.phase === "choose-node" && (graph.layers[value.combatIndex]?.length ?? 0) < 2) return null;
   if (!isNonNegativeSafeInteger(value.attempt)) return null;
   if (value.phase === "rewards" && value.attempt !== 0) return null;
   if (!isNonNegativeSafeInteger(value.gold)) return null;
-  if (
-    value.combatIndex === 0 &&
-    value.phase !== "defeat" &&
-    value.currentHp !== value.maxHp
-  )
-    return null;
+  if (value.combatIndex === 0 && value.phase !== "defeat" && value.currentHp !== value.maxHp) return null;
 
-  if (
-    !isStringArray(value.bag) ||
-    !value.bag.every((coin) => isKnownCoin(coin, context))
-  )
-    return null;
+  if (!isStringArray(value.bag) || !value.bag.every((coin) => isKnownCoin(coin, context))) return null;
   const startingBag = character.startingBag.map(String);
   const progressProbe = {
     ...value,
@@ -679,9 +617,7 @@ const normalizeRunSave = (
       const node = graph.layers[layer]?.[nodeChoices[layer] ?? 0];
       if (node === undefined) continue;
       if (node.kind === "event") {
-        const rolled = (context.events ?? {})[
-          String(rolledEventIdFor(value.runSeed, layer, context as ContentDb))
-        ];
+        const rolled = (context.events ?? {})[String(rolledEventIdFor(value.runSeed, layer, context as ContentDb))];
         if (rolled === undefined) return null;
         completedEventTypes[rolled.risk] += 1;
       } else if (node.kind !== "shop") {
@@ -701,76 +637,60 @@ const normalizeRunSave = (
     }
     if (value.phase === "victory") {
       const node = graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex] ?? 0];
-      if (node !== undefined && node.kind !== "shop" && node.kind !== "event")
-        grossGold += nodeGoldReward(node.kind);
+      if (node !== undefined && node.kind !== "shop" && node.kind !== "event") grossGold += nodeGoldReward(node.kind);
     }
     grossGold += 70 * value.eventCombats;
-    const hasEventNodes = graph.layers.some((layer) =>
-      layer.some((node) => node.kind === "event"),
-    );
+    const hasEventNodes = graph.layers.some((layer) => layer.some((node) => node.kind === "event"));
     // 수락 산술: gains−losses = 피의 제물 수락 수, losses = 제단+희생 수락 수
     const bloodAccepts = value.eventCoinGains - value.eventCoinLosses;
     if (bloodAccepts < 0 || bloodAccepts > completedEventTypes.hp) return null;
-    if (value.eventCoinLosses > completedEventTypes.gold + completedEventTypes.coin)
-      return null;
+    if (value.eventCoinLosses > completedEventTypes.gold + completedEventTypes.coin) return null;
     if (value.eventCombats > completedEventTypes.combat) return null;
     // HP 보존: 피의 제물 수락마다 5씩 잃었어야 한다 — 레거시(무회복) 그래프 한정.
     // P6 그래프는 휴식 회복·막 보스 전체 회복이 있어 이 상한이 성립하지 않는다.
-    if (graph.acts === undefined && value.currentHp + 5 * bloodAccepts > value.maxHp)
-      return null;
+    if (graph.acts === undefined && value.currentHp + 5 * bloodAccepts > value.maxHp) return null;
     // 골드 보존: 최소 변환 제단 수락 수 = losses − 희생 가용 수, 각 100 지불
-    const minTransmute = Math.max(
-      0,
-      value.eventCoinLosses - completedEventTypes.coin,
-    );
+    const minTransmute = Math.max(0, value.eventCoinLosses - completedEventTypes.coin);
     // 골드-총수입 상한은 이벤트 시대 그래프에만 적용한다 — 레거시(무이벤트) 그래프
     // 저장은 골드 의미론이 경제 이전 세대라 counters 검사(위 3종)만 유효하다.
     if (hasEventNodes && value.gold + 100 * minTransmute > grossGold) return null;
   }
   // 검증 High: 최종 보스 전투는 승리로 런이 끝나 보상 페이즈가 없다 — victory에서
   // completedCombatCount가 세는 마지막 전투를 코인/스킬 보상 원천에서 제외한다.
-  const rewardGrantingCombats =
-    value.phase === "victory" ? completedCombats - 1 : completedCombats;
+  const rewardGrantingCombats = value.phase === "victory" ? completedCombats - 1 : completedCombats;
   const rewardBagCombats = rewardGrantingCombats + value.eventCombats;
-  const minimumBagSize = Math.max(
-    1,
-    startingBag.length - value.shopRemovals - value.eventCoinLosses,
-  );
-  const maximumBagSize =
-    startingBag.length + rewardBagCombats + value.shopPurchasedCoins + value.eventCoinGains;
-  if (value.bag.length < minimumBagSize || value.bag.length > maximumBagSize)
-    return null;
-  if (value.combatIndex === 0 && !sameStrings(value.bag, startingBag))
-    return null;
+  const minimumBagSize = Math.max(1, startingBag.length - value.shopRemovals - value.eventCoinLosses);
+  const maximumBagSize = startingBag.length + rewardBagCombats + value.shopPurchasedCoins + value.eventCoinGains;
+  if (value.bag.length < minimumBagSize || value.bag.length > maximumBagSize) return null;
+  if (value.combatIndex === 0 && !sameStrings(value.bag, startingBag)) return null;
 
   // P7 D2 — 슬롯 8 고정, null = 빈 슬롯. 중복/존재 검증은 non-null만.
-  if (
-    !isSkillSlotArray(value.equippedSkills) ||
-    value.equippedSkills.length !== MAX_SLOTS
-  )
+  if (!isSkillSlotArray(value.equippedSkills) || value.equippedSkills.length !== MAX_SLOTS) return null;
+  if (value.equippedSkills.some((skill, index) => skill === null && (value.upgradedSlots as boolean[])[index] === true))
     return null;
-  if (
-    value.equippedSkills.some(
-      (skill, index) =>
-        skill === null && (value.upgradedSlots as boolean[])[index] === true,
-    )
-  )
-    return null;
-  const equippedNonNull = value.equippedSkills.filter(
-    (skill): skill is string => skill !== null,
-  );
+  const equippedNonNull = value.equippedSkills.filter((skill): skill is string => skill !== null);
   if (
     equippedNonNull.length === 0 ||
     !hasUniqueStrings(equippedNonNull) ||
-    !equippedNonNull.every((skill) => isKnownSkill(skill, context))
+    !equippedNonNull.every((skill) =>
+      isSkillEligibleForCharacter(context as ContentDb, value.character as CharacterId, skill as SkillId),
+    )
   ) {
     return null;
   }
   const startingSkills: (string | null)[] = character.startingSkills.map(String);
   while (startingSkills.length < MAX_SLOTS) startingSkills.push(null);
-  const changedSlots = value.equippedSkills.filter(
-    (skill, index) => skill !== startingSkills[index],
-  ).length;
+  const equippedSkillsForValidation = value.equippedSkills as (string | null)[];
+  if (
+    startingSkills.some(
+      (skill, index) =>
+        isLockedSkill(context as ContentDb, skill === null ? null : (skill as SkillId)) &&
+        equippedSkillsForValidation[index] !== skill,
+    )
+  ) {
+    return null;
+  }
+  const changedSlots = value.equippedSkills.filter((skill, index) => skill !== startingSkills[index]).length;
   let completedSkillRewardCount: number;
   if (graph.acts !== undefined) {
     // P6 신스펙: 스킬 제안 원천 = 엘리트 정산 + 이벤트 전투(희귀 2택) + 상점 구매
@@ -780,12 +700,10 @@ const normalizeRunSave = (
       const node = graph.layers[layer]?.[nodeChoices[layer] ?? 0];
       if (node?.kind === "elite") settledElites += 1;
     }
-    completedSkillRewardCount =
-      settledElites + value.eventCombats + value.shopPurchasedSkills;
+    completedSkillRewardCount = settledElites + value.eventCombats + value.shopPurchasedSkills;
   } else {
     completedSkillRewardCount =
-      Math.max(0, rewardBagCombats - (value.phase === "rewards" ? 2 : 1)) +
-      value.shopPurchasedSkills;
+      Math.max(0, rewardBagCombats - (value.phase === "rewards" ? 2 : 1)) + value.shopPurchasedSkills;
   }
   if (changedSlots > completedSkillRewardCount) return null;
 
@@ -794,19 +712,20 @@ const normalizeRunSave = (
       ? undefined
       : parsePendingRewards(
           value.pendingRewards,
+          value.character,
           value.equippedSkills,
           value.acquiredPassives,
           context,
+          allowLegacyOffers,
         );
   if (value.phase === "rewards" && pendingRewards === undefined) return null;
-  if (value.phase !== "rewards" && value.pendingRewards !== undefined)
-    return null;
+  if (value.phase !== "rewards" && value.pendingRewards !== undefined) return null;
   if (pendingRewards === null) return null;
 
   const pendingShop =
     value.pendingShop === undefined
       ? undefined
-      : parsePendingShop(value.pendingShop, value.character, context);
+      : parsePendingShop(value.pendingShop, value.character, context, allowLegacyOffers);
   if (value.phase === "shop" && pendingShop === undefined) return null;
   if (value.phase !== "shop" && value.pendingShop !== undefined) return null;
   if (pendingShop === null) return null;
@@ -818,7 +737,7 @@ const normalizeRunSave = (
     if (option !== null) {
       if (
         !isNonEmptyString(option) ||
-        (context.passives ?? {})[option] === undefined ||
+        !isPassiveEligibleForCharacter(option, value.character, context) ||
         value.acquiredPassives.includes(option)
       )
         return null;
@@ -828,23 +747,16 @@ const normalizeRunSave = (
     };
   }
   if (value.phase === "treasure" && pendingTreasure === undefined) return null;
-  if (value.phase !== "treasure" && value.pendingTreasure !== undefined)
-    return null;
+  if (value.phase !== "treasure" && value.pendingTreasure !== undefined) return null;
   if (value.phase === "rest" || value.phase === "treasure") {
     const node = graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex]];
     if (node?.kind !== value.phase) return null;
   }
 
-  const pendingEvent =
-    value.pendingEvent === undefined
-      ? undefined
-      : parsePendingEvent(value.pendingEvent, context);
+  const pendingEvent = value.pendingEvent === undefined ? undefined : parsePendingEvent(value.pendingEvent, context);
   const pendingEventCombat =
-    value.pendingEventCombat === undefined
-      ? undefined
-      : parsePendingEvent(value.pendingEventCombat, context);
-  const currentNode =
-    graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex]];
+    value.pendingEventCombat === undefined ? undefined : parsePendingEvent(value.pendingEventCombat, context);
+  const currentNode = graph.layers[value.combatIndex]?.[nodeChoices[value.combatIndex]];
   if (value.phase === "event") {
     if (pendingEvent === undefined || currentNode?.kind !== "event") return null;
   } else if (value.pendingEvent !== undefined) {
@@ -871,6 +783,7 @@ const normalizeRunSave = (
     equippedSkills: [...value.equippedSkills] as EquippedSkills,
     upgradedSlots: [...value.upgradedSlots] as RunSave["upgradedSlots"],
     acquiredPassives: value.acquiredPassives as RunSave["acquiredPassives"],
+    ...(normalizedBloodSwordInvestment === undefined ? {} : { bloodSwordInvestment: normalizedBloodSwordInvestment }),
     gold: value.gold,
     graph,
     nodeChoices,
@@ -888,28 +801,16 @@ const normalizeRunSave = (
     attempt: value.attempt,
     phase: value.phase,
   };
-  const withRewards =
-    pendingRewards === undefined ? save : { ...save, pendingRewards };
-  const withShop =
-    pendingShop === undefined ? withRewards : { ...withRewards, pendingShop };
-  const withEvent =
-    pendingEvent === undefined ? withShop : { ...withShop, pendingEvent };
-  const withEventCombat =
-    pendingEventCombat === undefined
-      ? withEvent
-      : { ...withEvent, pendingEventCombat };
-  return pendingTreasure === undefined
-    ? withEventCombat
-    : { ...withEventCombat, pendingTreasure };
+  const withRewards = pendingRewards === undefined ? save : { ...save, pendingRewards };
+  const withShop = pendingShop === undefined ? withRewards : { ...withRewards, pendingShop };
+  const withEvent = pendingEvent === undefined ? withShop : { ...withShop, pendingEvent };
+  const withEventCombat = pendingEventCombat === undefined ? withEvent : { ...withEvent, pendingEventCombat };
+  return pendingTreasure === undefined ? withEventCombat : { ...withEventCombat, pendingTreasure };
 };
 
-export const serializeRunSave = (
-  save: RunSave,
-  context: RunValidationContext,
-): string => {
+export const serializeRunSave = (save: RunSave, context: RunValidationContext): string => {
   const normalized = normalizeRunSave(save, save.contentVersion, context);
-  if (normalized === null)
-    throw new Error("cannot serialize an invalid run save");
+  if (normalized === null) throw new Error("cannot serialize an invalid run save");
   return JSON.stringify(normalized);
 };
 
@@ -919,21 +820,13 @@ export const parseRunSave = (
   context: RunValidationContext,
 ): RunSave | null => {
   try {
-    return normalizeRunSave(
-      JSON.parse(raw) as unknown,
-      expectedContentVersion,
-      context,
-    );
+    return normalizeRunSave(JSON.parse(raw) as unknown, expectedContentVersion, context);
   } catch {
     return null;
   }
 };
 
-export const saveRun = (
-  storage: StorageLike,
-  save: RunSave,
-  context: RunValidationContext,
-): boolean => {
+export const saveRun = (storage: StorageLike, save: RunSave, context: RunValidationContext): boolean => {
   const raw = serializeRunSave(save, context);
   let primaryOk = false;
   try {
@@ -953,21 +846,14 @@ export const saveRun = (
 // 손상 vs 미지원 판별: JSON 파싱 불가/형식 파손 = corrupt. 파싱은 되는데
 // (a) 미래 스키마 버전 또는 (b) 알 수 없는 콘텐츠 버전이면 = unsupported
 // (다른 세대의 정상 저장 — 데이터 파손이 아니다).
-const classifyInvalidRaw = (
-  raw: string,
-  expectedContentVersion: string,
-): "corrupt" | "unsupported" => {
+const classifyInvalidRaw = (raw: string, expectedContentVersion: string): "corrupt" | "unsupported" => {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (typeof value !== "object" || value === null) return "corrupt";
     const version = value.version;
-    if (typeof version === "number" && version > RUN_SAVE_VERSION)
-      return "unsupported";
+    if (typeof version === "number" && version > RUN_SAVE_VERSION) return "unsupported";
     if (typeof value.contentVersion === "string") {
-      const knownContentVersions = new Set<string>([
-        expectedContentVersion,
-        ...LEGACY_CONTENT_VERSIONS,
-      ]);
+      const knownContentVersions = new Set<string>([expectedContentVersion, ...LEGACY_CONTENT_VERSIONS]);
       if (!knownContentVersions.has(value.contentVersion)) return "unsupported";
     }
     return "corrupt";
@@ -997,8 +883,7 @@ export const loadRunDetailed = (
   } catch {
     return { status: "unavailable", save: null };
   }
-  if (primaryRaw === null && backupRaw === null)
-    return { status: "missing", save: null };
+  if (primaryRaw === null && backupRaw === null) return { status: "missing", save: null };
 
   if (primaryRaw !== null) {
     const primary = parseRunSave(primaryRaw, expectedContentVersion, context);
@@ -1030,8 +915,7 @@ export const loadRun = (
   storage: StorageLike,
   expectedContentVersion: string,
   context: RunValidationContext,
-): RunSave | null =>
-  loadRunDetailed(storage, expectedContentVersion, context).save;
+): RunSave | null => loadRunDetailed(storage, expectedContentVersion, context).save;
 
 export const clearRun = (storage: StorageLike): void => {
   try {
