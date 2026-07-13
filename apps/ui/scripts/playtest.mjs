@@ -1041,7 +1041,9 @@ const winCurrentCombat = async (page) => {
   );
 
   await page.locator(".pile-button.discard").click();
-  const emptyDiscardText = await page.locator(".pile-pop.discard").innerText();
+  const emptyDiscard = page.locator(".pile-pop.discard");
+  await emptyDiscard.waitFor({ state: "visible" });
+  const emptyDiscardText = await emptyDiscard.innerText();
   check(
     "S11 빈 버림 인스펙터 열림",
     emptyDiscardText.includes("아직 버린 동전이 없다"),
@@ -1052,14 +1054,14 @@ const winCurrentCombat = async (page) => {
   );
 
   await page.locator(".pile-button.exhausted").click();
+  const emptyExhaust = page.locator(".pile-pop.exhausted");
+  await emptyExhaust.waitFor({ state: "visible" });
   check(
     "S11 인스펙터 상호 배타적",
     (await page.locator(".pile-pop").count()) === 1 &&
-      (await page.locator(".pile-pop.exhausted").count()) === 1,
+      (await emptyExhaust.count()) === 1,
   );
-  const emptyExhaustText = await page
-    .locator(".pile-pop.exhausted")
-    .innerText();
+  const emptyExhaustText = await emptyExhaust.innerText();
   check(
     "S11 소모 수명주기 설명",
     emptyExhaustText.includes("영구 동전은 전투 후 복귀") &&
