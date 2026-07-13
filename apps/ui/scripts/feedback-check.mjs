@@ -129,9 +129,9 @@ try {
     const { page, errors } = await boot();
     await placeInto(page, 2, 0);
     await placeInto(page, 2, 1);
-    const strikePreview = await card(page, 2)
-      .locator(".preview-tip")
-      .innerText({ timeout: 2000 });
+    const strikePreviewTip = page.locator("#skill-preview-2");
+    await strikePreviewTip.waitFor({ state: "visible" });
+    const strikePreview = await strikePreviewTip.innerText();
     check("불타는 일격 프리뷰 자해 없음", !/자해/.test(strikePreview), strikePreview);
     check(
       "불타는 일격 프리뷰 코인 생성",
@@ -140,9 +140,9 @@ try {
     );
 
     await placeInto(page, 0);
-    const slashPreview = await card(page, 0)
-      .locator(".preview-tip")
-      .innerText({ timeout: 2000 });
+    const slashPreviewTip = page.locator("#skill-preview-0");
+    await slashPreviewTip.waitFor({ state: "visible" });
+    const slashPreview = await slashPreviewTip.innerText();
     check("베기 프리뷰 자해 없음", !/자해/.test(slashPreview), slashPreview);
     check("프리뷰 시나리오 에러 0", errors.length === 0, errors.join(" | "));
     await page.close();
