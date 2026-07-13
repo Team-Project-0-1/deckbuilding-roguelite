@@ -113,6 +113,31 @@ const waitForKeywordTooltip = (page, description, visible) =>
     { expected: description, shouldBeVisible: visible },
   );
 
+const tooltipLayerEvidence = (page, expected) =>
+  page.evaluate((text) => {
+    const tip = [...document.querySelectorAll('[role="tooltip"]')].find(
+      (node) => node.textContent?.includes(text) === true,
+    );
+    if (!(tip instanceof HTMLElement)) return null;
+    const rect = tip.getBoundingClientRect();
+    const previousPointerEvents = tip.style.pointerEvents;
+    tip.style.pointerEvents = "auto";
+    const topmost = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    tip.style.pointerEvents = previousPointerEvents;
+    return {
+      insideViewport:
+        rect.left >= 8 &&
+        rect.top >= 8 &&
+        rect.right <= innerWidth - 8 &&
+        rect.bottom <= innerHeight - 8,
+      layer: tip.parentElement?.dataset.overlayLayer ?? null,
+      topmost: topmost === tip || tip.contains(topmost),
+    };
+  }, expected);
+
 const continueFromTitleIfShown = async (page) => {
   const continueButton = page.locator('[data-testid="title-continue"]');
   if ((await continueButton.count()) === 0) return;
@@ -2841,6 +2866,14 @@ const winCurrentCombat = async (page) => {
     await chip.hover();
     await waitForTurnBuffTooltip(page, "공격 스킬 해결 후", true);
     check("S22 턴 버프 툴팁 hover", await turnBuffTooltipVisible(page, "공격 스킬 해결 후"));
+    const turnBuffLayer = await tooltipLayerEvidence(page, "공격 스킬 해결 후");
+    check(
+      "S22 턴 버프 툴팁 포털·경계·최상단",
+      turnBuffLayer?.layer === "tooltip" &&
+        turnBuffLayer.insideViewport &&
+        turnBuffLayer.topmost,
+      JSON.stringify(turnBuffLayer),
+    );
     await page.mouse.move(20, 20);
     await chip.focus();
     await waitForTurnBuffTooltip(page, "공격 스킬 해결 후", true);
@@ -4101,6 +4134,14 @@ const winCurrentCombat = async (page) => {
   await chip.hover();
   await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, true);
   check("S32 패시브 툴팁 hover 표시", true);
+  const passiveLayer = await tooltipLayerEvidence(page, PASSIVE_DESCRIPTION);
+  check(
+    "S32 패시브 툴팁 포털·경계·최상단",
+    passiveLayer?.layer === "tooltip" &&
+      passiveLayer.insideViewport &&
+      passiveLayer.topmost,
+    JSON.stringify(passiveLayer),
+  );
   await page.locator(".unit-name").first().hover();
   await waitForKeywordTooltip(page, PASSIVE_DESCRIPTION, false);
   await chip.click();

@@ -2,6 +2,7 @@ import type { TurnTriggerInstance } from "@game/core";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Keyword } from "./keywords";
+import { AnchoredOverlay } from "./overlay";
 
 const triggerName = (id: string): string =>
   ({
@@ -35,19 +36,24 @@ function TurnBuffChip(props: {
 }): JSX.Element {
   const id = useId();
   const host = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
   const name = triggerName(props.trigger.trigger.id);
   const effect = triggerEffectText(props.trigger.trigger);
+  const open = !suppressed && (focused || hovered || pinned);
 
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!host.current?.contains(event.target as Node)) setOpen(false);
+      if (host.current?.contains(event.target as Node)) return;
+      setPinned(false);
+      setSuppressed(true);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setOpen(false);
+      setPinned(false);
       setSuppressed(true);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -64,7 +70,11 @@ function TurnBuffChip(props: {
       data-open={open ? "true" : undefined}
       data-suppressed={suppressed ? "true" : undefined}
       ref={host}
-      onMouseLeave={() => setSuppressed(false)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setSuppressed(false);
+      }}
     >
       <button
         aria-describedby={id}
@@ -74,27 +84,43 @@ function TurnBuffChip(props: {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          setSuppressed(false);
-          setOpen((current) => !current);
+          if (pinned) {
+            setPinned(false);
+            setSuppressed(true);
+          } else {
+            setSuppressed(false);
+            setPinned(true);
+          }
         }}
-        onBlur={() => setSuppressed(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          setSuppressed(false);
+        }}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.stopPropagation();
-          setOpen(false);
+          setPinned(false);
           setSuppressed(true);
         }}
       >
         <span className="turn-buff-chip__name">{name}</span>
         <span className="turn-buff-chip__effect">{effect}</span>
       </button>
-      <span className="turn-buff-tip" id={id} role="tooltip">
+      <AnchoredOverlay
+        anchorRef={host}
+        className="turn-buff-tip"
+        id={id}
+        interactive
+        open={open}
+        role="tooltip"
+      >
         <strong>{name}</strong>
         <span>
           <Keyword term="trigger">턴 버프</Keyword> ·{" "}
           {hookText(props.trigger.trigger.hook)} {effect}
         </span>
-      </span>
+      </AnchoredOverlay>
     </span>
   );
 }

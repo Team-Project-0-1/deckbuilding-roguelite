@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { AnchoredOverlay } from "./overlay";
+
 import "./keywords.css";
 
 export type KeywordTerm =
@@ -105,20 +107,27 @@ export function Keyword(props: {
 }): JSX.Element {
   const id = useId();
   const host = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [pinned, setPinned] = useState(false);
   // hover/:focus-visible 표시도 Escape로 즉시 해제돼야 한다 (WCAG 1.4.13 — 포커스
   // 이동 없이 닫기). 억제는 hover 이탈·blur에서 풀려 다음 표시를 막지 않는다.
   const [suppressed, setSuppressed] = useState(false);
   const entry = props.entry ?? KEYWORD_GLOSSARY[props.term];
+  const open = !suppressed && (focused || hovered || pinned);
 
   useEffect(() => {
     if (!open) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!host.current?.contains(event.target as Node)) setOpen(false);
+      if (host.current?.contains(event.target as Node)) return;
+      setPinned(false);
+      setSuppressed(true);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setPinned(false);
+      setSuppressed(true);
     };
 
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -135,7 +144,11 @@ export function Keyword(props: {
       data-open={open ? "true" : undefined}
       data-suppressed={suppressed ? "true" : undefined}
       ref={host}
-      onMouseLeave={() => setSuppressed(false)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setSuppressed(false);
+      }}
     >
       <button
         aria-describedby={id}
@@ -144,23 +157,38 @@ export function Keyword(props: {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          setSuppressed(false);
-          setOpen((current) => !current);
+          if (pinned) {
+            setPinned(false);
+            setSuppressed(true);
+          } else {
+            setSuppressed(false);
+            setPinned(true);
+          }
         }}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.stopPropagation();
-          setOpen(false);
+          setPinned(false);
           setSuppressed(true);
         }}
-        onBlur={() => setSuppressed(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          setSuppressed(false);
+        }}
       >
         {props.children ?? entry.label}
       </button>
-      <span className="kw-tip" id={id} role="tooltip">
+      <AnchoredOverlay
+        anchorRef={host}
+        className="kw-tip"
+        id={id}
+        open={open}
+        role="tooltip"
+      >
         <strong>{entry.label}</strong>
         {entry.description}
-      </span>
+      </AnchoredOverlay>
     </span>
   );
 }

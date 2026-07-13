@@ -24,11 +24,6 @@
 }
 
 .kw-tip {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 7px);
-  z-index: 20;
-  display: none;
   width: max-content;
   max-width: 220px;
   padding: 7px 9px;
@@ -40,7 +35,6 @@
   background: var(--slate, #2f3241);
   border: 2px solid var(--out, #151019);
   box-shadow: 0 4px 0 rgba(28, 23, 36, 0.5);
-  transform: translateX(-50%);
   pointer-events: none;
 }
 
@@ -54,13 +48,3 @@
   border-bottom: 1px solid var(--slate-2, #59627f);
 }
 
-.kw-host:hover .kw-tip,
-.kw:focus-visible + .kw-tip,
-.kw-host[data-open="true"] .kw-tip {
-  display: block;
-}
-
-/* Escape 억제 — hover/focus 표시 규칙보다 우선한다 (해제는 hover 이탈·blur에서) */
-.kw-host[data-suppressed="true"] .kw-tip {
-  display: none;
-}

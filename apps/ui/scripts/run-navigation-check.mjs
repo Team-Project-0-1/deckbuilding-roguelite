@@ -88,6 +88,38 @@ try {
     )) !== null,
   );
 
+  const keywordButton = page.locator(".skill-card .kw").first();
+  check("combat card keyword exists", (await keywordButton.count()) === 1);
+  if ((await keywordButton.count()) === 1) {
+    await keywordButton.click();
+    const keywordId = await keywordButton.getAttribute("aria-describedby");
+    await page.waitForFunction(
+      (id) =>
+        id !== null &&
+        document.getElementById(id)?.dataset.placement !== undefined,
+      keywordId,
+    );
+    const keywordLayer = await page.evaluate((id) => {
+      const tip = document.getElementById(id);
+      if (!(tip instanceof HTMLElement)) return null;
+      const rect = tip.getBoundingClientRect();
+      return {
+        insideViewport:
+          rect.left >= 8 &&
+          rect.top >= 8 &&
+          rect.right <= innerWidth - 8 &&
+          rect.bottom <= innerHeight - 8,
+        layer: tip.parentElement?.dataset.overlayLayer ?? null,
+      };
+    }, keywordId);
+    check(
+      "combat card keyword uses unclipped tooltip layer",
+      keywordLayer?.layer === "tooltip" && keywordLayer.insideViewport,
+      JSON.stringify(keywordLayer),
+    );
+    await page.keyboard.press("Escape");
+  }
+
   await page.locator('[data-testid="run-menu-open"]').click();
   await page.waitForSelector('[data-testid="run-menu"]');
   await page.keyboard.press("Escape");
