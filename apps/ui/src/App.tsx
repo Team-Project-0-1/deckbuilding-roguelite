@@ -44,7 +44,11 @@ import {
 } from "@game/core";
 import type { CombatEvent, CombatState, Command } from "@game/core";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  RefObject,
+} from "react";
 
 import "./App.css";
 import "./vfx.css";
@@ -85,6 +89,7 @@ import { EventScreen } from "./event-screen";
 import { NodeChoice } from "./node-choice";
 import { ShopScreen } from "./shop-screen";
 import { Keyword } from "./keywords";
+import { AnchoredOverlay, OverlayPortal } from "./overlay";
 import { buildResolutionSummary, statusKo } from "./resolution-summary";
 import { ResolutionTicket } from "./resolution-ticket";
 import type { ResolutionSummary } from "./resolution-summary";
@@ -577,18 +582,23 @@ const PILE_COPY: Record<
 };
 
 const PilePopover = ({
+  anchorRef,
   zone,
   groups,
 }: {
+  anchorRef: RefObject<HTMLElement>;
   zone: CoinPileZone;
   groups: CoinPileGroup[];
 }) => {
   const copy = PILE_COPY[zone];
   return (
-    <div
-      aria-label={`${copy.label} 구성`}
+    <AnchoredOverlay
+      anchorRef={anchorRef}
+      ariaLabel={`${copy.label} 구성`}
       className={`pile-pop ${zone === "draw" ? "pouch-pop" : ""} ${zone}`}
       id={`${zone}-pile-pop`}
+      interactive
+      open
       role="dialog"
     >
       <strong>{copy.title}</strong>
@@ -632,7 +642,7 @@ const PilePopover = ({
           })}
         </ul>
       )}
-    </div>
+    </AnchoredOverlay>
   );
 };
 
@@ -2238,8 +2248,14 @@ const CombatBoard = ({
   const [resolutionTicket, setResolutionTicket] =
     useState<ResolutionSummary | null>(null);
   const [vfx, setVfx] = useState<Set<string>>(() => new Set());
+  const skillCardRefs = useRef<Array<{ current: HTMLElement | null }>>(
+    state.slots.map(() => ({ current: null })),
+  );
   const pouchRef = useRef<HTMLDivElement | null>(null);
   const pileCountsRef = useRef<HTMLDivElement | null>(null);
+  const drawPileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const discardPileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const exhaustedPileButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingResolution = useRef<PendingResolution | null>(null);
   const resolutionTimer = useRef<number | null>(null);
   const nextFloatId = useRef(1);
@@ -2312,7 +2328,11 @@ const CombatBoard = ({
       const insidePouch = pouchRef.current?.contains(event.target) === true;
       const insidePileCounts =
         pileCountsRef.current?.contains(event.target) === true;
-      if (!insidePouch && !insidePileCounts) setOpenPile(null);
+      const insidePortalPopover =
+        event.target instanceof Element &&
+        event.target.closest('[data-overlay-layer="popover"]') !== null;
+      if (!insidePouch && !insidePileCounts && !insidePortalPopover)
+        setOpenPile(null);
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onPointerDown);
@@ -3285,6 +3305,10 @@ const CombatBoard = ({
               className={`skill-card ${use !== undefined ? "ready" : ""} ${slotState.cooldownRemaining > 0 ? "spent" : ""} ${slotState.skillId === null ? "empty-slot" : ""} ${lockedOnce ? "combat-locked" : ""} ${placed.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
               data-slot={index}
               key={`${index}-${String(slotState.skillId)}`}
+              ref={(element) => {
+                const anchor = skillCardRefs.current[index];
+                if (anchor !== undefined) anchor.current = element;
+              }}
               onClick={() => {
                 if (clickGuard()) return;
                 // 동전을 고른 동안 카드 클릭은 장전 전용 — 장전 불가면 아무 것도 하지 않는다
@@ -3469,7 +3493,13 @@ const CombatBoard = ({
               ) : null}
               {lockedOnce ? <span className="locked-label">잠금</span> : null}
               {preview !== null ? (
-                <div className="preview-tip" role="tooltip">
+                <AnchoredOverlay
+                  anchorRef={skillCardRefs.current[index]!}
+                  className="preview-tip"
+                  interactive
+                  open
+                  role="tooltip"
+                >
                   피해 {preview.byAxis.damage.min}~{preview.byAxis.damage.max}{" "}
                   (기대 {preview.expected.damage})
                   <br />
@@ -3495,7 +3525,7 @@ const CombatBoard = ({
                       {preview.expected.coinsCreated})
                     </>
                   ) : null}
-                </div>
+                </AnchoredOverlay>
               ) : null}
             </article>
           );
@@ -3523,6 +3553,7 @@ const CombatBoard = ({
             aria-expanded={openPile === "draw"}
             aria-label={`코인 주머니 — 남은 동전 ${state.zones.draw.length}닢, 구성 보기`}
             className={`pouch-circle ${pouchReceiving ? "receiving" : ""}`}
+            ref={drawPileButtonRef}
             type="button"
             onClick={() => togglePile("draw")}
           >
@@ -3531,6 +3562,7 @@ const CombatBoard = ({
           <span>주머니</span>
           {openPile === "draw" ? (
             <PilePopover
+              anchorRef={drawPileButtonRef}
               groups={pileComposition(state, "draw", contentDb)}
               zone="draw"
             />
@@ -3602,6 +3634,7 @@ const CombatBoard = ({
             aria-expanded={openPile === "discard"}
             aria-label={`버림 더미 ${state.zones.discard.length}개, 구성 보기`}
             className={`pile-button discard ${discardReceiving ? "receiving" : ""}`}
+            ref={discardPileButtonRef}
             type="button"
             onClick={() => togglePile("discard")}
           >
@@ -3612,6 +3645,7 @@ const CombatBoard = ({
             aria-expanded={openPile === "exhausted"}
             aria-label={`소모 영역 ${state.zones.exhausted.length}개, 구성 보기`}
             className={`pile-button exhausted ${exhaustReceiving ? "receiving" : ""}`}
+            ref={exhaustedPileButtonRef}
             type="button"
             onClick={() => togglePile("exhausted")}
           >
@@ -3619,12 +3653,14 @@ const CombatBoard = ({
           </button>
           {openPile === "discard" ? (
             <PilePopover
+              anchorRef={discardPileButtonRef}
               groups={pileComposition(state, "discard", contentDb)}
               zone="discard"
             />
           ) : null}
           {openPile === "exhausted" ? (
             <PilePopover
+              anchorRef={exhaustedPileButtonRef}
               groups={pileComposition(state, "exhausted", contentDb)}
               zone="exhausted"
             />
@@ -3653,13 +3689,15 @@ const CombatBoard = ({
       ) : null}
 
       {dragging ? (
-        <div
-          aria-hidden="true"
-          className="drag-proxy"
-          style={{ left: drag.x, top: drag.y }}
-        >
-          <CoinDisc coin={drag.coin} state={state} />
-        </div>
+        <OverlayPortal layer="drag">
+          <div
+            aria-hidden="true"
+            className="drag-proxy"
+            style={{ left: drag.x, top: drag.y }}
+          >
+            <CoinDisc coin={drag.coin} state={state} />
+          </div>
+        </OverlayPortal>
       ) : null}
     </main>
   );

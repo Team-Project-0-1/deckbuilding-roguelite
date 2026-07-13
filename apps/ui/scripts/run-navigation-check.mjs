@@ -120,8 +120,40 @@ try {
     await page.keyboard.press("Escape");
   }
 
+  await page.locator(".hand-tray .coin").first().click();
+  await page.locator(".skill-card").first().locator(".socket").first().click();
+  await page.waitForSelector(".preview-tip");
+  const previewLayer = await page.locator(".preview-tip").evaluate((tip) => ({
+    layer: tip.parentElement?.dataset.overlayLayer ?? null,
+    rect: tip.getBoundingClientRect().toJSON(),
+  }));
+  check(
+    "skill preview uses tooltip layer",
+    previewLayer.layer === "tooltip",
+    JSON.stringify(previewLayer),
+  );
+
+  await page.locator(".pouch-circle").click();
+  await page.waitForSelector("#draw-pile-pop");
+  const pileLayer = await page.locator("#draw-pile-pop").evaluate((dialog) => ({
+    layer: dialog.parentElement?.dataset.overlayLayer ?? null,
+    pointerEvents: getComputedStyle(dialog).pointerEvents,
+  }));
+  check(
+    "pile dialog uses interactive popover layer",
+    pileLayer.layer === "popover" && pileLayer.pointerEvents === "auto",
+    JSON.stringify(pileLayer),
+  );
+  await page.keyboard.press("Escape");
+
   await page.locator('[data-testid="run-menu-open"]').click();
   await page.waitForSelector('[data-testid="run-menu"]');
+  check(
+    "run menu uses modal layer",
+    (await page.locator('[data-testid="run-menu"]').evaluate(
+      (menu) => menu.parentElement?.dataset.overlayLayer ?? null,
+    )) === "modal",
+  );
   await page.keyboard.press("Escape");
   check("escape closes run menu", (await page.locator('[data-testid="run-menu"]').count()) === 0);
 

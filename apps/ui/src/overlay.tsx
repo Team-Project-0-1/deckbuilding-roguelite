@@ -45,6 +45,7 @@ export const OverlayPortal = ({
 
 interface AnchoredOverlayProps {
   anchorRef: RefObject<HTMLElement>;
+  ariaLabel?: string;
   children: ReactNode;
   className: string;
   id?: string;
@@ -64,6 +65,7 @@ const ANCHOR_GAP = 8;
 
 export const AnchoredOverlay = ({
   anchorRef,
+  ariaLabel,
   children,
   className,
   id,
@@ -135,6 +137,7 @@ export const AnchoredOverlay = ({
   return (
     <OverlayPortal layer={role === "dialog" ? "popover" : "tooltip"}>
       <div
+        aria-label={ariaLabel}
         className={`anchored-overlay ${interactive ? "interactive" : ""} ${className}`}
         data-placement={position?.placement}
         id={id}

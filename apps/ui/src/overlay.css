@@ -28,6 +28,11 @@
   z-index: var(--z-notice);
 }
 
+.overlay-layer-modal > *,
+.overlay-layer-notice > * {
+  pointer-events: auto;
+}
+
 .anchored-overlay {
   position: fixed;
   margin: 0;

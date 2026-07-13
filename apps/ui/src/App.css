@@ -840,18 +840,14 @@ button:focus-visible {
 }
 
 .preview-tip {
-  position: absolute;
-  bottom: calc(100% + 16px);
-  left: 50%;
-  transform: translateX(-50%);
   width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
   padding: 7px 10px;
   font-size: 12.5px;
   line-height: 1.5;
   background: var(--out);
   color: var(--paper);
   border: 2px solid var(--gold);
-  z-index: 5;
   pointer-events: auto;
 }
 
@@ -1039,10 +1035,6 @@ button:focus-visible {
 
 /* 더미 인스펙터 — 평소에는 닫혀 있고 HUD 가장자리 위로만 열려 전장을 보호한다 */
 .pile-pop {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 10px);
-  z-index: var(--z-popover);
   min-width: 168px;
   max-width: min(240px, 60vw);
   max-height: min(300px, 55vh);
@@ -1349,8 +1341,6 @@ button:focus-visible {
 }
 
 .pile-counts .pile-pop {
-  right: 0;
-  left: auto;
   min-width: 238px;
   max-width: min(270px, 72vw);
 }
