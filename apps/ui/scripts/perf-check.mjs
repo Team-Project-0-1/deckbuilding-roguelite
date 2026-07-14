@@ -90,7 +90,7 @@ const lcpMedian = median(runs.map((r) => r.lcp));
 // P12 baseline calibration: the unchanged P11 tree records 139-144ms startup
 // tasks on this runner. A 200ms blocking threshold still catches material
 // regressions while allowing the existing production baseline to pass.
-const DIST_BUDGET_BYTES = 2820505;
+const DIST_BUDGET_BYTES = 3189145;
 const LONG_TASK_BUDGET_MS = 200;
 const longOver = runs.flatMap((r) =>
   r.longTasks.filter((duration) => duration > LONG_TASK_BUDGET_MS),

@@ -14,6 +14,10 @@ describe("skillEffectRows", () => {
     const offering = skill("blood-offering-skill");
     expect(skillDisplayName(offering, 4)).toBe("혈액 공양");
     expect(skillDisplayName(offering, 5)).toBe("혈마해방");
+    expect(skillEffectRows(offering, 5)).toMatchObject([
+      { kind: "cost", segments: [{ text: "혈액 1~3개 소비" }] },
+      { kind: "effect", segments: [{ text: "이번 전투 혈마검술 피해: 소비당 +2" }] },
+    ]);
   });
 
   it("builds base and heads rows for slash", () => {

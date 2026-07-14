@@ -47,6 +47,7 @@ import { TutorialStrip } from "./tutorial";
 import { isMuted, playSfx, setMuted } from "./audio";
 import { CardEffectRows, skillDisplayName, skillSummaryText } from "./card-effects";
 import { CharacterSelect } from "./character-select";
+import type { CharacterArt } from "./character-select";
 import { RunMenu } from "./run-menu";
 import { TitleScreen } from "./title-screen";
 import type { TitleSaveSummary } from "./title-screen";
@@ -82,6 +83,11 @@ import { sfxCuesFor } from "./combat-sfx";
 import { cycleTarget, defaultTarget, legalTargetsForCommand, livingEnemyTargets } from "./targeting";
 import type { TargetingCommand } from "./targeting";
 import bgForest from "./assets/bg-forest.webp";
+import frostKnightStanding from "./assets/characters/frost-knight.webp";
+import arcanistStanding from "./assets/characters/arcanist.webp";
+import sorcererStanding from "./assets/characters/sorcerer.webp";
+import bloodSpellbladeStanding from "./assets/characters/blood-spellblade.webp";
+import warriorStanding from "./assets/characters/warrior.webp";
 import cardSlash from "./assets/card-slash.webp";
 import cardJab from "./assets/card-jab.webp";
 import cardFistGuard from "./assets/card-fist-guard.webp";
@@ -351,6 +357,20 @@ const playerSprite = (character: CharacterId): SpriteAsset => {
   if (String(character) === "sorcerer") return SPRITES.sorcerer;
   if (String(character) === "frost-knight") return SPRITES["frost-knight"];
   return SPRITES.player;
+};
+
+const CHARACTER_STANDING_ART: Readonly<Record<string, string>> = {
+  "frost-knight": frostKnightStanding,
+  arcanist: arcanistStanding,
+  sorcerer: sorcererStanding,
+  "blood-spellblade": bloodSpellbladeStanding,
+  warrior: warriorStanding,
+};
+
+const characterSelectArt = (character: CharacterId): CharacterArt => {
+  const standing = CHARACTER_STANDING_ART[String(character)];
+  if (standing !== undefined) return { kind: "standing", src: standing };
+  return { kind: "sprite", ...playerSprite(character) };
 };
 
 type FloatText = {
@@ -634,6 +654,8 @@ const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
   // 1전투 적이 시드 롤이 되면서 필요해졌다.
   return encounter === "duo-raiders"
     ? (["raider" as EnemyDefId, "raider" as EnemyDefId] as const)
+    : encounter === "trio-ghoul-goblin-slime"
+      ? (["ghoul" as EnemyDefId, "goblin" as EnemyDefId, "slime" as EnemyDefId] as const)
     : encounter === "raider"
       ? (["raider" as EnemyDefId] as const)
       : encounter === "ghoul"
@@ -1917,7 +1939,7 @@ export const App = () => {
         </div>
         <CharacterSelect
           artByCharacter={Object.fromEntries(
-            Object.values(contentDb.characters).map((character) => [String(character.id), playerSprite(character.id)]),
+            Object.values(contentDb.characters).map((character) => [String(character.id), characterSelectArt(character.id)]),
           )}
           characters={Object.values(contentDb.characters)}
           contentDb={contentDb}
@@ -3154,7 +3176,13 @@ const CombatBoard = ({ combat, run, onComplete, onTelemetryCombatStart, onTeleme
                   </span>
                 )}
               </div>
-              {skill !== undefined ? <CardEffectRows displayName={displaySkillName} skill={skill} /> : null}
+              {skill !== undefined ? (
+                <CardEffectRows
+                  bloodSwordPower={state.player.bloodSwordPower}
+                  displayName={displaySkillName}
+                  skill={skill}
+                />
+              ) : null}
               {slotState.cooldownRemaining > 0 ? (
                 <span className="spent-label">쿨 {slotState.cooldownRemaining}</span>
               ) : null}

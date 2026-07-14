@@ -202,10 +202,12 @@ const bonusSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } =>
 const bonusSegments = (atoms: readonly EffectAtom[]): Array<{ text: string; term?: KeywordTerm }> =>
   atoms.map(bonusSegment);
 
-export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
+export function skillEffectRows(skill: SkillDef, bloodSwordPower = 0): EffectRowModel[] {
   if (skill.type === "consume") {
-    const costText =
-      skill.consume.mode === "upTo"
+    const bloodRelease = skill.bloodOffering === true && bloodSwordPower >= 5;
+    const costText = bloodRelease
+      ? "혈액 1~3개 소비"
+      : skill.consume.mode === "upTo"
         ? `${elementKo(skill.consume.element)} 1~${skill.consume.count}개 소비`
         : skill.consume.mode === "all"
           ? `${elementKo(skill.consume.element)} 최소 ${skill.consume.count}개·손의 전부 소비`
@@ -224,7 +226,7 @@ export function skillEffectRows(skill: SkillDef): EffectRowModel[] {
       {
         kind: "effect",
         badge: "효과",
-        segments: atomSegments(skill.effects),
+        segments: bloodRelease ? [{ text: "이번 전투 혈마검술 피해: 소비당 +2" }] : atomSegments(skill.effects),
       },
     ];
     // P7 D5 — 과열 강화 분기 (있을 때만)
@@ -352,10 +354,10 @@ export const skillSummaryText = (skill: SkillDef): string =>
 export const skillDisplayName = (skill: SkillDef, bloodSwordPower = 0): string =>
   skill.bloodOffering === true && bloodSwordPower >= 5 ? "혈마해방" : skill.name;
 
-export function CardEffectRows(props: { skill: SkillDef; displayName?: string }): JSX.Element {
+export function CardEffectRows(props: { skill: SkillDef; displayName?: string; bloodSwordPower?: number }): JSX.Element {
   return (
     <div className="card-effects" aria-label={`${props.displayName ?? props.skill.name} 효과`}>
-      {skillEffectRows(props.skill).map((row, rowIndex) => (
+      {skillEffectRows(props.skill, props.bloodSwordPower).map((row, rowIndex) => (
         <div className={`card-effect-row ${row.kind}`} key={`${row.kind}-${rowIndex}`}>
           <span className="card-effect-badge">{row.badge}</span>
           <span className="card-effect-copy">

@@ -4791,6 +4791,37 @@ const phaseAttr = (page, name) =>
   await page.close();
 }
 
+// ---------- 시나리오 37: 3적 가로 저해상도 HUD — 패널 겹침 금지 ----------
+{
+  const { page, errors } = await boot(
+    { width: 800, height: 390 },
+    {
+      url: `${URL}&encounter=trio-ghoul-goblin-slime`,
+    },
+  );
+  const layout = await page.locator(".battlefield .unit-plate").evaluateAll((plates) => {
+    const rects = plates.map((plate) => {
+      const { left, right } = plate.getBoundingClientRect();
+      return { left, right };
+    });
+    return {
+      count: rects.length,
+      insideViewport: rects.every((rect) => rect.left >= 0 && rect.right <= innerWidth),
+      overlapping: rects.some((rect, index) =>
+        rects.slice(index + 1).some((other) => rect.left < other.right && other.left < rect.right),
+      ),
+    };
+  });
+  check(
+    "S37 800x390 player and three-enemy HUD panels do not overlap",
+    layout.count === 4 && layout.insideViewport && !layout.overlapping,
+    JSON.stringify(layout),
+  );
+  await page.screenshot({ path: `${outDir}/65-trio-enemy-hud.png` });
+  check("S37 three-enemy HUD has no errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
 await browser.close();
 if (server !== null)
   await new Promise((resolveClose) => server.httpServer.close(resolveClose));

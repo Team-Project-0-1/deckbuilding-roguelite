@@ -2,10 +2,16 @@ import type { CharacterDef, CharacterId, CoinDefId, ContentDb, EffectAtom } from
 import { AtlasSprite } from "./AtlasSprite";
 import type { SpriteManifest } from "./AtlasSprite";
 
-export interface CharacterArt {
-  atlasUrl: string;
-  manifest: SpriteManifest;
-}
+export type CharacterArt =
+  | {
+      kind: "standing";
+      src: string;
+    }
+  | {
+      kind: "sprite";
+      atlasUrl: string;
+      manifest: SpriteManifest;
+    };
 
 const elementKo = (element: string): string => {
   if (element === "fire") return "화염";
@@ -106,7 +112,9 @@ export const CharacterSelect = ({ artByCharacter, characters, contentDb, seed, o
       <p>전투에 진입할 캐릭터를 고릅니다.</p>
       {seed !== null ? <p className="select-seed">SEED {seed}</p> : null}
       <div className="character-grid">
-        {characters.map((character) => (
+        {characters.map((character) => {
+          const art = artByCharacter[String(character.id)];
+          return (
           <button
             aria-label={`${character.name} 선택, HP ${character.maxHp}, 시작 스킬 ${character.startingSkills
               .map((skill) => contentDb.skills[String(skill)]?.name ?? String(skill))
@@ -124,10 +132,12 @@ export const CharacterSelect = ({ artByCharacter, characters, contentDb, seed, o
             </span>
             <span className="character-card-body">
               <span className="character-portrait" data-testid="character-portrait">
-                {artByCharacter[String(character.id)] !== undefined ? (
+                {art?.kind === "standing" ? (
+                  <img alt="" className="character-standing-art" src={art.src} />
+                ) : art?.kind === "sprite" ? (
                   <AtlasSprite
-                    atlasUrl={artByCharacter[String(character.id)]!.atlasUrl}
-                    manifest={artByCharacter[String(character.id)]!.manifest}
+                    atlasUrl={art.atlasUrl}
+                    manifest={art.manifest}
                     motion="idle"
                     playKey={0}
                     side="player"
@@ -163,7 +173,8 @@ export const CharacterSelect = ({ artByCharacter, characters, contentDb, seed, o
               </span>
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   </section>
