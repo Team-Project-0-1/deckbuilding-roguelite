@@ -72,7 +72,7 @@ export const applyDamage = (
   state: CombatState,
   target: TargetRef,
   amount: number,
-  source: 'skill' | 'burn' | 'enemy' | 'self',
+  source: 'skill' | 'coin' | 'burn' | 'enemy' | 'self',
   events: CombatEvent[],
   attacker?: TargetRef
 ): CombatState => {
@@ -287,10 +287,19 @@ export const applyEffectAtom = (
         ? fireTurnTriggers(damaged, 'onDamageDealt', target, db, events, options?.turnTriggerScope)
         : damaged;
     }
+    case 'coinDamage':
+      return target.type === 'enemy' && isAliveEnemy(state, target.index)
+        ? applyDamage(state, target, atom.amount, 'coin', events, { type: 'player' })
+        : state;
     case 'block':
       return applyBlock(state, { type: 'player' }, atom.amount, events);
     case 'selfDamage':
       return applyDamage(state, { type: 'player' }, atom.amount, 'self', events);
+    case 'loseHp': {
+      if (state.player.hp <= atom.amount) return state;
+      events.push({ type: 'damageDealt', target: { type: 'player' }, amount: atom.amount, blocked: 0, source: 'self' });
+      return { ...state, player: { ...state.player, hp: state.player.hp - atom.amount } };
+    }
     case 'payHp': {
       if (state.player.hp <= atom.amount) throw new Error('not enough hp to pay skill cost');
       const hp = state.player.hp - atom.amount;
@@ -662,6 +671,13 @@ const targetsForElementProc = (
   skillTarget: TargetRef,
   explicitTarget: number | undefined
 ): TargetRef[] => {
+  if (atom.kind === 'coinDamage') {
+    if (explicitTarget !== undefined && isAliveEnemy(state, explicitTarget)) {
+      return [{ type: 'enemy', index: explicitTarget }];
+    }
+    if (skillTarget.type === 'enemy' && isAliveEnemy(state, skillTarget.index)) return [skillTarget];
+    return [];
+  }
   const hostile =
     atom.kind === 'damage' ||
     atom.kind === 'damagePerTargetBurn' ||
@@ -1204,12 +1220,25 @@ export const resolveFlip = (
           db.coins[String(coin.defId)]?.element === 'blood' &&
           !state.player.concentratedBloodUsedThisTurn &&
           passiveMechanics.has('concentratedBlood');
+        const hpLoss = (atoms ?? []).reduce((total, atom) => total + (atom.kind === 'loseHp' ? atom.amount : 0), 0);
+        if (hpLoss > 0 && state.player.hp <= hpLoss) {
+          events.push({ type: 'bloodCoinFizzle', coin: resolutionCoins[i]! });
+          if (concentrated) {
+            state = {
+              ...state,
+              player: { ...state.player, concentratedBloodUsedThisTurn: true }
+            };
+          }
+          continue;
+        }
         for (const atom of atoms ?? []) {
           const procAtom: EffectAtom =
             concentrated && atom.kind === 'heal'
               ? { ...atom, amount: atom.amount + 1 }
               : concentrated && atom.kind === 'block'
                 ? { ...atom, amount: atom.amount + 1 }
+                : concentrated && atom.kind === 'coinDamage'
+                  ? { ...atom, amount: atom.amount + 1 }
                 : atom;
           for (const procTarget of targetsForElementProc(state, procAtom, skill, resolutionTarget, target)) {
             state = applyEffectAtom(state, procAtom, procTarget, db, events, undefined, { turnTriggerScope, isReuse });

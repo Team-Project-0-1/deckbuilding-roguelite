@@ -69,7 +69,7 @@ const sumBranch = (
 ): Omit<PreviewBranch, "faces" | "probability"> =>
   events.reduce(
     (total, event) => {
-      if (event.type === "damageDealt" && event.source === "skill") {
+      if (event.type === "damageDealt" && (event.source === "skill" || event.source === "coin")) {
         return { ...total, damage: total.damage + event.amount };
       }
       if (event.type === "damageDealt" && event.source === "self") {

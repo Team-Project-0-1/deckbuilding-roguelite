@@ -31,7 +31,7 @@ export interface HumanDamageFact {
   enemyIndex?: number;
   amount: number;
   blocked: number;
-  source: "skill" | "burn" | "enemy" | "self";
+  source: "skill" | "coin" | "burn" | "enemy" | "self";
 }
 
 export interface HumanDecisionFact {

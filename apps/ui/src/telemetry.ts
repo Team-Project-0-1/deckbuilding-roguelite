@@ -37,7 +37,7 @@ export interface HumanDamageFact {
   enemyIndex?: number;
   amount: number;
   blocked: number;
-  source: "skill" | "burn" | "enemy" | "self";
+  source: "skill" | "coin" | "burn" | "enemy" | "self";
 }
 
 export interface HumanDecisionFact {
@@ -711,7 +711,7 @@ const sanitizeDecision = (value: unknown, label: string): HumanDecisionFact => {
         ),
         source: literalValue(
           entry.source,
-          ["skill", "burn", "enemy", "self"] as const,
+          ["skill", "coin", "burn", "enemy", "self"] as const,
           `${label}.damage[${index}].source`,
         ),
       };

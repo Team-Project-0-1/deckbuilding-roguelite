@@ -30,6 +30,7 @@ const modeNote = (mode: "any" | "per"): string | undefined => (mode === "per" ? 
 
 const atomSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => {
   if (atom.kind === "damage") return { text: `피해 ${atom.amount}` };
+  if (atom.kind === "coinDamage") return { text: `코인 피해 ${atom.amount}` };
   if (atom.kind === "block") return { text: `방어 ${atom.amount}` };
   if (atom.kind === "applyStatus" && atom.status === "burn") {
     return { text: `화상 ${atom.stacks}`, term: "burn" };
@@ -50,6 +51,7 @@ const atomSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => 
     };
   }
   if (atom.kind === "selfDamage") return { text: `자신 피해 ${atom.amount}` };
+  if (atom.kind === "loseHp") return { text: `체력 ${atom.amount} 상실` };
   if (atom.kind === "payHp") return { text: `체력 ${atom.amount} 지불` };
   if (atom.kind === "addTurnTrigger") {
     // 트리거 정의에서 데이터 주도로 유도 — '특수'는 인과 가독성 원칙 위반 (P3.3 시각 검수)
@@ -192,6 +194,7 @@ const atomSegments = (atoms: readonly EffectAtom[]): Array<{ text: string; term?
 // 면 보너스는 "더해지는 값"임을 +로 명시 — 값이 행의 첫 자리에 오도록 접미 표기와 짝을 이룬다
 const bonusSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => {
   if (atom.kind === "damage") return { text: `피해 +${atom.amount}` };
+  if (atom.kind === "coinDamage") return { text: `코인 피해 +${atom.amount}` };
   if (atom.kind === "block") return { text: `방어 +${atom.amount}` };
   if (atom.kind === "applyStatus" && atom.status === "burn") {
     return { text: `화상 +${atom.stacks}`, term: "burn" };
@@ -203,6 +206,7 @@ const bonusSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } =>
     return { text: `감전 +${atom.stacks}`, term: "shock" };
   }
   if (atom.kind === "selfDamage") return { text: `자신 피해 +${atom.amount}` };
+  if (atom.kind === "loseHp") return { text: `체력 ${atom.amount} 상실` };
   if (atom.kind === "payHp") return { text: `체력 ${atom.amount} 지불` };
   if (atom.kind === "empowerSummons") return { text: `강화 +${atom.amount}` };
   return atomSegment(atom);

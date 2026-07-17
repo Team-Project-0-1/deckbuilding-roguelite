@@ -24,6 +24,8 @@ const elementLabel = (value: string): string =>
 const procEffectText = (effect: { kind: string } & Record<string, unknown>): string => {
   if (effect.kind === 'block') return `방어 +${effect.amount as number}`;
   if (effect.kind === 'damage') return `피해 ${effect.amount as number}`;
+  if (effect.kind === 'coinDamage') return `피해 ${effect.amount as number}`;
+  if (effect.kind === 'loseHp') return `체력 ${effect.amount as number} 상실`;
   if (effect.kind === 'heal') return `회복 ${effect.amount as number}`;
   if (effect.kind === 'applyStatus') {
     const name = statusKo(effect.status as never);
@@ -37,9 +39,9 @@ export const coinRewardDetailFor = (db: ContentDb, coin: string): string => {
   const procs = db.coins[coin]?.procs;
   if (procs === undefined) return '속성 효과 없음';
   const parts: string[] = [];
-  const heads = procs.heads?.[0];
-  const tails = procs.tails?.[0];
-  if (heads !== undefined) parts.push(`앞면 ${procEffectText(heads)}`);
-  if (tails !== undefined) parts.push(`뒷면 ${procEffectText(tails)}`);
+  const heads = procs.heads ?? [];
+  const tails = procs.tails ?? [];
+  if (heads.length > 0) parts.push(`앞면 ${heads.map(procEffectText).join(' + ')}`);
+  if (tails.length > 0) parts.push(`뒷면 ${tails.map(procEffectText).join(' + ')}`);
   return parts.length === 0 ? '속성 효과 없음' : parts.join(' · ');
 };

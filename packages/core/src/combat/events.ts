@@ -13,8 +13,9 @@ export type CombatEvent =
       target: TargetRef;
       amount: number;
       blocked: number;
-      source: 'skill' | 'burn' | 'enemy' | 'self';
+      source: 'skill' | 'coin' | 'burn' | 'enemy' | 'self';
     }
+  | { type: 'bloodCoinFizzle'; coin: CoinUid }
   | { type: 'blockGained'; target: TargetRef; amount: number }
   | { type: 'blockCleared'; target: TargetRef; amount: number }
   // P7 — 회복(D4)·쿨다운 감소(D1)·과열(D5)

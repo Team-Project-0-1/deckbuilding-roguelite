@@ -26,6 +26,7 @@ const HOSTILE_STATUSES = new Set(['burn', 'frostbite', 'shock']);
 
 const isHostileProc = (atom: EffectAtom): boolean =>
   atom.kind === 'damage' ||
+  atom.kind === 'coinDamage' ||
   atom.kind === 'damagePerTargetBurn' ||
   atom.kind === 'damageByConsumed' ||
   atom.kind === 'damageByTargetFrostbite' ||
@@ -38,13 +39,16 @@ const isHostileProc = (atom: EffectAtom): boolean =>
  * 플립 전에는 면을 알 수 없으므로 어느 면이든 적대 proc이 있으면 대상을 요구한다.
  */
 export const flipSkillRequiresEnemyTarget = (state: CombatState, slot: SlotId, skill: FlipSkillDef, db: ContentDb): boolean => {
-  if (skill.targetType !== 'self' && skill.targetType !== 'none') return false;
+  if (skill.targetType === 'single-enemy') return false;
   for (const coinUid of state.zones.placed[slot] ?? []) {
     const instance = state.coins[Number(coinUid)];
     if (instance === undefined) continue;
     for (const element of effectiveElements(instance, db)) {
       const coinDef = Object.values(db.coins).find((candidate) => candidate.element === element);
-      if ([...(coinDef?.procs?.heads ?? []), ...(coinDef?.procs?.tails ?? [])].some(isHostileProc)) return true;
+      const procs = [...(coinDef?.procs?.heads ?? []), ...(coinDef?.procs?.tails ?? [])];
+      if (skill.targetType === 'all-enemies') {
+        if (procs.some((atom) => atom.kind === 'coinDamage')) return true;
+      } else if (procs.some(isHostileProc)) return true;
     }
   }
   return false;

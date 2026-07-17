@@ -28,8 +28,11 @@ const testDb = (): ContentDb => {
         id: id<CoinDefId>('blood'),
         element: 'blood',
         procs: {
-          heads: [{ kind: 'heal', amount: 1 }],
-          tails: [{ kind: 'block', amount: 1 }]
+          heads: [{ kind: 'coinDamage', amount: 1 }],
+          tails: [
+            { kind: 'loseHp', amount: 1 },
+            { kind: 'coinDamage', amount: 2 }
+          ]
         }
       }
     },
@@ -311,26 +314,22 @@ describe('P7 D2 — 8슬롯·빈 슬롯', () => {
   });
 });
 
-describe('P7 D4 — 양면 코인·회복', () => {
-  it('혈액 코인 앞면 회복은 maxHp 상한, 뒷면은 방어로 플레이어에 귀속된다', () => {
+describe('P7 D4 — 양면 코인 효과', () => {
+  it('혈액 코인은 지정 적에게 공격 proc을 적용하고 뒷면이면 방어를 무시해 체력을 잃는다', () => {
     const db = testDb();
     const bag = Array.from({ length: 10 }, () => id<CoinDefId>('blood'));
     let state = start([id<SkillId>('guardSelf')], bag, db);
-    state = { ...state, player: { ...state.player, hp: 49 } };
+    state = { ...state, player: { ...state.player, hp: 49, block: 7 } };
     const coin = state.zones.hand[0]!;
     const placed = step(state, { type: 'placeCoin', coin, slot: slot(0) }, db);
     expect(placed.ok).toBe(true);
     if (!placed.ok) return;
-    const used = step(placed.state, { type: 'useFlipSkill', slot: slot(0) }, db);
+    const used = step(placed.state, { type: 'useFlipSkill', slot: slot(0), target: 0 }, db);
     expect(used.ok).toBe(true);
     if (!used.ok) return;
-    const healEvents = used.events.filter((event) => event.type === 'healed');
-    const blockEvents = used.events.filter(
-      (event) => event.type === 'blockGained' && event.target.type === 'player'
-    );
-    // 앞이든 뒤든 정확히 한쪽 효과가 플레이어에게 발동
-    expect(healEvents.length + blockEvents.length).toBeGreaterThanOrEqual(1);
-    expect(used.state.player.hp).toBeLessThanOrEqual(50);
+    expect(used.events.filter((event) => event.type === 'damageDealt' && event.source === 'coin')).toHaveLength(1);
+    expect(used.state.player.block).toBeGreaterThanOrEqual(7);
+    expect(used.state.player.hp).toBeGreaterThanOrEqual(48);
   });
 
   it('자기 대상 스킬의 화염 뒷면 피해는 살아있는 적에게 간다', () => {

@@ -76,8 +76,11 @@ export const coins = {
     id: coin('blood'),
     element: 'blood',
     procs: {
-      heads: [{ kind: 'heal', amount: 1 }],
-      tails: [{ kind: 'block', amount: 1 }]
+      heads: [{ kind: 'coinDamage', amount: 1 }],
+      tails: [
+        { kind: 'loseHp', amount: 1 },
+        { kind: 'coinDamage', amount: 2 }
+      ]
     }
   }
 } satisfies Record<string, CoinDef>;

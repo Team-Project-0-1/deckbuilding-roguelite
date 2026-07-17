@@ -669,6 +669,7 @@ const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
         `갑주 반향 계산 — 기본 ${event.base}, 예열 ${event.preheat}, 정밀 ${event.precision}, 총 ${event.total}`,
       ];
     if (event.type === "echoSpent") return [`반향 증폭 — +${event.amount}`];
+    if (event.type === "bloodCoinFizzle") return ["혈액 코인 불발 — 체력이 부족합니다"];
     if (event.type === "enemyWindupStarted")
       return [
         `적 ${event.enemy + 1} 준비 시작 — ${event.turnsLeft}턴 남음${event.cancelThreshold === undefined ? "" : `, ${event.cancelThreshold} 피해로 취소`}`,

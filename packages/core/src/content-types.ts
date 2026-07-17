@@ -194,8 +194,10 @@ export interface TurnTriggerDef {
 
 export type EffectAtom =
   | { kind: 'damage'; amount: number }
+  | { kind: 'coinDamage'; amount: number }
   | { kind: 'block'; amount: number }
   | { kind: 'selfDamage'; amount: number }
+  | { kind: 'loseHp'; amount: number }
   | { kind: 'payHp'; amount: number }
   // P7 D4 — 회복 (플레이어 전용, maxHp 상한)
   | { kind: 'heal'; amount: number }
@@ -450,7 +452,7 @@ const validateAtomAmounts = (db: Omit<ContentDb, 'validate'>): string[] => {
 };
 
 // P7 D4 — 양면 코인 검증: 속성 코인은 앞뒤 모두 1+ 효과, proc은 안전 원자만
-const COIN_PROC_ATOMS = new Set(['damage', 'block', 'heal', 'applyStatus']);
+const COIN_PROC_ATOMS = new Set(['damage', 'coinDamage', 'block', 'heal', 'loseHp', 'applyStatus']);
 
 const validateCoinProcs = (coins: Record<string, CoinDef>): string[] => {
   const errors: string[] = [];

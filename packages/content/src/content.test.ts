@@ -1958,13 +1958,16 @@ describe('P6 shipped content goldens (1.1.0-p6)', () => {
 });
 
 describe('P9 shipped content goldens (1.3.0-p9)', () => {
-  it('ships the blood coin with heal heads and block tails (D4)', () => {
+  it('ships the blood coin as a designated-target risk/reward attacker (D6)', () => {
     expect(coins.blood).toEqual({
       id: coinId('blood'),
       element: 'blood',
       procs: {
-        heads: [{ kind: 'heal', amount: 1 }],
-        tails: [{ kind: 'block', amount: 1 }]
+        heads: [{ kind: 'coinDamage', amount: 1 }],
+        tails: [
+          { kind: 'loseHp', amount: 1 },
+          { kind: 'coinDamage', amount: 2 }
+        ]
       }
     });
   });

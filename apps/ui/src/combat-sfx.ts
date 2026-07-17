@@ -81,6 +81,7 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
     case "enemyHealFailed":
       return ["flip-tails"];
     case "coinsDrawn":
+    case "bloodCoinFizzle":
     case "coinsDiscarded":
     case "coinsPreserved":
     case "blockCleared":

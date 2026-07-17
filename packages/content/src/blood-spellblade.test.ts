@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CoinUid, SlotId } from "@game/core";
+import type { CoinUid, SkillDef, SlotId } from "@game/core";
 import { consumeRequirementFor, createCombat, step } from "@game/core";
 
 import { characters, contentDb, passives, skills } from "./index";
@@ -89,6 +89,56 @@ describe("Blood Spellblade design integration", () => {
         (entry) => String(entry.exclusiveTo) === "blood-spellblade",
       ),
     ).toHaveLength(3);
+  });
+
+  it("keeps the Blood coin purely offensive and confines lifesteal atoms to Blood Spellblade skills", () => {
+    const bloodAtoms = [
+      ...(contentDb.coins.blood?.procs?.heads ?? []),
+      ...(contentDb.coins.blood?.procs?.tails ?? []),
+    ];
+    expect(bloodAtoms.map((atom) => atom.kind)).toEqual([
+      "coinDamage",
+      "loseHp",
+      "coinDamage",
+    ]);
+    expect(
+      bloodAtoms.some((atom) =>
+        ["heal", "block", "lifesteal", "lifestealByConsumed"].includes(
+          atom.kind,
+        ),
+      ),
+    ).toBe(false);
+
+    const atomsFor = (definition: SkillDef) =>
+      definition.type === "consume"
+        ? [...definition.effects, ...(definition.overheatBonus ?? [])]
+        : [
+            ...(definition.base ?? []),
+            ...(definition.heads?.effects ?? []),
+            ...(definition.tails?.effects ?? []),
+            ...(definition.mixed?.effects ?? []),
+            ...(definition.successLadder ?? []).flat(),
+            ...(definition.elementFaces ?? []).flatMap((bonus) =>
+              bonus.effects,
+            ),
+            ...(definition.overheatBonus ?? []),
+            ...(definition.preservedBonus ?? []),
+            ...(definition.resonance?.effects ?? []),
+          ];
+    const lifestealOwners = Object.values(skills).filter((definition) =>
+      atomsFor(definition).some(
+        (atom) =>
+          atom.kind === "lifesteal" || atom.kind === "lifestealByConsumed",
+      ),
+    );
+    expect(lifestealOwners.length).toBeGreaterThan(0);
+    expect(
+      lifestealOwners.every(
+        (definition) =>
+          "exclusiveTo" in definition &&
+          String(definition.exclusiveTo) === "blood-spellblade",
+      ),
+    ).toBe(true);
   });
 
   it("automatically pays one HP and advances the run investment at combat start", () => {

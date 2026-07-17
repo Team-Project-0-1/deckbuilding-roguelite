@@ -19,8 +19,8 @@ describe('coinRewardDetailFor', () => {
     expect(coinRewardDetailFor(contentDb, 'basic')).toBe('속성 효과 없음');
   });
 
-  it('혈액 코인(P7 신규)은 앞면 회복 · 뒷면 방어를 명시한다', () => {
-    expect(coinRewardDetailFor(contentDb, 'blood')).toBe('앞면 회복 1 · 뒷면 방어 +1');
+  it('혈액 코인은 앞면 지정 피해 · 뒷면 체력 상실과 강화 피해를 명시한다', () => {
+    expect(coinRewardDetailFor(contentDb, 'blood')).toBe('앞면 피해 1 · 뒷면 체력 1 상실 + 피해 2');
   });
 
   it('미등록 상태 proc은 면별 일반 문구로 폴백한다', () => {
