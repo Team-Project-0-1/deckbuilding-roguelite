@@ -20,33 +20,22 @@ const aggroDamage = (outcome: PublicOutcome): number =>
 const compareAggro: OutcomeComparator = (candidate, incumbent) =>
   compareNumber(aggroDamage(candidate), aggroDamage(incumbent));
 
-const compareTurtle: OutcomeComparator = (candidate, incumbent) => {
-  const hpLoss = compareNumber(
-    incumbent.expectedHpLoss,
-    candidate.expectedHpLoss,
-  );
-  if (hpLoss !== 0) return hpLoss;
+const turtleEvScore = (outcome: PublicOutcome): number =>
+  outcome.expectedDamage * 0.35 +
+  outcome.preventedIncomingDamage +
+  outcome.expectedSelfDamage * -1.5 +
+  outcome.expectedBurn * 0.25 +
+  outcome.expectedResourcesCreated * 0.5;
 
-  const prevention = compareNumber(
-    candidate.preventedIncomingDamage,
-    incumbent.preventedIncomingDamage,
-  );
-  if (prevention !== 0) return prevention;
-
-  const selfDamage = compareNumber(
-    incumbent.expectedSelfDamage,
-    candidate.expectedSelfDamage,
-  );
-  if (selfDamage !== 0) return selfDamage;
-
-  return compareNumber(aggroDamage(candidate), aggroDamage(incumbent));
-};
+const compareTurtle: OutcomeComparator = (candidate, incumbent) =>
+  compareNumber(turtleEvScore(candidate), turtleEvScore(incumbent));
 
 export const GREEDY_EV_WEIGHTS = Object.freeze({
   expectedDamage: 1,
   preventedIncomingDamage: 0.9,
   selfDamage: -1.5,
   burnMarginalValue: 0.75,
+  resourceMarginalValue: 2,
   unusedResourcePenalty: -0.1,
 } as const);
 
@@ -55,6 +44,7 @@ const greedyEvScore = (outcome: PublicOutcome): number =>
   outcome.preventedIncomingDamage * GREEDY_EV_WEIGHTS.preventedIncomingDamage +
   outcome.expectedSelfDamage * GREEDY_EV_WEIGHTS.selfDamage +
   outcome.expectedBurn * GREEDY_EV_WEIGHTS.burnMarginalValue +
+  outcome.expectedResourcesCreated * GREEDY_EV_WEIGHTS.resourceMarginalValue +
   outcome.unusedResources * GREEDY_EV_WEIGHTS.unusedResourcePenalty;
 
 const compareGreedy: OutcomeComparator = (candidate, incumbent) =>

@@ -21,7 +21,7 @@ const SEED_42_GOLDEN = {
   // 1.6.0-blood 재고정 — 혈액 마검사 및 보상 풀 정책 반영 (balance-provisional)
   // 2026-07-16 P13: 보상 풀 전속성 가중 개방(basic+signature → all-element weighted)으로 재앵커
   // 2026-07-17 v1.2 화염 시작기 이관 — balance-provisional, 깊이 2 유지.
-  turnsPerCombat: [5, 5],
+  turnsPerCombat: [7, 2],
   carriedHp: 0,
   finalBag: [
     "basic",

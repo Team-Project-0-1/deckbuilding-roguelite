@@ -53,6 +53,8 @@ export interface PassiveDef {
   element: Element | null;
   hook: 'combatStart' | 'turnStart';
   effects: EffectAtom[];
+  /** Retained for save compatibility but omitted from new reward/shop offers. */
+  retiredFromRewards?: boolean;
   mechanic?:
     | 'continuousMotion'
     | 'retrievalHabit'
@@ -116,6 +118,8 @@ export interface SkillDefBase {
   // final stage without replacing the stable skill id in saves.
   bloodSword?: boolean;
   bloodOffering?: boolean;
+  /** Retained for save compatibility but omitted from new reward/shop offers. */
+  retiredFromRewards?: boolean;
   // 캐릭터 전용 스킬 — 공용 보상 풀에서 제외되고 해당 캐릭터 런에서만 노출된다.
   // 숨김 프로퍼티 같은 암묵 경계 대신 명시적 데이터로 풀 경계를 표현한다 (P3.2 결정).
   exclusiveTo?: CharacterId;

@@ -83,7 +83,8 @@ export const isRewardSkillEligibleForCharacter = (
   skill: SkillId,
 ): boolean =>
   isSkillEligibleForCharacter(db, character, skill) &&
-  !isLockedSkill(db, skill);
+  !isLockedSkill(db, skill) &&
+  db.skills[String(skill)]?.retiredFromRewards !== true;
 
 export function weightedCoinOptions(
   db: ContentDb,
@@ -349,8 +350,9 @@ export const eligiblePassiveIds = (
   return Object.values(passives ?? {})
     .filter(
       (passive) =>
-        passive.exclusiveTo === undefined ||
-        String(passive.exclusiveTo) === String(character),
+        passive.retiredFromRewards !== true &&
+        (passive.exclusiveTo === undefined ||
+          String(passive.exclusiveTo) === String(character)),
     )
     .map((passive) => passive.id)
     .filter((passive) => !owned.has(String(passive)))
@@ -806,6 +808,7 @@ export const rewardEligibleSkillIds = (
     .filter(
       (skill) =>
         skill.bloodOffering !== true &&
+        skill.retiredFromRewards !== true &&
         (skill.exclusiveTo === undefined ||
           String(skill.exclusiveTo) === String(character)),
     )

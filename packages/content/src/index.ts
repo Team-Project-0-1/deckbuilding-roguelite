@@ -780,9 +780,13 @@ export const skills = {
     cooldown: 0,
     cost: 1,
     exclusiveTo: character('warrior'),
-    base: [{ kind: 'damage', amount: 4 }],
-    heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] },
-    upgrade: { name: '묵직한 공격', description: '기본 피해 +2', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
+    successFace: 'heads',
+    successLadder: [[], [{ kind: 'damage', amount: 4 }]],
+    upgrade: {
+      name: '묵직한 공격',
+      description: '성공 피해 4 → 5',
+      patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 }
+    }
   },
   'fist-guard': {
     id: skill('fist-guard'),
@@ -794,9 +798,13 @@ export const skills = {
     cooldown: 0,
     cost: 1,
     exclusiveTo: character('warrior'),
-    base: [{ kind: 'block', amount: 4 }],
-    tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] },
-    upgrade: { name: '철벽 방어', description: '기본 방어 +2', patch: { kind: 'baseAmount', index: 0, delta: 2 } }
+    successFace: 'tails',
+    successLadder: [[], [{ kind: 'block', amount: 4 }]],
+    upgrade: {
+      name: '철벽 방어',
+      description: '성공 방어 4 → 5',
+      patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 }
+    }
   },
   'burning-fist': {
     id: skill('burning-fist'),
@@ -937,6 +945,7 @@ export const skills = {
     cooldown: 3,
     cost: 1,
     exclusiveTo: character('warrior'),
+    retiredFromRewards: true,
     requiredElement: 'fire',
     base: [{ kind: 'enterOverheat' }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 5 }] },
@@ -1019,6 +1028,7 @@ export const skills = {
     cooldown: 1,
     cost: 1,
     exclusiveTo: character('warrior'),
+    retiredFromRewards: true,
     base: [{ kind: 'damage', amount: 4 }],
     heads: { mode: 'any', effects: [{ kind: 'damage', amount: 2 }] },
     overheatBonus: [{ kind: 'damage', amount: 4 }],
@@ -1034,6 +1044,7 @@ export const skills = {
     oncePerCombat: true,
     cost: 2,
     exclusiveTo: character('warrior'),
+    retiredFromRewards: true,
     base: [
       { kind: 'damage', amount: 8 },
       { kind: 'applyStatus', status: 'burn', stacks: 2, to: 'target' }
@@ -2169,6 +2180,7 @@ export const passives = {
     name: '잔열 축적',
     description: '전투당 1회, 비과열 상태에서 공격 스킬에 화염 동전을 사용하면 다음 턴 과열을 예약한다',
     exclusiveTo: character('warrior'),
+    retiredFromRewards: true,
     element: 'fire',
     hook: 'turnStart',
     effects: [],

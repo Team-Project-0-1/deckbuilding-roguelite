@@ -29,6 +29,7 @@ exclusiveTo가 현재 캐릭터 ID인 전용 콘텐츠
 - `exclusiveTo` 없음: 공용
 - `exclusiveTo: characterId`: 해당 캐릭터 전용
 - 시작·고유·저장 호환용 레거시는 일반 보상 대상에서 제외하는 명시적 상태를 사용한다.
+- 저장 호환 정의를 신규 후보에서만 내릴 때는 `retiredFromRewards: true`를 사용한다. ID와 효과 정의는 유지하므로 구 장착 스킬·획득 패시브는 계속 해결되지만 `rewardEligibleSkillIds`와 `eligiblePassiveIds`에서는 제외된다.
 
 ### 2.2 공용으로 허용되는 효과
 
@@ -60,6 +61,7 @@ exclusiveTo가 현재 캐릭터 ID인 전용 콘텐츠
 - 캐릭터 표시명과 내부 ID가 달라도 된다. 예: 냉기 도적=`frost-knight`, 마도기사=`arcanist`.
 - 구 콘텐츠를 보상에서 내리더라도 구저장 복원을 위해 정의 자체를 남길 수 있다.
 - 레거시 정의는 공용처럼 노출되지 않도록 소유권과 보상 가능 여부를 명확히 한다.
+- 퇴역을 `bloodOffering` 같은 다른 메커니즘 플래그로 표현하지 않는다. 퇴역 여부와 전투 의미는 서로 독립이다.
 
 ## 4. 코인 작성
 

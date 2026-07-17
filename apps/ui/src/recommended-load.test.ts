@@ -23,7 +23,9 @@ describe("recommended load proposal", () => {
     expect(proposal.commands.every((command) => command.type === "placeCoin")).toBe(true);
     expect(proposal.placements.map((placement) => placement.slot)).toEqual([
       slot(0),
-      slot(1),
+      // 이 시드는 basic 1개와 fire 2개를 뽑는다. basic을 공격에 장전한 뒤
+      // fire는 무속성 방어가 아니라 화염 속성 스킬에만 합법적으로 들어간다.
+      slot(2),
       slot(2),
     ]);
     expect(state).toEqual(before);

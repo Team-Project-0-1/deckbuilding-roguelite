@@ -31,8 +31,10 @@ const withOneDecision = (): {
   combat: CombatState;
 } => {
   const combat = bootCombat();
-  const coin = combat.zones.hand[0];
-  if (coin === undefined) throw new Error("missing test coin");
+  const coin = combat.zones.hand.find(
+    (candidate) => combat.coins[Number(candidate)]?.defId === "basic",
+  );
+  if (coin === undefined) throw new Error("missing basic test coin");
   const command = {
     type: "placeCoin" as const,
     coin: coin as CoinUid,

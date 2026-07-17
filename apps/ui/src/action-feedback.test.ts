@@ -16,8 +16,10 @@ const boot = (): CombatState =>
   );
 
 const firstHandCoin = (state: CombatState): CoinUid => {
-  const coin = state.zones.hand[0];
-  if (coin === undefined) throw new Error("missing hand coin");
+  const coin = state.zones.hand.find(
+    (candidate) => state.coins[Number(candidate)]?.defId === "basic",
+  );
+  if (coin === undefined) throw new Error("missing basic hand coin");
   return coin;
 };
 

@@ -1,5 +1,5 @@
 import type { CombatState, CoinDefId, CoinUid, ConsumeSkillDef, EnemyDef, Face, FlipSkillDef, Rng, RngSnapshot, SkillDef, SkillId, SlotId } from '@game/core';
-import { createCombat, createRun, deriveUpgradedSkill, legalCommands, rewardEligibleSkillIds, settleRunCombat, startRunCombat, statusStacks, statusTurns, step, validateContentDb } from '@game/core';
+import { createCombat, createRun, deriveUpgradedSkill, eligiblePassiveIds, legalCommands, rewardEligibleSkillIds, settleRunCombat, startRunCombat, statusStacks, statusTurns, step, validateContentDb } from '@game/core';
 import { describe, expect, it } from 'vitest';
 
 import { characters, coins, CONTENT_VERSION, LEGACY_CONTENT_VERSIONS, contentDb, enemies, equipment, events, passives, skills } from './index';
@@ -111,11 +111,11 @@ describe('P9 latest design sync', () => {
     expect(step(state, { type: 'endTurn' }, contentDb).ok).toBe(true);
   });
 
-  it('ships the revised starters while retaining legacy reward ids', () => {
+  it('ships the revised starters while retaining retired ids for compatibility', () => {
     expect(characters.warrior.startingSkills.map(String)).toEqual(['jab', 'fist-guard', 'fire-fist', 'direct-hit']);
     expect(skills['flame-hook']).toMatchObject({ name: '불씨권', cost: 1 });
     expect('upgrade' in skills['flame-hook']).toBe(false);
-    expect(skills['inner-passion']).toBeDefined();
+    expect(skills['inner-passion']).toMatchObject({ retiredFromRewards: true });
     expect('upgrade' in skills['inner-passion']).toBe(false);
     expect(characters.sorcerer.startingSkills.map(String)).toEqual(['slash', 'guard', 'attaque', 'parade']);
     expect(Object.values(contentDb.skills).filter((entry) => String(entry.exclusiveTo) === 'sorcerer')).toEqual(
@@ -934,15 +934,16 @@ describe('P10 Fire Warrior and Arcanist design sync', () => {
     expect(armored.player.block).toBe(5);
 
     let shield = combatWith('p10-fire-shield', 'warrior', ['fist-guard'], ['steady-breath']);
+    shield = withHandDefs(shield, ['basic']);
     shield = withFaces(shield, ['tails']);
     const shielded = useFlip(shield, [shield.zones.hand[0]!], 0);
-    expect(shielded.state.player.block).toBe(8);
+    expect(shielded.state.player.block).toBe(5);
 
     const idlePrepared = step(combatWith('p10-fire-prepare-idle', 'warrior', ['jab'], ['reserve-coin']), { type: 'endTurn' }, contentDb);
     if (!idlePrepared.ok) throw new Error(idlePrepared.error);
     expect(idlePrepared.events.some((event) => event.type === 'blockGained')).toBe(false);
 
-    const preparedBase = combatWith('p10-fire-prepare', 'warrior', ['jab'], ['reserve-coin']);
+    const preparedBase = withHandDefs(combatWith('p10-fire-prepare', 'warrior', ['jab'], ['reserve-coin']), ['basic']);
     const attacked = useFlip(preparedBase, [preparedBase.zones.hand[0]!], 0);
     const prepared = step(attacked.state, { type: 'endTurn' }, contentDb);
     if (!prepared.ok) throw new Error(prepared.error);
@@ -1487,6 +1488,27 @@ describe('P3.4 exclusive reward reachability (dead-option gate)', () => {
     }
   });
 
+  it('retires only the unsupported warrior overheat family from skill and passive offers', () => {
+    const warrior = contentDb.characters.warrior;
+    if (warrior === undefined) throw new Error('missing warrior');
+    const retiredSkills = ['inner-passion', 'overheat-strike', 'overheat-vent'];
+    const retiredPassives = ['flame-opening'];
+    const skillPool = rewardEligibleSkillIds(contentDb.skills, warrior.id, warrior.startingSkills).map(String);
+    const passivePool = eligiblePassiveIds(contentDb.passives ?? {}, warrior.id, []).map(String);
+
+    for (const id of retiredSkills) {
+      expect(contentDb.skills[id]).toMatchObject({ retiredFromRewards: true });
+      expect(skillPool).not.toContain(id);
+    }
+    for (const id of retiredPassives) {
+      expect(contentDb.passives?.[id]).toMatchObject({ retiredFromRewards: true });
+      expect(passivePool).not.toContain(id);
+    }
+
+    expect(skillPool).toEqual(expect.arrayContaining(['burning-fist', 'flame-hook', 'ember-weave']));
+    expect(passivePool).toEqual(expect.arrayContaining(['iron-body', 'steady-breath', 'ember-stock']));
+  });
+
   it('keeps active arcanist armor-to-damage effects routed through armor echo only', () => {
     const retired = new Set(['aegis-pulse', 'mirror-plate', 'bulwark-charge']);
     const directBridgeKinds = new Set(['damagePerBlock', 'blockFromCurrent', 'damagePlusBlock', 'scheduleEndTurnBlockAoe']);
@@ -1972,7 +1994,7 @@ describe('P9 shipped content goldens (1.3.0-p9)', () => {
     });
   });
 
-  it('ships v1.2 neutral basics while retaining the legacy fire-fighter basics for their later slice', () => {
+  it('ships every v1.2 one-coin basic as a zero-floor success ladder', () => {
     expect(contentDb.skills.slash).toMatchObject({
       cooldown: 0,
       cost: 1,
@@ -1988,19 +2010,32 @@ describe('P9 shipped content goldens (1.3.0-p9)', () => {
     expect(contentDb.skills.jab).toMatchObject({
       cooldown: 0,
       cost: 1,
-      base: [{ kind: 'damage', amount: 4 }],
-      heads: { mode: 'any', effects: [{ kind: 'damage', amount: 3 }] }
+      successFace: 'heads',
+      successLadder: [[], [{ kind: 'damage', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
+    expect(contentDb.skills.jab).not.toHaveProperty('base');
+    expect(contentDb.skills.jab).not.toHaveProperty('heads');
     expect(contentDb.skills['fist-guard']).toMatchObject({
       cooldown: 0,
       cost: 1,
-      base: [{ kind: 'block', amount: 4 }],
-      tails: { mode: 'any', effects: [{ kind: 'block', amount: 3 }] }
+      successFace: 'tails',
+      successLadder: [[], [{ kind: 'block', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
+    expect(contentDb.skills['fist-guard']).not.toHaveProperty('base');
+    expect(contentDb.skills['fist-guard']).not.toHaveProperty('tails');
+    expect((deriveUpgradedSkill(contentDb.skills.jab!) as FlipSkillDef).successLadder?.[1]).toEqual([
+      { kind: 'damage', amount: 5 }
+    ]);
+    expect((deriveUpgradedSkill(contentDb.skills['fist-guard']!) as FlipSkillDef).successLadder?.[1]).toEqual([
+      { kind: 'block', amount: 5 }
+    ]);
   });
 
   it('pins the remaining warrior overheat kit and v1.2 fire starters (D3/D5)', () => {
     expect(skills['inner-passion']).toMatchObject({
+      retiredFromRewards: true,
       type: 'flip',
       cooldown: 3,
       cost: 1,
@@ -2037,10 +2072,12 @@ describe('P9 shipped content goldens (1.3.0-p9)', () => {
     expect((skills['ember-weave'] as FlipSkillDef).elementFaces).toBeUndefined();
     // 재설계된 과열 스킬은 damagePerFireInHand 없이 overheatBonus 분기만 갖는다
     expect(skills['overheat-strike']).toMatchObject({
+      retiredFromRewards: true,
       cooldown: 1,
       overheatBonus: [{ kind: 'damage', amount: 4 }]
     });
     expect(skills['overheat-vent']).toMatchObject({
+      retiredFromRewards: true,
       oncePerCombat: true,
       overheatBonus: [{ kind: 'damage', amount: 10 }]
     });

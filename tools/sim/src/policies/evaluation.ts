@@ -17,6 +17,7 @@ export interface PublicOutcome {
   readonly expectedBlock: number;
   readonly expectedSelfDamage: number;
   readonly expectedBurn: number;
+  readonly expectedResourcesCreated: number;
   readonly preventedIncomingDamage: number;
   readonly expectedHpLoss: number;
   readonly unusedResources: number;
@@ -67,6 +68,7 @@ const neutralOutcome = (
   expectedBlock: 0,
   expectedSelfDamage: 0,
   expectedBurn: 0,
+  expectedResourcesCreated: 0,
   preventedIncomingDamage: 0,
   expectedHpLoss: incomingHpLoss(state),
   unusedResources: unusedResourcesAfter(state, committedResources),
@@ -114,6 +116,7 @@ const flipOutcome = (
     expectedBlock: preview.expected.block,
     expectedSelfDamage,
     expectedBurn: preview.expected.burn,
+    expectedResourcesCreated: preview.expected.coinsCreated,
     preventedIncomingDamage,
     expectedHpLoss:
       Math.max(0, baseLoss - preventedIncomingDamage) + expectedSelfDamage,
@@ -126,6 +129,7 @@ interface GuaranteedEffectTotals {
   expectedBlock: number;
   expectedSelfDamage: number;
   expectedBurn: number;
+  expectedResourcesCreated: number;
   finalPlayerBlock: number;
 }
 
@@ -164,6 +168,7 @@ const summarizeGuaranteedEffects = (
   let expectedBlock = 0;
   let expectedSelfDamage = 0;
   let expectedBurn = 0;
+  let expectedResourcesCreated = 0;
 
   const applyGuaranteedEffect = (effect: EffectAtom): void => {
     switch (effect.kind) {
@@ -197,6 +202,11 @@ const summarizeGuaranteedEffects = (
         }
         return;
       case "addCoin":
+        expectedResourcesCreated += effect.count;
+        return;
+      case "draw":
+        expectedResourcesCreated += effect.count;
+        return;
       case "grantElement":
         return;
     }
@@ -208,6 +218,7 @@ const summarizeGuaranteedEffects = (
     expectedBlock,
     expectedSelfDamage,
     expectedBurn,
+    expectedResourcesCreated,
     finalPlayerBlock: playerBlock,
   };
 };

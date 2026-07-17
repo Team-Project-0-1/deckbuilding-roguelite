@@ -61,7 +61,7 @@ describe('M5 full-run simulator', () => {
       seed: '42',
       result: 'defeat',
       combatsCompleted: 2,
-      turnsPerCombat: [5, 5], // v1.2 화염 시작기 전환 후 결정론 골든 (balance-provisional)
+      turnsPerCombat: [7, 2], // v1.2 화염 기본기 + EV 인식 정책 이관 후 전환기 결정론 골든
       carriedHp: 0,
       finalBag: [
         'basic',

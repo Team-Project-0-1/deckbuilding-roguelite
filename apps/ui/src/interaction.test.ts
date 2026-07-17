@@ -6,7 +6,7 @@ import type {
   RunState,
   SlotId,
 } from "@game/core";
-import { createCombat, createRun, step } from "@game/core";
+import { createCombat, createRun, legalCommands, step } from "@game/core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -35,11 +35,17 @@ const placeFirst = (
   state: CombatState,
   slotIndex: number,
 ): { state: CombatState; coin: CoinUid } => {
-  const coin = state.zones.hand[0];
-  if (coin === undefined) throw new Error("missing hand coin");
+  const command = legalCommands(state, contentDb).find(
+    (candidate) =>
+      candidate.type === "placeCoin" && candidate.slot === slot(slotIndex),
+  );
+  if (command === undefined || command.type !== "placeCoin") {
+    throw new Error("missing legal hand coin");
+  }
+  const { coin } = command;
   const result = step(
     state,
-    { type: "placeCoin", coin, slot: slot(slotIndex) },
+    command,
     contentDb,
   );
   if (!result.ok) throw new Error(result.error);

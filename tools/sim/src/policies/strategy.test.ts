@@ -2,6 +2,7 @@ import { contentDb } from "@game/content";
 import {
   createCombat,
   legalCommands,
+  previewFlip,
   step,
   type CoinDefId,
   type CombatState,
@@ -65,7 +66,7 @@ const strategySkills = {
     cost: 1,
     base: [
       { kind: "damage", amount: 7 },
-      { kind: "block", amount: 7 },
+      { kind: "block", amount: 2 },
     ],
   }),
   "policy-idle": flipSkill("policy-idle", {
@@ -76,6 +77,68 @@ const strategySkills = {
     targetType: "self",
     cost: 1,
     base: [],
+  }),
+  "policy-v12-zero-guard": flipSkill("policy-v12-zero-guard", {
+    name: "v1.2 Zero-floor Guard",
+    type: "flip",
+    rarity: "common",
+    tags: ["defense"],
+    targetType: "self",
+    cost: 1,
+    successFace: "tails",
+    successLadder: [[], [{ kind: "block", amount: 4 }]],
+  }),
+  "policy-v12-balanced": flipSkill("policy-v12-balanced", {
+    name: "v1.2 Balanced Two-cost",
+    type: "flip",
+    rarity: "common",
+    tags: ["attack", "defense"],
+    targetType: "single-enemy",
+    cost: 2,
+    successFace: "heads",
+    successLadder: [
+      [
+        { kind: "damage", amount: 3 },
+        { kind: "block", amount: 1 },
+      ],
+      [
+        { kind: "damage", amount: 3 },
+        { kind: "block", amount: 1 },
+      ],
+      [
+        { kind: "damage", amount: 3 },
+        { kind: "block", amount: 1 },
+      ],
+    ],
+  }),
+  "policy-v12-engine": flipSkill("policy-v12-engine", {
+    name: "v1.2 Resource Engine",
+    type: "flip",
+    rarity: "common",
+    tags: ["attack"],
+    targetType: "single-enemy",
+    cost: 2,
+    successFace: "heads",
+    successLadder: [
+      [{ kind: "damage", amount: 3 }],
+      [
+        { kind: "damage", amount: 3 },
+        { kind: "addCoin", coin: coin("fire"), zone: "draw", count: 1 },
+      ],
+      [
+        { kind: "damage", amount: 3 },
+        { kind: "addCoin", coin: coin("fire"), zone: "draw", count: 1 },
+      ],
+    ],
+  }),
+  "policy-v12-burst": flipSkill("policy-v12-burst", {
+    name: "v1.2 Immediate Burst",
+    type: "flip",
+    rarity: "common",
+    tags: ["attack"],
+    targetType: "single-enemy",
+    cost: 2,
+    base: [{ kind: "damage", amount: 4 }],
   }),
 } satisfies Record<string, SkillDef>;
 
@@ -168,6 +231,7 @@ describe("M6 strategy policies", () => {
       preventedIncomingDamage: 0.9,
       selfDamage: -1.5,
       burnMarginalValue: 0.75,
+      resourceMarginalValue: 2,
       unusedResourcePenalty: -0.1,
     });
     expect(Object.isFrozen(GREEDY_EV_WEIGHTS)).toBe(true);
@@ -231,6 +295,77 @@ describe("M6 strategy policies", () => {
       expect(command).toMatchObject({ type: "useConsumeSkill", slot: 0 });
       expect(state.rng).toEqual(snapshot);
     }
+  });
+
+  it("values a v1.2 two-cost resource engine over a slightly larger one-shot hit", () => {
+    const db = withSkills(strategySkills);
+    const initial = stateWithSkills(
+      db,
+      [
+        skill("policy-v12-burst"),
+        skill("policy-v12-engine"),
+        skill("policy-idle"),
+      ],
+      [coin("basic"), coin("basic"), coin("basic")],
+    );
+    const basicHand = initial.zones.hand.filter(
+      (uid) => String(initial.coins[Number(uid)]?.defId) === "basic",
+    );
+    const state: CombatState = {
+      ...initial,
+      zones: {
+        ...initial.zones,
+        hand: basicHand,
+        draw: initial.zones.draw.filter((uid) => !basicHand.includes(uid)),
+      },
+    };
+
+    let planned = state;
+    for (let index = 0; index < 2; index += 1) {
+      const placement = legalCommands(planned, db).find(
+        (command) => command.type === "placeCoin" && Number(command.slot) === 1,
+      );
+      if (placement === undefined) throw new Error("engine placement missing");
+      const result = step(planned, placement, db);
+      if (!result.ok) throw new Error(result.error);
+      planned = result.state;
+    }
+    expect(previewFlip(planned, 1 as SlotId, db).expected.coinsCreated).toBe(
+      0.75,
+    );
+
+    expect(
+      Number(
+        policySlot(
+          createGreedyEvPolicy({ runSeed: "V12-ENGINE" }),
+          state,
+          db,
+        ),
+      ),
+    ).toBe(1);
+  });
+
+  it("makes Turtle trade a small amount of prevention for a guaranteed two-cost counterattack", () => {
+    const db = withSkills(strategySkills);
+    const state = stateWithSkills(
+      db,
+      [
+        skill("policy-v12-zero-guard"),
+        skill("policy-v12-balanced"),
+        skill("policy-idle"),
+      ],
+      [coin("basic"), coin("basic"), coin("basic")],
+    );
+
+    expect(
+      Number(
+        policySlot(
+          createTurtlePolicy({ runSeed: "V12-TURTLE" }),
+          state,
+          db,
+        ),
+      ),
+    ).toBe(1);
   });
 
   it("keeps canonical endTurn when Aggro and Turtle outcomes are exactly tied", () => {
