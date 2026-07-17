@@ -35,7 +35,7 @@ import {
   statusTurns,
   step,
 } from "@game/core";
-import type { CombatEvent, CombatState, Command, SkillDef } from "@game/core";
+import type { CombatEvent, CombatState, Command, EnemyAction, SkillDef } from "@game/core";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 
@@ -452,6 +452,11 @@ const combatReducer = (_state: CombatState, action: CombatAction): CombatState =
   return action.state;
 };
 
+const enemyAttackDamage = (action: Extract<EnemyAction, { kind: "attack" }>, growthStacks = 0): number =>
+  action.damagePerGrowthPercent === undefined
+    ? action.damage + growthStacks
+    : Math.round(action.damage * (1 + growthStacks * action.damagePerGrowthPercent));
+
 export const enemyIntentDamageTotal = (enemies: readonly CombatState["enemies"][number][]): number =>
   enemies.reduce(
     (sum, enemy) =>
@@ -459,9 +464,9 @@ export const enemyIntentDamageTotal = (enemies: readonly CombatState["enemies"][
       enemy.intent.actions.reduce(
         (intentSum, action) =>
           action.kind === "attack"
-            ? intentSum + action.damage * (action.hits ?? 1)
+            ? intentSum + enemyAttackDamage(action, enemy.growthStacks) * (action.hits ?? 1)
             : action.kind === "conditionalAttack"
-              ? intentSum + action.damage + action.bonusDamage
+              ? intentSum + action.damage + action.bonusDamage + (enemy.growthStacks ?? 0)
               : intentSum,
         0,
       ),
@@ -503,6 +508,7 @@ export const IntentBadge = ({
   const intent = windup?.intent ?? enemy.intent;
   const boundHealAlly = windup?.boundHealAlly ?? enemy.boundHealAlly;
   const boundHealAllyName = boundHealAlly === undefined ? undefined : enemyDisplayName(enemies[boundHealAlly]);
+  const growthLabel = contentDb.enemies[String(enemy.defId)]?.growthLabel ?? "성장";
   return (
     <div aria-label="다음 행동 의도" className="intent">
       {windup !== undefined ? (
@@ -530,7 +536,9 @@ export const IntentBadge = ({
         action.kind === "attack" ? (
           <span key={index}>
             <SwordIcon scale={1.6} />
-            {action.hits !== undefined && action.hits > 1 ? `${action.damage}×${action.hits}` : action.damage}
+            {action.hits !== undefined && action.hits > 1
+              ? `${enemyAttackDamage(action, enemy.growthStacks)}×${action.hits}`
+              : enemyAttackDamage(action, enemy.growthStacks)}
           </span>
         ) : action.kind === "block" ? (
           <span key={index}>
@@ -562,8 +570,12 @@ export const IntentBadge = ({
             {action.damage}+{action.bonusDamage}
           </span>
         ) : action.kind === "growOnUnblockedDamage" ? (
-          <span key={index} aria-label={`성장 ${action.amount}`}>
-            성장 {action.amount}
+          <span
+            key={index}
+            aria-label={`${growthLabel} ${action.amount}${action.minHpDamageFraction === undefined ? "" : `, 실제 피해 비율 ${action.minHpDamageFraction * 100}% 초과 시`}`}
+          >
+            {growthLabel} +{action.amount}
+            {action.maxStacks === undefined ? "" : `/${action.maxStacks}`}
           </span>
         ) : (
           <span
@@ -576,6 +588,7 @@ export const IntentBadge = ({
           >
             회복 {action.amount}
             {boundHealAllyName === undefined ? "" : ` → ${boundHealAllyName}`}
+            {action.cleanse === undefined ? "" : ` · 정화 ${action.cleanse}`}
           </span>
         ),
       )}
@@ -678,6 +691,8 @@ const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
     if (event.type === "enemyWindupCancelled") return [`적 ${event.enemy + 1} 준비 취소`];
     if (event.type === "enemyPhaseChanged") return [`적 ${event.enemy + 1} 페이즈 전환 — 광란`];
     if (event.type === "enemyGrew") return [`적 ${event.enemy + 1} 성장 — 스택 ${event.stacks}`];
+    if (event.type === "enemyCleansed")
+      return [`적 ${event.enemy + 1} 정화 — ${event.statuses.map(statusKo).join("·")} 제거`];
     if (event.type === "enemyHealFailed") return [`적 ${event.enemy + 1} 치유 실패 — 대상 ${event.target + 1}`];
     return [];
   });
@@ -3401,6 +3416,9 @@ const CombatBoard = ({
     } else if (event?.type === "enemyGrew") {
       showFloat(`성장 ${event.stacks}`, "enemy", "status", event.enemy);
       delay = 380;
+    } else if (event?.type === "enemyCleansed") {
+      showFloat(`정화 ${event.statuses.map(statusKo).join("·")}`, "enemy", "status", event.enemy);
+      delay = 400;
     } else if (event?.type === "enemyHealFailed") {
       showFloat("치유 실패", "enemy", "status", event.enemy);
       delay = 380;
@@ -3868,7 +3886,9 @@ const CombatBoard = ({
                 attackBuff={enemy.nextAttackBonus}
                 passive={contentDb.enemies[String(enemy.defId)]?.passive}
                 phaseIndex={enemy.phaseIndex}
+                damageTakenMultiplier={enemy.damageTakenMultiplier}
                 growthStacks={enemy.growthStacks}
+                growthLabel={contentDb.enemies[String(enemy.defId)]?.growthLabel}
               />
             );
           })}
@@ -4652,7 +4672,9 @@ interface UnitPanelProps {
   bloodSwordPower?: number;
   bloodSwordInvestment?: number;
   phaseIndex?: number;
+  damageTakenMultiplier?: number;
   growthStacks?: number;
+  growthLabel?: string;
 }
 
 export const ArmorEchoHud = ({
@@ -4720,7 +4742,9 @@ export const UnitPanel = ({
   bloodSwordPower,
   bloodSwordInvestment,
   phaseIndex,
+  damageTakenMultiplier,
   growthStacks,
+  growthLabel = "성장",
 }: UnitPanelProps) => (
   <div
     className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
@@ -4749,15 +4773,23 @@ export const UnitPanel = ({
         ) : null}
         {side === "enemy" && phaseIndex !== undefined ? (
           <Keyword className="chip-keyword" term="frenzy">
-            <em aria-label={`광란 페이즈 ${phaseIndex + 1}`} className="passive-chip">
+            <em
+              aria-label={`광란 페이즈 ${phaseIndex + 1}${damageTakenMultiplier === undefined ? "" : `, 받는 피해 ${damageTakenMultiplier}배`}`}
+              className="passive-chip"
+            >
               광란 {phaseIndex + 1}
+              {damageTakenMultiplier === undefined ? "" : ` · 취약 ×${damageTakenMultiplier}`}
             </em>
           </Keyword>
         ) : null}
         {side === "enemy" && growthStacks !== undefined && growthStacks > 0 ? (
-          <Keyword className="chip-keyword" term="growth">
-            <em aria-label={`성장 스택 ${growthStacks}`} className="passive-chip">
-              성장 {growthStacks}
+          <Keyword
+            className="chip-keyword"
+            entry={{ label: growthLabel, description: `${growthLabel} 스택. 공격을 강화하며 표시된 대응 조건으로 획득하거나 잃습니다.` }}
+            term="growth"
+          >
+            <em aria-label={`${growthLabel} 스택 ${growthStacks}`} className="passive-chip">
+              {growthLabel} {growthStacks}
             </em>
           </Keyword>
         ) : null}

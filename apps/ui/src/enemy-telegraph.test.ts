@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CombatState } from "@game/core";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { IntentBadge, UnitPanel } from "./App";
+import { enemyIntentDamageTotal, IntentBadge, UnitPanel } from "./App";
 import { KEYWORD_GLOSSARY } from "./keywords";
 
 const enemy = (overrides: Partial<CombatState["enemies"][number]>): CombatState["enemies"][number] => ({
@@ -31,7 +31,7 @@ describe("enemy telegraph UI", () => {
       id: "silver-mend",
       cancelOn: { damageThreshold: 10 },
       vulnerableWhileWindup: 1.5,
-      actions: [{ kind: "healAlly" as const, amount: 12, target: "lowestHpAlly" as const }],
+      actions: [{ kind: "healAlly" as const, amount: 12, target: "lowestHpAlly" as const, cleanse: 2 }],
     };
     const html = renderToStaticMarkup(
       createElement(IntentBadge, {
@@ -55,6 +55,7 @@ describe("enemy telegraph UI", () => {
     expect(html).toContain("10 피해로 취소");
     expect(html).toContain("취약 ×1.5");
     expect(html).toContain("회복 12");
+    expect(html).toContain("정화 2");
     expect(html).toContain("붉은성배 흡혈귀 시종");
   });
 
@@ -69,11 +70,13 @@ describe("enemy telegraph UI", () => {
         block: 0,
         floats: [],
         growthStacks: 3,
+        growthLabel: "기세",
         hp: 20,
         maxHp: 30,
         motion: "idle",
         name: "쇠사슬 광전사",
         phaseIndex: 0,
+        damageTakenMultiplier: 1.25,
         playKey: 0,
         side: "enemy",
         sprite,
@@ -84,7 +87,8 @@ describe("enemy telegraph UI", () => {
     );
 
     expect(html).toContain("광란 1");
-    expect(html).toContain("성장 3");
+    expect(html).toContain("취약 ×1.25");
+    expect(html).toContain("기세 3");
   });
 
   it("defines glossary entries for telegraph terms", () => {
@@ -92,5 +96,16 @@ describe("enemy telegraph UI", () => {
     expect(KEYWORD_GLOSSARY.vulnerable.label).toBe("취약");
     expect(KEYWORD_GLOSSARY.frenzy.label).toBe("광란(페이즈)");
     expect(KEYWORD_GLOSSARY.growth.label).toBe("성장");
+  });
+
+  it("includes growth-scaled attacks in the visible incoming-damage total", () => {
+    expect(
+      enemyIntentDamageTotal([
+        enemy({
+          growthStacks: 2,
+          intent: { id: "charge", actions: [{ kind: "attack", damage: 20, damagePerGrowthPercent: 0.15 }] },
+        }),
+      ]),
+    ).toBe(26);
   });
 });

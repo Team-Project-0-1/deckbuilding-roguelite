@@ -66,7 +66,8 @@ const modifiedDamage = (state: CombatState, target: TargetRef, amount: number, a
     target.type === 'enemy' && state.enemies[target.index]?.windup !== undefined
       ? (state.enemies[target.index]?.windup?.intent.vulnerableWhileWindup ?? 1)
       : 1;
-  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier);
+  const phaseMultiplier = target.type === 'enemy' ? (state.enemies[target.index]?.damageTakenMultiplier ?? 1) : 1;
+  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier * phaseMultiplier);
 };
 
 export const applyDamage = (

@@ -216,8 +216,9 @@ Drive v1.2의 화염 격투가 범위에는 과열이 없으므로 신규 보상
 ## 7.0.2 적 의도 원자 (P13 배치 A)
 
 - `windup {turns, cancelOn.damageThreshold}`: 예고형 준비 — 시작 시 카운트다운·수치·취소 임계 공개, 준비 중 `vulnerableWhileWindup` 배수로 받는 피해 증가, 준비 시작 후 누적 HP 피해가 임계에 닿으면 취소.
-- `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction}`(1회 전환·비가역), `growOnUnblockedDamage(+healOnGrow)`(실피해 시 +1·완전 방어 시 −1, 공격력 가산), `healAlly(lowestHpAlly)`(공개 시 대상 바인딩, 대상 사망 시 실패).
-- 전부 의도 수준 원자이며 `enemyTurnStart` 패시브의 자기 대상 한정 검증 벽은 유지된다. 이벤트: `enemyWindupStarted/Ticked/Cancelled`, `enemyPhaseChanged`, `enemyGrew`, `enemyHealFailed`.
+- `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction, damageTakenMultiplier}`(1회 전환·비가역), `growOnUnblockedDamage(+healOnGrow/maxStacks/minHpDamageFraction/loseOnFullBlock)`(실피해 비율·상한·완전 방어 감소를 데이터로 지정), `healAlly(lowestHpAlly, cleanse)`(공개 시 대상 바인딩, 대상 사망 시 치유·정화 모두 실패), `growthBranch(atLeast)`(스택 임계 도달 시 같은 패턴 칸의 예고 의도로 교체).
+- 배치 A 정련값: 붉은기병은 돌진 피해가 50%보다 많이 HP에 들어갈 때만 기세 +1(최대 3), 기세당 이후 돌진 +15%. 광전사는 광란 페이즈 전체에서 받는 피해 ×1.25. 치유사는 바인딩 대상 회복 12 후 상태 2개를 정화. 흡혈귀 시종은 만찬 최대 5, 4 이상이면 성배의 입맞춤 대신 1턴 예고 후 `7×3` 진홍의 향연을 사용한다.
+- 전부 의도 수준 원자이며 `enemyTurnStart` 패시브의 자기 대상 한정 검증 벽은 유지된다. 이벤트: `enemyWindupStarted/Ticked/Cancelled`, `enemyPhaseChanged`, `enemyGrew`, `enemyCleansed`, `enemyHealFailed`.
 
 ## 7.1 P10 캐릭터 전투 상태
 

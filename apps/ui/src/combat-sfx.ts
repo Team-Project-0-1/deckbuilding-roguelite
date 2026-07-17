@@ -78,6 +78,8 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
       return ["overheat-enter"];
     case "enemyGrew":
       return ["mana"];
+    case "enemyCleansed":
+      return ["blood"];
     case "enemyHealFailed":
       return ["flip-tails"];
     case "coinsDrawn":

@@ -1,4 +1,4 @@
-import type { ContentDb, EnemyIntent } from '../content-types';
+import type { ContentDb, EnemyIntent, StatusId } from '../content-types';
 import { rngFrom } from '../rng';
 import type { CombatEvent } from './events';
 import { applyBlock, applyDamage, applyEffectAtom, checkCombatEnd } from './resolve/flip';
@@ -12,8 +12,12 @@ export const nextIntent = (state: CombatState, enemyIndex: number, db: ContentDb
   if (def === undefined || def.intents.length === 0) throw new Error('enemy has no intents');
   const intents = enemy.phaseIndex === undefined ? def.intents : (def.phases?.[enemy.phaseIndex]?.intents ?? def.intents);
   const index = (enemy.intentIndex + 1) % intents.length;
-  const intent = intents[index];
-  if (intent === undefined) throw new Error('enemy intent missing');
+  const baseIntent = intents[index];
+  if (baseIntent === undefined) throw new Error('enemy intent missing');
+  const intent =
+    baseIntent.growthBranch !== undefined && (enemy.growthStacks ?? 0) >= baseIntent.growthBranch.atLeast
+      ? baseIntent.growthBranch.intent
+      : baseIntent;
   return { intent, index };
 };
 
@@ -47,6 +51,8 @@ const withEnemy = (state: CombatState, enemyIndex: number, update: (enemy: Comba
   ...state,
   enemies: state.enemies.map((enemy, index) => (index === enemyIndex ? update(enemy) : enemy))
 });
+
+const CLEANSE_ORDER: readonly StatusId[] = ['burn', 'frostbite', 'shock'];
 
 const maybeStartWindup = (state: CombatState, enemyIndex: number, events: CombatEvent[]): { state: CombatState; started: boolean } => {
   const enemy = state.enemies[enemyIndex];
@@ -82,8 +88,15 @@ const maybeChangePhase = (state: CombatState, enemyIndex: number, db: ContentDb,
   if (enemy === undefined || def?.phases === undefined || enemy.phaseIndex !== undefined) return state;
   const phaseIndex = def.phases.findIndex((phase) => enemy.hp / enemy.maxHp < phase.hpBelowFraction);
   if (phaseIndex < 0) return state;
+  const phase = def.phases[phaseIndex];
+  if (phase === undefined) return state;
   events.push({ type: 'enemyPhaseChanged', enemy: enemyIndex });
-  return withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, phaseIndex, intentIndex: -1 }));
+  return withEnemy(state, enemyIndex, (candidate) => ({
+    ...candidate,
+    phaseIndex,
+    intentIndex: -1,
+    damageTakenMultiplier: phase.damageTakenMultiplier
+  }));
 };
 
 const tickEnemyDurations = (input: CombatState, enemyIndex: number, events: CombatEvent[], preserveShock = false): CombatState => {
@@ -202,6 +215,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
       }
     }
     let lastAttackHpDamage = 0;
+    let lastAttackBlockedAmount = 0;
     let lastAttackBlocked = false;
     for (const action of state.enemies[enemyIndex]?.intent.actions ?? []) {
       const actingEnemy = state.enemies[enemyIndex];
@@ -219,13 +233,18 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         }
         let hpDamage = 0;
         let blocked = 0;
+        const growthStacks = actingEnemy.growthStacks ?? 0;
+        const baseDamage =
+          action.damagePerGrowthPercent === undefined
+            ? action.damage + growthStacks
+            : Math.round(action.damage * (1 + growthStacks * action.damagePerGrowthPercent));
         for (let hit = 0; hit < hits; hit += 1) {
           const beforeEventCount = events.length;
           // P6 D1 — 막별 스케일은 공격 피해에만 적용(버프 보너스는 원수치 가산)
           state = applyDamage(
             state,
             { type: 'player' },
-            Math.round((action.damage + (actingEnemy.growthStacks ?? 0)) * (state.enemyScale ?? 1)) + (hit === 0 ? bonus : 0),
+            Math.round(baseDamage * (state.enemyScale ?? 1)) + (hit === 0 ? bonus : 0),
             'enemy',
             events,
             { type: 'enemy', index: enemyIndex }
@@ -238,6 +257,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           if (state.phase === 'defeat') return { state, events };
         }
         lastAttackHpDamage = hpDamage;
+        lastAttackBlockedAmount = blocked;
         lastAttackBlocked = hpDamage === 0 && blocked > 0;
       } else if (action.kind === 'conditionalAttack') {
         const bonusDamage = state.player.hp < state.player.maxHp / 2 ? action.bonusDamage : 0;
@@ -252,6 +272,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         );
         const event = events.slice(beforeEventCount).find((candidate) => candidate.type === 'damageDealt' && candidate.target.type === 'player');
         lastAttackHpDamage = event?.type === 'damageDealt' ? event.amount : 0;
+        lastAttackBlockedAmount = event?.type === 'damageDealt' ? event.blocked : 0;
         lastAttackBlocked = event?.type === 'damageDealt' ? event.amount === 0 && event.blocked > 0 : false;
         if (state.phase === 'defeat') return { state, events };
       } else if (action.kind === 'block') {
@@ -294,13 +315,20 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
       } else if (action.kind === 'growOnUnblockedDamage') {
         const before = state.enemies[enemyIndex];
         if (before === undefined) continue;
-        const stacks = Math.max(0, (before.growthStacks ?? 0) + (lastAttackHpDamage > 0 ? action.amount : lastAttackBlocked ? -action.amount : 0));
+        const resolvedDamage = lastAttackHpDamage + lastAttackBlockedAmount;
+        const hpDamageFraction = resolvedDamage === 0 ? 0 : lastAttackHpDamage / resolvedDamage;
+        const grows = lastAttackHpDamage > 0 && hpDamageFraction > (action.minHpDamageFraction ?? 0);
+        const shrinks = action.loseOnFullBlock !== false && lastAttackBlocked;
+        const stacks = Math.min(
+          action.maxStacks ?? Number.MAX_SAFE_INTEGER,
+          Math.max(0, (before.growthStacks ?? 0) + (grows ? action.amount : shrinks ? -action.amount : 0))
+        );
         state = {
           ...state,
           enemies: state.enemies.map((candidate, index) => (index === enemyIndex ? { ...candidate, growthStacks: stacks } : candidate))
         };
         events.push({ type: 'enemyGrew', enemy: enemyIndex, stacks });
-        if (lastAttackHpDamage > 0 && action.healOnGrow !== undefined) {
+        if (grows && action.healOnGrow !== undefined) {
           const current = state.enemies[enemyIndex];
           if (current === undefined) continue;
           const hp = Math.min(current.maxHp, current.hp + action.healOnGrow);
@@ -324,6 +352,16 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           enemies: state.enemies.map((candidate, index) => (index === target ? { ...candidate, hp } : candidate))
         };
         events.push({ type: 'enemyHealed', enemy: target, amount: hp - before.hp, hp });
+        const cleansed = CLEANSE_ORDER.filter((status) => before.statuses[status] !== undefined).slice(0, action.cleanse ?? 0);
+        if (cleansed.length > 0) {
+          const statuses = { ...state.enemies[target]?.statuses };
+          for (const status of cleansed) delete statuses[status];
+          state = {
+            ...state,
+            enemies: state.enemies.map((candidate, index) => (index === target ? { ...candidate, statuses } : candidate))
+          };
+          events.push({ type: 'enemyCleansed', enemy: target, statuses: cleansed });
+        }
       } else {
         // 미래 행동 타입이 조용히 buff로 흘러들지 않도록 컴파일 타임 exhaustiveness 고정
         const exhausted: never = action;

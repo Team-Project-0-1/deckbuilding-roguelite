@@ -333,15 +333,22 @@ export interface CharacterDef {
 }
 
 export type EnemyAction =
-  | { kind: 'attack'; damage: number; hits?: number }
+  | { kind: 'attack'; damage: number; hits?: number; damagePerGrowthPercent?: number }
   | { kind: 'conditionalAttack'; damage: number; bonusDamage: number; condition: 'playerHpBelowHalf' }
   | { kind: 'block'; amount: number }
   | { kind: 'nextDrawPenalty'; amount: number }
   | { kind: 'applyStatus'; status: StatusId; stacks: number }
   | { kind: 'heal'; amount: number }
   | { kind: 'buffNextAttack'; amount: number }
-  | { kind: 'growOnUnblockedDamage'; amount: number; healOnGrow?: number }
-  | { kind: 'healAlly'; amount: number; target: 'lowestHpAlly' };
+  | {
+      kind: 'growOnUnblockedDamage';
+      amount: number;
+      healOnGrow?: number;
+      maxStacks?: number;
+      minHpDamageFraction?: number;
+      loseOnFullBlock?: boolean;
+    }
+  | { kind: 'healAlly'; amount: number; target: 'lowestHpAlly'; cleanse?: number };
 
 export interface EnemyIntent {
   id: string;
@@ -349,6 +356,13 @@ export interface EnemyIntent {
   windup?: { turns: number; revealAtStart: true };
   cancelOn?: { damageThreshold: number };
   vulnerableWhileWindup?: number;
+  growthBranch?: { atLeast: number; intent: EnemyIntent };
+}
+
+export interface EnemyPhase {
+  hpBelowFraction: number;
+  intents: EnemyIntent[];
+  damageTakenMultiplier?: number;
 }
 
 // 몬스터 패시브 — 설계 가이드 §3 패시브 원칙 준용: 자동 조건 발동 최대 1개.
@@ -367,7 +381,8 @@ export interface EnemyDef {
   name: string;
   maxHp: number;
   intents: EnemyIntent[];
-  phases?: { hpBelowFraction: number; intents: EnemyIntent[] }[];
+  phases?: EnemyPhase[];
+  growthLabel?: string;
   passive?: EnemyPassiveDef;
 }
 
@@ -735,14 +750,41 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
         if (action.hits !== undefined && (!Number.isInteger(action.hits) || action.hits <= 0)) {
           errors.push(`${owner}: attack hits must be a positive integer`);
         }
+        if (
+          action.damagePerGrowthPercent !== undefined &&
+          (!Number.isFinite(action.damagePerGrowthPercent) || action.damagePerGrowthPercent <= 0 || action.damagePerGrowthPercent > 1)
+        ) {
+          errors.push(`${owner}: attack damagePerGrowthPercent must be greater than 0 and at most 1`);
+        }
       } else if (action.kind === 'conditionalAttack') {
         if (!Number.isInteger(action.damage) || action.damage <= 0) errors.push(`${owner}: conditionalAttack damage must be a positive integer`);
         if (!Number.isInteger(action.bonusDamage) || action.bonusDamage < 0) {
           errors.push(`${owner}: conditionalAttack bonusDamage must be a non-negative integer`);
         }
-      } else if (action.kind === 'growOnUnblockedDamage' && action.healOnGrow !== undefined) {
-        if (!Number.isInteger(action.healOnGrow) || action.healOnGrow <= 0) errors.push(`${owner}: healOnGrow must be a positive integer`);
+      } else if (action.kind === 'growOnUnblockedDamage') {
+        if (action.healOnGrow !== undefined && (!Number.isInteger(action.healOnGrow) || action.healOnGrow <= 0)) {
+          errors.push(`${owner}: healOnGrow must be a positive integer`);
+        }
+        if (action.maxStacks !== undefined && (!Number.isInteger(action.maxStacks) || action.maxStacks <= 0)) {
+          errors.push(`${owner}: maxStacks must be a positive integer`);
+        }
+        if (
+          action.minHpDamageFraction !== undefined &&
+          (!Number.isFinite(action.minHpDamageFraction) || action.minHpDamageFraction < 0 || action.minHpDamageFraction >= 1)
+        ) {
+          errors.push(`${owner}: minHpDamageFraction must be at least 0 and less than 1`);
+        }
+      } else if (action.kind === 'healAlly' && action.cleanse !== undefined) {
+        if (!Number.isInteger(action.cleanse) || action.cleanse <= 0 || action.cleanse > 3) {
+          errors.push(`${owner}: healAlly cleanse must be an integer from 1 to 3`);
+        }
       }
+    }
+    if (intent.growthBranch !== undefined) {
+      if (!Number.isInteger(intent.growthBranch.atLeast) || intent.growthBranch.atLeast <= 0) {
+        errors.push(`${owner}: growthBranch atLeast must be a positive integer`);
+      }
+      validateIntent(intent.growthBranch.intent, `${owner} growth branch ${intent.growthBranch.intent.id}`);
     }
   };
   for (const enemy of Object.values(enemies)) {
@@ -754,7 +796,16 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
         errors.push(`${owner}: hpBelowFraction must be greater than 0 and less than 1`);
       }
       if (phase.intents.length === 0) errors.push(`${owner}: must declare at least one intent`);
+      if (
+        phase.damageTakenMultiplier !== undefined &&
+        (!Number.isFinite(phase.damageTakenMultiplier) || phase.damageTakenMultiplier <= 1 || phase.damageTakenMultiplier > 2)
+      ) {
+        errors.push(`${owner}: damageTakenMultiplier must be greater than 1 and at most 2`);
+      }
       phase.intents.forEach((intent, intentIndex) => validateIntent(intent, `${owner} intent ${intent.id || intentIndex}`));
+    }
+    if (enemy.growthLabel !== undefined && enemy.growthLabel.trim().length === 0) {
+      errors.push(`enemy ${String(enemy.id)}: growthLabel must not be empty`);
     }
   }
   return errors;

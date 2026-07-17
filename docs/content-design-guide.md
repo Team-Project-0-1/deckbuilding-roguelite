@@ -280,7 +280,8 @@ intents, 패시브, 등장 구간, 보상 가치
 ```
 
 - 행동은 공격, 연속 공격, 방어, 버프, 디버프, 소환으로 표현한다.
-- P13 배치 A 기믹 필드(전부 옵셔널, 계약은 `packages/core/src/combat/enemy-atoms.test.ts`): `windup {turns, cancelOn.damageThreshold}`, `vulnerableWhileWindup`, `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction, intents}`, `growOnUnblockedDamage(+healOnGrow)`, `healAlly(lowestHpAlly)`.
+- P13 배치 A 기믹 필드(전부 옵셔널, 계약은 `packages/core/src/combat/enemy-atoms.test.ts`): `windup {turns, cancelOn.damageThreshold}`, `vulnerableWhileWindup`, `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction, damageTakenMultiplier, intents}`, `attack.damagePerGrowthPercent`, `growOnUnblockedDamage(+healOnGrow/maxStacks/minHpDamageFraction/loseOnFullBlock)`, `growthBranch {atLeast, intent}`, `healAlly(lowestHpAlly, cleanse)`.
+- `growthLabel`은 동일 런타임 스택을 몬스터 콘셉트 용어(예: 기세·만찬)로 표시한다. `growthBranch`는 기본 패턴 인덱스를 유지한 채 공개 시점의 스택으로 대체 의도를 확정하므로, 분기 결과와 준비 행동이 플레이어에게 먼저 보인다.
 - 강공은 windup 예고를 경유해야 하고, 일반 조우의 핵심 위협은 1~2개다(교란 축 3중첩 금지).
 - 의도만 보고 대응 결정을 내릴 수 있어야 한다.
 - 숨은 예외보다 보이는 패시브를 사용한다. `enemyTurnStart` 패시브는 자기 대상 한정.

@@ -419,13 +419,23 @@ describe('P9 latest design sync', () => {
     expect(enemies['red-lancer']).toMatchObject({
       name: '로트하임 붉은기병',
       maxHp: 64,
+      growthLabel: '기세',
       intents: expect.arrayContaining([
         {
           id: 'red-charge',
           windup: { turns: 1, revealAtStart: true },
           cancelOn: { damageThreshold: 12 },
           vulnerableWhileWindup: 1.5,
-          actions: [{ kind: 'attack', damage: 22 }]
+          actions: [
+            { kind: 'attack', damage: 22, damagePerGrowthPercent: 0.15 },
+            {
+              kind: 'growOnUnblockedDamage',
+              amount: 1,
+              maxStacks: 3,
+              minHpDamageFraction: 0.5,
+              loseOnFullBlock: false
+            }
+          ]
         }
       ])
     });
@@ -435,11 +445,11 @@ describe('P9 latest design sync', () => {
       phases: [
         {
           hpBelowFraction: 0.5,
+          damageTakenMultiplier: 1.25,
           intents: expect.arrayContaining([
             {
               id: 'frenzied-chainstorm',
               windup: { turns: 1, revealAtStart: true },
-              vulnerableWhileWindup: 1.5,
               actions: [{ kind: 'attack', damage: 5, hits: 3 }]
             }
           ])
@@ -453,21 +463,36 @@ describe('P9 latest design sync', () => {
         {
           id: 'silver-mend',
           windup: { turns: 1, revealAtStart: true },
-          actions: [{ kind: 'healAlly', amount: 12, target: 'lowestHpAlly' }]
+          actions: [{ kind: 'healAlly', amount: 12, target: 'lowestHpAlly', cleanse: 2 }]
         }
       ])
     });
     expect(enemies['chalice-thrall']).toMatchObject({
       name: '붉은성배 흡혈귀 시종',
       maxHp: 58,
+      growthLabel: '만찬',
       intents: expect.arrayContaining([
-        {
+        expect.objectContaining({
           id: 'blood-drain',
           actions: [
             { kind: 'attack', damage: 7 },
-            { kind: 'growOnUnblockedDamage', amount: 1, healOnGrow: 2 }
+            { kind: 'growOnUnblockedDamage', amount: 1, healOnGrow: 2, maxStacks: 5 }
           ]
-        }
+        }),
+        expect.objectContaining({
+          id: 'chalice-kiss',
+          growthBranch: {
+            atLeast: 4,
+            intent: {
+              id: 'crimson-feast',
+              windup: { turns: 1, revealAtStart: true },
+              actions: [
+                { kind: 'attack', damage: 7, hits: 3 },
+                { kind: 'growOnUnblockedDamage', amount: 1, healOnGrow: 2, maxStacks: 5 }
+              ]
+            }
+          }
+        })
       ])
     });
     expect(contentDb.validate()).toEqual([]);

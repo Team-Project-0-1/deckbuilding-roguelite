@@ -74,6 +74,8 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
       return [cue(`unit-enemy-${event.enemy}`, 560)];
     case "enemyGrew":
       return [cue(`unit-enemy-${event.enemy}`, 420)];
+    case "enemyCleansed":
+      return [cue(`unit-enemy-${event.enemy}`, 420)];
     case "enemyHealFailed":
       return [cue(`unit-enemy-${event.enemy}`, 380)];
     case "coinFlipped":

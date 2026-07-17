@@ -107,6 +107,7 @@ export interface EnemyState extends UnitState {
     boundHealAlly?: number;
   };
   phaseIndex?: number;
+  damageTakenMultiplier?: number;
   growthStacks?: number;
   boundHealAlly?: number;
   cancelledWindupIntentId?: string;

@@ -60,6 +60,9 @@ describe("feedbackCuesFor", () => {
     expect(keys({ type: "enemyGrew", enemy: 1, stacks: 2 })).toEqual([
       "unit-enemy-1",
     ]);
+    expect(keys({ type: "enemyCleansed", enemy: 1, statuses: ["burn", "shock"] })).toEqual([
+      "unit-enemy-1",
+    ]);
     expect(keys({ type: "enemyHealFailed", enemy: 1, target: 0 })).toEqual([
       "unit-enemy-1",
     ]);

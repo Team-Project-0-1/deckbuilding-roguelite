@@ -32,6 +32,7 @@ describe("sfxCuesFor", () => {
     expect(cues({ type: "enemyWindupCancelled", enemy: 0, intent })).toEqual(["skill"]);
     expect(cues({ type: "enemyPhaseChanged", enemy: 0 })).toEqual(["overheat-enter"]);
     expect(cues({ type: "enemyGrew", enemy: 0, stacks: 2 })).toEqual(["mana"]);
+    expect(cues({ type: "enemyCleansed", enemy: 0, statuses: ["burn", "shock"] })).toEqual(["blood"]);
     expect(cues({ type: "enemyHealFailed", enemy: 0, target: 1 })).toEqual(["flip-tails"]);
   });
 

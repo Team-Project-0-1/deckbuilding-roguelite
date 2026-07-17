@@ -66,6 +66,7 @@ export type CombatEvent =
   | { type: 'enemyWindupCancelled'; enemy: number; intent: EnemyIntent }
   | { type: 'enemyPhaseChanged'; enemy: number }
   | { type: 'enemyGrew'; enemy: number; stacks: number }
+  | { type: 'enemyCleansed'; enemy: number; statuses: StatusId[] }
   | { type: 'enemyHealFailed'; enemy: number; target: number }
   | { type: 'turnStarted'; turn: number }
   | { type: 'combatEnded'; result: 'victory' | 'defeat'; turns: number };

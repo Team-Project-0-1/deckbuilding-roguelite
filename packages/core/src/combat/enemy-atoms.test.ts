@@ -129,6 +129,7 @@ describe('enemy atoms — branching and phases', () => {
         phases: [
           {
             hpBelowFraction: 0.5,
+            damageTakenMultiplier: 1.25,
             intents: [
               { id: 'rage-a', actions: [{ kind: 'attack', damage: 3 }] },
               { id: 'rage-b', actions: [] }
@@ -143,15 +144,99 @@ describe('enemy atoms — branching and phases', () => {
     );
     expect(changed.events.filter((event) => event.type === 'enemyPhaseChanged')).toHaveLength(1);
     expect(changed.state.enemies[0]?.intent.id).toBe('rage-a');
+    expect(changed.state.enemies[0]?.damageTakenMultiplier).toBe(1.25);
 
-    const next = endTurn(changed.state, content);
+    const damageEvents: CombatEvent[] = [];
+    const vulnerable = applyDamage(changed.state, { type: 'enemy', index: 0 }, 4, 'skill', damageEvents, { type: 'player' });
+    expect(vulnerable.enemies[0]?.hp).toBe(4);
+    expect(damageEvents).toContainEqual({ type: 'damageDealt', target: { type: 'enemy', index: 0 }, amount: 5, blocked: 0, source: 'skill' });
+
+    const next = endTurn(vulnerable, content);
     expect(next.state.player.hp).toBe(67);
     expect(next.events.filter((event) => event.type === 'enemyPhaseChanged')).toHaveLength(0);
     expect(next.state.enemies[0]?.intent.id).toBe('rage-b');
   });
+
+  it('reveals a growth-gated replacement intent without disturbing the base pattern index', () => {
+    const content = db({
+      vampire: enemy('vampire', {
+        intents: [
+          { id: 'poke', actions: [] },
+          {
+            id: 'kiss',
+            actions: [{ kind: 'attack', damage: 4 }],
+            growthBranch: {
+              atLeast: 4,
+              intent: {
+                id: 'feast',
+                windup: { turns: 1, revealAtStart: true },
+                actions: [{ kind: 'attack', damage: 2, hits: 3 }]
+              }
+            }
+          }
+        ]
+      })
+    });
+    const base = combat(content, ['vampire']);
+    const primed = { ...base, enemies: base.enemies.map((unit) => ({ ...unit, growthStacks: 4 })) };
+    const revealed = endTurn(primed, content);
+    expect(revealed.state.enemies[0]?.intent.id).toBe('feast');
+    expect(revealed.state.enemies[0]?.intentIndex).toBe(1);
+
+    const started = endTurn(revealed.state, content);
+    expect(started.state.player.hp).toBe(70);
+    expect(started.state.enemies[0]?.windup?.intent.id).toBe('feast');
+
+    const resolved = endTurn(started.state, content);
+    expect(resolved.state.player.hp).toBe(52);
+    expect(resolved.state.enemies[0]?.intent.id).toBe('poke');
+
+    const unprimed = { ...base, enemies: base.enemies.map((unit) => ({ ...unit, growthStacks: 3 })) };
+    expect(endTurn(unprimed, content).state.enemies[0]?.intent.id).toBe('kiss');
+  });
 });
 
 describe('enemy atoms — growth and ally healing', () => {
+  it('gains capped momentum only when more than half of charge damage reaches HP and scales later charges', () => {
+    const content = db({
+      lancer: enemy('lancer', {
+        intents: [
+          {
+            id: 'charge',
+            actions: [
+              { kind: 'attack', damage: 20, damagePerGrowthPercent: 0.15 },
+              {
+                kind: 'growOnUnblockedDamage',
+                amount: 1,
+                maxStacks: 3,
+                minHpDamageFraction: 0.5,
+                loseOnFullBlock: false
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const base = combat(content, ['lancer']);
+    const gained = endTurn({ ...base, player: { ...base.player, block: 9 } }, content);
+    expect(gained.state.player.hp).toBe(59);
+    expect(gained.state.enemies[0]?.growthStacks).toBe(1);
+
+    const denied = endTurn({ ...gained.state, player: { ...gained.state.player, block: 13 } }, content);
+    expect(denied.state.enemies[0]?.growthStacks).toBe(1);
+
+    const scaledBase = combat(content, ['lancer']);
+    const scaled = endTurn(
+      { ...scaledBase, enemies: scaledBase.enemies.map((unit) => ({ ...unit, growthStacks: 2 })) },
+      content
+    );
+    expect(scaled.state.player.hp).toBe(44);
+    expect(scaled.state.enemies[0]?.growthStacks).toBe(3);
+
+    const capped = endTurn({ ...scaled.state, player: { ...scaled.state.player, hp: 70 } }, content);
+    expect(capped.state.enemies[0]?.growthStacks).toBe(3);
+  });
+
   it('grows on HP damage, adds stacks to attacks, shrinks on full block, and floors at zero', () => {
     const content = db({
       vampire: enemy('vampire', {
@@ -201,5 +286,46 @@ describe('enemy atoms — growth and ally healing', () => {
     const failed = endTurn(killedTarget, content);
     expect(failed.events).toContainEqual({ type: 'enemyHealFailed', enemy: 0, target: 1 });
     expect(failed.state.enemies[2]?.hp).toBe(10);
+  });
+
+  it('cleanses at most two statuses from the ally bound when healing was telegraphed', () => {
+    const content = db({
+      healer: enemy('healer', {
+        intents: [
+          {
+            id: 'mend',
+            windup: { turns: 1, revealAtStart: true },
+            actions: [{ kind: 'healAlly', amount: 6, target: 'lowestHpAlly', cleanse: 2 }]
+          }
+        ]
+      }),
+      guard: enemy('guard', { maxHp: 30, intents: [{ id: 'idle', actions: [] }] })
+    });
+    const base = combat(content, ['healer', 'guard']);
+    const wounded = {
+      ...base,
+      enemies: base.enemies.map((unit, index) =>
+        index === 1
+          ? {
+              ...unit,
+              hp: 5,
+              statuses: {
+                burn: { kind: 'stack' as const, stacks: 1 },
+                frostbite: { kind: 'duration' as const, turns: 2 },
+                shock: { kind: 'duration' as const, turns: 3 }
+              }
+            }
+          : unit
+      )
+    };
+    const started = endTurn(wounded, content);
+    expect(started.state.enemies[0]?.windup?.boundHealAlly).toBe(1);
+
+    const resolved = endTurn(started.state, content);
+    expect(resolved.state.enemies[1]?.hp).toBe(10);
+    expect(resolved.state.enemies[1]?.statuses.burn).toBeUndefined();
+    expect(resolved.state.enemies[1]?.statuses.frostbite).toBeUndefined();
+    expect(resolved.state.enemies[1]?.statuses.shock).toEqual({ kind: 'duration', turns: 1 });
+    expect(resolved.events).toContainEqual({ type: 'enemyCleansed', enemy: 1, statuses: ['burn', 'frostbite'] });
   });
 });
