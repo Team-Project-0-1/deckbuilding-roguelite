@@ -139,6 +139,7 @@ export interface CoinPileGroup {
   element: string | null;
   grants: Element[];
   temporary: boolean;
+  enchant: string | null;
   count: number;
 }
 
@@ -153,8 +154,9 @@ export const pileComposition = (
     if (instance === undefined) continue;
     const defId = String(instance.defId);
     const temporary = !instance.permanent;
+    const enchant = instance.permanent ? (instance.enchant ?? null) : null;
     const grants = [...instance.grants].sort();
-    const key = `${defId}|${temporary ? "t" : "p"}|${grants.join(",")}`;
+    const key = `${defId}|${temporary ? "t" : "p"}|${enchant ?? "none"}|${grants.join(",")}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       existing.count += 1;
@@ -165,6 +167,7 @@ export const pileComposition = (
       element: db.coins[defId]?.element ?? null,
       grants,
       temporary,
+      enchant,
       count: 1,
     });
   }
@@ -175,6 +178,8 @@ export const pileComposition = (
     if (left.defId !== right.defId)
       return left.defId.localeCompare(right.defId);
     if (left.temporary !== right.temporary) return left.temporary ? 1 : -1;
+    if (left.enchant !== right.enchant)
+      return (left.enchant ?? "").localeCompare(right.enchant ?? "");
     return left.grants.join(",").localeCompare(right.grants.join(","));
   });
 };

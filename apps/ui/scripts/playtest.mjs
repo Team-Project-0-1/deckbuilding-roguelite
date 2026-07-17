@@ -308,7 +308,7 @@ const winCurrentCombat = async (page) => {
   throw new Error("자동 전투가 18턴 안에 끝나지 않았다");
 };
 
-if (onlyScope !== "p13") {
+if (onlyScope === null) {
 // ---------- 시나리오 1: 첫 상태 + 클릭 장전/회수/사용 (공격) ----------
 {
   const { page, errors } = await boot();
@@ -1184,7 +1184,7 @@ if (false) {
     );
     check(
       `S9 ${tag} 키보드 포커스 대상 = 방어 장전 소켓`,
-      focusOn.includes("장전된 동전 회수"),
+      focusOn.includes("장전 동전 회수"),
       focusOn,
     );
     const kb = await cardRect(1);
@@ -5328,7 +5328,7 @@ const phaseAttr = (page, name) =>
 }
 
 // ---------- p13-multi-enemy: 3/4/5적 전투 레이아웃 + 상점 설명 ----------
-{
+if (onlyScope === null || onlyScope === "p13") {
   console.log("\n[p13-multi-enemy]");
   const p13OutDir = resolve(outDir, "p13-layout");
   await mkdir(p13OutDir, { recursive: true });
@@ -5483,6 +5483,200 @@ const phaseAttr = (page, name) =>
   await shopPage.screenshot({ path: `${p13OutDir}/p13-shop-descriptions.png` });
   check("P13 shop has no errors", shopErrors.length === 0, shopErrors.join(" | "));
   await shopContext.close();
+}
+
+// ---------- Directive 9: immutable enchanted coin offers and combat visibility ----------
+if (onlyScope === null || onlyScope === "d9") {
+  console.log("\n[d9-enchants]");
+  const enchantOffers = [
+    {
+      coin: "basic",
+      enchant: "sharpness",
+      name: "예리함",
+      description: "공격 스킬에서 이 코인이 성공하면 피해 +1.",
+    },
+    {
+      coin: "fire",
+      enchant: "heads-polish",
+      name: "양각 연마",
+      description: "이 코인의 앞면 확률이 60%가 된다.",
+    },
+    {
+      coin: "mana",
+      enchant: "tails-polish",
+      name: "음각 연마",
+      description: "이 코인의 뒷면 확률이 60%가 된다.",
+    },
+  ];
+  const bossEnchantOffers = [
+    enchantOffers[0],
+    {
+      coin: "fire",
+      enchant: "echo",
+      name: "메아리",
+      description: "매 전투에서 이 코인을 처음 사용한 후 손패로 되돌아온다.",
+    },
+    {
+      coin: "mana",
+      enchant: "pendulum",
+      name: "시계추",
+      description: "매 전투에서 처음 사용할 때 현재 스킬의 성공면으로 확정 판정한다.",
+    },
+  ];
+  const d9Bag = [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"];
+  const d9Ledger = () => ({
+    nextUid: d9Bag.length + 1,
+    coins: d9Bag.map((defId, index) => ({ uid: index + 1, defId })),
+  });
+  const d9Save = (nodeKind) => {
+    const boss = nodeKind === "boss";
+    const offers = boss ? bossEnchantOffers : enchantOffers;
+    return {
+      version: 10,
+      contentVersion: "1.7.0-revision",
+      runSeed: `D9-${nodeKind.toUpperCase()}`,
+      character: "warrior",
+      currentHp: 63,
+      maxHp: 70,
+      bag: d9Bag,
+      permanentCoins: d9Ledger(),
+      equippedSkills: [
+        "jab",
+        "fist-guard",
+        "fire-fist",
+        "direct-hit",
+        null,
+        null,
+        null,
+        null,
+      ],
+      upgradedSlots: [false, false, false, false, false, false, false, false],
+      acquiredPassives: [],
+      gold: boss ? 170 : 70,
+      graph: {
+        layers: [
+          [{ id: "d9-elite", kind: "elite", encounter: ["raider-plus"] }],
+          [{ id: "d9-boss", kind: "boss", encounter: ["gatekeeper-plus"] }],
+          [{ id: "d9-combat", kind: "combat", encounter: ["raider"] }],
+        ],
+      },
+      nodeChoices: [0, 0, 0],
+      shopRemovals: 0,
+      shopPurchasedCoins: 0,
+      shopPurchasedSkills: 0,
+      shopPurchasedPassives: 0,
+      eventCombats: 0,
+      eventCoinGains: 0,
+      eventCoinLosses: 0,
+      treasureOpened: 0,
+      restHeals: 0,
+      restUpgrades: 0,
+      combatIndex: boss ? 2 : 1,
+      attempt: 0,
+      phase: "rewards",
+      pendingRewards: {
+        coinOptions: offers.map(({ coin }) => coin),
+        coinEnchantOptions: offers.map(({ enchant }) => enchant),
+        coinChoiceResolved: false,
+        coinRemovalResolved: true,
+        skillOptions: [],
+        skillChoiceResolved: true,
+        passiveOptions: [],
+        passiveChoiceResolved: true,
+      },
+    };
+  };
+  const bootD9 = async (save) => {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+    page.on("console", (message) => {
+      if (message.type() === "error" && !message.location().url.endsWith("/favicon.ico"))
+        errors.push(`console: ${message.text()}`);
+    });
+    await page.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      ["deckbuilding-roguelite.run-save", JSON.stringify(save)],
+    );
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await continueFromTitleIfShown(page);
+    await page.waitForSelector('[data-testid="reward-stage"]', { timeout: 15000 });
+    return { context, errors, page };
+  };
+  const savedLedger = (page) =>
+    page.evaluate(() => {
+      const raw = window.localStorage.getItem("deckbuilding-roguelite.run-save");
+      return raw === null ? null : JSON.parse(raw).permanentCoins;
+    });
+  const assertEnchantedOffer = async (page, nodeKind, offers) => {
+    check(
+      `D9 ${nodeKind} reward renders the coin-choice controls`,
+      (await page.locator(".reward-grid.coin-rewards").count()) === 1 &&
+        (await page.locator('[data-testid="coin-reward-skip"]').count()) === 1,
+    );
+    for (const offer of offers) {
+      const card = page.locator(`[data-testid="coin-reward-${offer.coin}"]`);
+      const copy = await card.innerText();
+      check(
+        `D9 ${nodeKind} ${offer.coin} shows its aligned enchant detail`,
+        copy.includes(offer.name) && copy.includes(offer.description),
+        copy.replace(/\n/g, " | "),
+      );
+      check(
+        `D9 ${nodeKind} ${offer.coin} states immutable lifecycle`,
+        copy.includes("인챈트 불변 · 코인 제거 가능"),
+        copy.replace(/\n/g, " | "),
+      );
+    }
+  };
+
+  {
+    const { context, errors, page } = await bootD9(d9Save("elite"));
+    await assertEnchantedOffer(page, "elite", enchantOffers);
+    const before = await savedLedger(page);
+    await page.locator('[data-testid="coin-reward-skip"]').click();
+    check(
+      "D9 declined elite offer resolves to the next node without acquiring a coin",
+      (await page.locator('[data-testid="run-phase"]').getAttribute("data-run-phase")) === "ready" &&
+        JSON.stringify(await savedLedger(page)) === JSON.stringify(before),
+    );
+    check("D9 elite offer has no browser errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  {
+    const { context, errors, page } = await bootD9(d9Save("boss"));
+    await assertEnchantedOffer(page, "boss", bossEnchantOffers);
+    await page.locator('[data-testid="coin-reward-basic"]').click();
+    const acquiredLedger = await savedLedger(page);
+    check(
+      "D9 selected boss reward persists its aligned immutable enchant",
+      acquiredLedger?.coins?.some(
+        (coin) => coin.defId === "basic" && coin.enchant === "sharpness",
+      ) === true,
+      JSON.stringify(acquiredLedger),
+    );
+    await page.locator('[data-testid="next-combat"]').click();
+    await page.waitForSelector("main.combat-shell", { timeout: 15000 });
+    await page.waitForFunction(
+      () => document.querySelector(".end-turn:not(:disabled)") !== null,
+      undefined,
+      { timeout: 20000 },
+    );
+    await page.locator(".pouch-circle").click();
+    const pileCopy = await page.locator(".pouch-pop").innerText();
+    check(
+      "D9 acquired enchanted coin is visibly labeled in the combat pile",
+      pileCopy.includes("예리함") && pileCopy.includes("인챈트 변경·교체 불가"),
+      pileCopy.replace(/\n/g, " | "),
+    );
+    check("D9 boss offer and combat transition have no browser errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
 }
 
 await browser.close();

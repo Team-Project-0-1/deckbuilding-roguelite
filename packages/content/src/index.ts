@@ -1,6 +1,25 @@
-import type { CharacterId, CoinDefId, EnemyDefId, EquipmentDefId, EventDefId, PassiveId, SkillId } from '@game/core';
+import type {
+  CharacterId,
+  CoinDefId,
+  CoinEnchantId,
+  EnemyDefId,
+  EquipmentDefId,
+  EventDefId,
+  PassiveId,
+  SkillId
+} from '@game/core';
 import { validateContentDb } from '@game/core';
-import type { CharacterDef, CoinDef, ContentDb, EnemyDef, EquipmentDef, EventDef, PassiveDef, SkillDef } from '@game/core';
+import type {
+  CharacterDef,
+  CoinDef,
+  CoinEnchantDef,
+  ContentDb,
+  EnemyDef,
+  EquipmentDef,
+  EventDef,
+  PassiveDef,
+  SkillDef
+} from '@game/core';
 
 // P3.2 승격: 수호자·마나 스킬·exclusiveTo 시대. m5 콘텐츠는 현 버전의 부분집합이고
 // 기존 수치가 불변이므로 m5 저장은 안전하게 로드(마이그레이션)할 수 있다.
@@ -28,6 +47,7 @@ export const LEGACY_CONTENT_VERSIONS: readonly string[] = [
 // (전사 공용 9종 − 장착 6 = 미보유 ≥3 ≥ 2) — 공허 엣지, run-storage 테스트로 고정.
 
 const coin = (value: string) => value as CoinDefId;
+const enchant = (value: string) => value as CoinEnchantId;
 const skill = (value: string) => value as SkillId;
 const character = (value: string) => value as CharacterId;
 const enemy = (value: string) => value as EnemyDefId;
@@ -84,6 +104,39 @@ export const coins = {
     }
   }
 } satisfies Record<string, CoinDef>;
+
+export const enchants = {
+  sharpness: {
+    id: enchant('sharpness'),
+    name: '예리함',
+    description: '공격 스킬에서 이 코인이 성공하면 피해 +1.',
+    mechanic: 'sharpness'
+  },
+  'heads-polish': {
+    id: enchant('heads-polish'),
+    name: '양각 연마',
+    description: '이 코인의 앞면 확률이 60%가 된다.',
+    mechanic: 'heads-polish'
+  },
+  'tails-polish': {
+    id: enchant('tails-polish'),
+    name: '음각 연마',
+    description: '이 코인의 뒷면 확률이 60%가 된다.',
+    mechanic: 'tails-polish'
+  },
+  echo: {
+    id: enchant('echo'),
+    name: '메아리',
+    description: '매 전투에서 이 코인을 처음 사용한 후 손패로 되돌아온다.',
+    mechanic: 'echo'
+  },
+  pendulum: {
+    id: enchant('pendulum'),
+    name: '시계추',
+    description: '매 전투에서 처음 사용할 때 현재 스킬의 성공면으로 확정 판정한다.',
+    mechanic: 'pendulum'
+  }
+} satisfies Record<string, CoinEnchantDef>;
 
 export const skills = {
   slash: {
@@ -2528,11 +2581,12 @@ export const events = {
 
 export const contentDb: ContentDb = {
   coins,
+  enchants,
   skills,
   enemies,
   characters,
   events,
   passives,
   equipment,
-  validate: () => validateContentDb({ coins, skills, enemies, characters, events, passives, equipment })
+  validate: () => validateContentDb({ coins, enchants, skills, enemies, characters, events, passives, equipment })
 };

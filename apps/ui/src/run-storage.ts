@@ -3,7 +3,9 @@ import {
   RUN_ENCOUNTERS,
   RUN_SAVE_VERSION,
   MAX_SKILL_SLOTS,
+  coinEnchantOptionsFor,
   completedCombatCount,
+  isCoinEnchantId,
   isLockedSkill,
   isRewardSkillEligibleForCharacter,
   isSkillEligibleForCharacter,
@@ -12,12 +14,14 @@ import {
   signatureElement,
   type CharacterId,
   type CoinDefId,
+  type CoinEnchantId,
   type ContentDb,
   type EquippedSkills,
   type EventDefId,
   type PassiveId,
   type PendingRewards,
   type PendingShop,
+  type PermanentCoinLedger,
   type RunPhase,
   type RunSave,
   type RunState,
@@ -145,21 +149,72 @@ const legacyGraphForSave = (): RunSave["graph"] => ({
 // P7 D2 — v7 공통 패딩: 장착 8칸(null=빈 슬롯) / 강화 8칸(false)
 const MAX_SLOTS = MAX_SKILL_SLOTS;
 
+const migrateV9RewardEnchants = (value: Record<string, unknown>): Record<string, unknown> | null => {
+  const pendingRewards = value.pendingRewards;
+  // coinEnchantOptions was introduced after v9. Treat any v9 occurrence as an
+  // injected future field instead of accepting an arbitrary valid-looking offer.
+  if (isRecord(pendingRewards) && pendingRewards.coinEnchantOptions !== undefined) return null;
+  if (
+    value.phase !== "rewards" ||
+    !isRecord(pendingRewards) ||
+    !isStringArray(pendingRewards.coinOptions) ||
+    pendingRewards.coinOptions.length !== 3 ||
+    !isNonNegativeSafeInteger(value.combatIndex) ||
+    value.combatIndex === 0 ||
+    !isNonEmptyString(value.runSeed) ||
+    !isRecord(value.graph) ||
+    !Array.isArray(value.graph.layers) ||
+    !Array.isArray(value.nodeChoices)
+  ) {
+    return value;
+  }
+
+  const completedLayer = value.graph.layers[value.combatIndex - 1];
+  const completedChoice = value.nodeChoices[value.combatIndex - 1];
+  if (!Array.isArray(completedLayer) || !isNonNegativeSafeInteger(completedChoice)) return value;
+  const completedNode = completedLayer[completedChoice];
+  if (!isRecord(completedNode)) return value;
+  if (completedNode.kind !== "elite" && completedNode.kind !== "boss") return value;
+  const completedCombatIndex = completedCombatCount(value as unknown as RunState);
+  if (completedCombatIndex === 0) return value;
+
+  return {
+    ...value,
+    pendingRewards: {
+      ...pendingRewards,
+      coinEnchantOptions: coinEnchantOptionsFor(
+        value.runSeed,
+        completedCombatIndex,
+        pendingRewards.coinOptions.length,
+      ),
+    },
+  };
+};
+
 const paddedToCurrent = (value: Record<string, unknown>): Record<string, unknown> => {
   const equipped = Array.isArray(value.equippedSkills) ? [...(value.equippedSkills as unknown[])] : [];
   while (equipped.length < MAX_SLOTS) equipped.push(null);
   const upgraded = Array.isArray(value.upgradedSlots) ? [...(value.upgradedSlots as unknown[])] : [];
   while (upgraded.length < MAX_SLOTS) upgraded.push(false);
+  const bag = Array.isArray(value.bag) ? value.bag : [];
   return {
     ...value,
     version: RUN_SAVE_VERSION,
     equippedSkills: equipped,
     upgradedSlots: upgraded,
+    permanentCoins: {
+      nextUid: bag.length + 1,
+      coins: bag.map((defId, index) => ({ uid: index + 1, defId })),
+    },
   };
 };
 
 const migratedLegacySave = (value: Record<string, unknown>): Record<string, unknown> | null => {
   if (value.version === RUN_SAVE_VERSION) return value;
+  if (value.version === 9) {
+    const migrated = migrateV9RewardEnchants(value);
+    return migrated === null ? null : paddedToCurrent(migrated);
+  }
   // P13 W5c v8 -> v9: non-retired saves are field-preserving; retired guardian saves
   // are classified before loading and never normalized into a current RunSave.
   if (value.version === 8) return paddedToCurrent(value);
@@ -312,6 +367,46 @@ const parseRunGraph = (value: unknown, context: RunValidationContext): RunSave["
   return { layers: layers as RunSave["graph"]["layers"] };
 };
 
+const parsePermanentCoins = (
+  value: unknown,
+  bag: readonly string[],
+  context: RunValidationContext,
+): PermanentCoinLedger | null => {
+  if (
+    !isRecord(value) ||
+    !isPositiveSafeInteger(value.nextUid) ||
+    value.nextUid >= Number.MAX_SAFE_INTEGER ||
+    !Array.isArray(value.coins)
+  )
+    return null;
+  if (value.coins.length !== bag.length) return null;
+
+  const ids = new Set<number>();
+  const coins: PermanentCoinLedger["coins"] = [];
+  let highestUid = 0;
+  for (let index = 0; index < value.coins.length; index += 1) {
+    const record = value.coins[index];
+    if (!isRecord(record)) return null;
+    const allowedKeys = new Set(["uid", "defId", "enchant"]);
+    if (Object.keys(record).some((key) => !allowedKeys.has(key))) return null;
+    if (!isPositiveSafeInteger(record.uid) || ids.has(record.uid)) return null;
+    if (!isNonEmptyString(record.defId) || !isKnownCoin(record.defId, context)) return null;
+    if (record.defId !== bag[index]) return null;
+    if (record.enchant !== undefined && (!isNonEmptyString(record.enchant) || !isCoinEnchantId(record.enchant))) {
+      return null;
+    }
+    ids.add(record.uid);
+    highestUid = Math.max(highestUid, record.uid);
+    coins.push({
+      uid: record.uid as PermanentCoinLedger["coins"][number]["uid"],
+      defId: record.defId as CoinDefId,
+      ...(record.enchant === undefined ? {} : { enchant: record.enchant as CoinEnchantId }),
+    });
+  }
+  if (value.nextUid <= highestUid) return null;
+  return { nextUid: value.nextUid, coins };
+};
+
 const validCharacterContext = (characterId: string, context: RunValidationContext): boolean => {
   const character = context.characters[characterId];
   if (character === undefined || !isPositiveSafeInteger(character.maxHp)) return false;
@@ -338,6 +433,7 @@ const parsePendingRewards = (
   equippedSkills: readonly (string | null)[],
   acquiredPassives: readonly string[],
   context: RunValidationContext,
+  completedNodeKind: RunSave["graph"]["layers"][number][number]["kind"] | undefined,
 ): PendingRewards | null => {
   if (!isRecord(value) || !isStringArray(value.coinOptions) || !isStringArray(value.skillOptions)) return null;
   if (
@@ -371,6 +467,24 @@ const parsePendingRewards = (
     return null;
   }
   if (skillOptions.length === 0 && !value.skillChoiceResolved) return null;
+
+  const coinEnchantOptions =
+    value.coinEnchantOptions === undefined
+      ? undefined
+      : isStringArray(value.coinEnchantOptions)
+        ? value.coinEnchantOptions
+        : null;
+  if (coinEnchantOptions === null) return null;
+  const rewardsEnchantedCoins = completedNodeKind === "elite" || completedNodeKind === "boss";
+  if (rewardsEnchantedCoins !== (coinEnchantOptions !== undefined)) return null;
+  if (
+    coinEnchantOptions !== undefined &&
+    (coinOptions.length !== 3 ||
+      coinEnchantOptions.length !== 3 ||
+      !hasUniqueStrings(coinEnchantOptions) ||
+      !coinEnchantOptions.every(isCoinEnchantId))
+  )
+    return null;
 
   const passiveOptions =
     value.passiveOptions === undefined ? undefined : isStringArray(value.passiveOptions) ? value.passiveOptions : null;
@@ -409,6 +523,9 @@ const parsePendingRewards = (
     skillOptions: skillOptions as SkillId[],
     skillChoiceResolved: value.skillChoiceResolved,
   };
+  if (coinEnchantOptions !== undefined) {
+    parsed.coinEnchantOptions = coinEnchantOptions as CoinEnchantId[];
+  }
   if (passiveOptions !== undefined) {
     parsed.passiveOptions = passiveOptions as PendingRewards["passiveOptions"];
     parsed.passiveChoiceResolved = passiveChoiceResolved;
@@ -585,6 +702,8 @@ const normalizeRunSave = (
   if (value.combatIndex === 0 && value.phase !== "defeat" && value.currentHp !== value.maxHp) return null;
 
   if (!isStringArray(value.bag) || !value.bag.every((coin) => isKnownCoin(coin, context))) return null;
+  const permanentCoins = parsePermanentCoins(value.permanentCoins, value.bag, context);
+  if (permanentCoins === null) return null;
   const startingBag = character.startingBag.map(String);
   const progressProbe = {
     ...value,
@@ -694,6 +813,13 @@ const normalizeRunSave = (
   }
   if (changedSlots > completedSkillRewardCount) return null;
 
+  // Reward resolution advances combatIndex first, so the rewarded encounter is
+  // the selected node in the preceding layer. Legacy graphs contain only
+  // ordinary combat nodes and therefore cannot carry enchant offers.
+  const completedRewardNode =
+    value.phase === "rewards"
+      ? graph.layers[value.combatIndex - 1]?.[nodeChoices[value.combatIndex - 1] ?? 0]
+      : undefined;
   const pendingRewards =
     value.pendingRewards === undefined
       ? undefined
@@ -703,6 +829,7 @@ const normalizeRunSave = (
           value.equippedSkills,
           value.acquiredPassives,
           context,
+          completedRewardNode?.kind,
         );
   if (value.phase === "rewards" && pendingRewards === undefined) return null;
   if (value.phase !== "rewards" && value.pendingRewards !== undefined) return null;
@@ -766,6 +893,7 @@ const normalizeRunSave = (
     currentHp: value.currentHp,
     maxHp: value.maxHp,
     bag: value.bag as CoinDefId[],
+    permanentCoins,
     equippedSkills: [...value.equippedSkills] as EquippedSkills,
     upgradedSlots: [...value.upgradedSlots] as RunSave["upgradedSlots"],
     acquiredPassives: value.acquiredPassives as RunSave["acquiredPassives"],

@@ -1,5 +1,5 @@
 import type { ContentDb, FlipSkillDef } from "../content-types";
-import { flipSkillEffects } from "../content-types";
+import { flipSkillEffects, isSuccessLadderFlipSkill } from "../content-types";
 import type { CoinUid, Face, SlotId } from "../ids";
 import type { Rng, RngSnapshot } from "../rng";
 import type { CombatEvent } from "./events";
@@ -38,29 +38,86 @@ export interface PreviewFlipResult {
   };
 }
 
-const scriptedFlips = (faces: readonly Face[]): Rng => {
+const permanentEnchant = (
+  state: CombatState,
+  coin: CoinUid | undefined,
+): string | undefined => {
+  if (coin === undefined) return undefined;
+  const instance = state.coins[Number(coin)];
+  return instance?.permanent === true ? instance.enchant : undefined;
+};
+
+const scriptedFlips = (
+  faces: readonly Face[],
+  state: CombatState,
+  placed: readonly CoinUid[],
+): Rng => {
   let index = 0;
+  const nextFace = (): Face => {
+    const face = faces[index];
+    if (face === undefined) throw new Error("scripted flip exhausted");
+    index += 1;
+    return face;
+  };
   return {
-    float: () => 0,
-    int: () => 0,
-    flip: () => {
-      const face = faces[index];
-      if (face === undefined) throw new Error("scripted flip exhausted");
-      index += 1;
-      return face;
+    float: () => {
+      const face = nextFace();
+      const coin = placed.length === 0 ? undefined : placed[(index - 1) % placed.length];
+      const favoredFace = permanentEnchant(state, coin) === "tails-polish" ? "tails" : "heads";
+      return face === favoredFace ? 0 : 0.999_999;
     },
+    int: () => 0,
+    flip: nextFace,
     shuffle: <T>(xs: readonly T[]) => [...xs],
     snapshot: (): RngSnapshot => ({ s: [index, 0, 0, 0] }),
   };
 };
 
-const enumerateFaces = (count: number): Face[][] => {
-  if (count > 15) throw new Error("preview supports up to 15 flip outcomes");
-  const branchCount = 2 ** count;
-  return Array.from({ length: branchCount }, (_, branch) =>
-    Array.from({ length: count }, (_unused, bit) =>
-      (branch & (1 << bit)) === 0 ? "heads" : "tails",
-    ),
+interface WeightedFaces {
+  faces: Face[];
+  probability: number;
+}
+
+const faceOptions = (
+  state: CombatState,
+  coin: CoinUid,
+  skill: FlipSkillDef,
+  repeat: boolean,
+): readonly { face: Face; probability: number }[] => {
+  const enchant = permanentEnchant(state, coin);
+  if (
+    !repeat &&
+    enchant === "pendulum" &&
+    state.coins[Number(coin)]?.enchantUsed !== true &&
+    isSuccessLadderFlipSkill(skill)
+  ) {
+    return [{ face: skill.successFace, probability: 1 }];
+  }
+  let headsProbability = 0.5;
+  if (enchant === "heads-polish") headsProbability = 0.6;
+  if (enchant === "tails-polish") headsProbability = 0.4;
+  return [
+    { face: "heads", probability: headsProbability },
+    { face: "tails", probability: 1 - headsProbability },
+  ];
+};
+
+const enumerateWeightedFaces = (
+  state: CombatState,
+  coins: readonly CoinUid[],
+  skill: FlipSkillDef,
+  repeat: boolean,
+): WeightedFaces[] => {
+  if (coins.length > 15) throw new Error("preview supports up to 15 flip outcomes");
+  return coins.reduce<WeightedFaces[]>(
+    (branches, coin) =>
+      branches.flatMap((branch) =>
+        faceOptions(state, coin, skill, repeat).map((option) => ({
+          faces: [...branch.faces, option.face],
+          probability: branch.probability * option.probability,
+        })),
+      ),
+    [{ faces: [], probability: 1 }],
   );
 };
 
@@ -140,14 +197,14 @@ export const previewFlip = (
     state.player.remiseCharges > 0 &&
     skill.tags.includes("attack") &&
     placed.length > 0;
-  const originalBranches = enumerateFaces(placed.length);
+  const originalBranches = enumerateWeightedFaces(state, placed, skill, false);
   const faceBranches = originalBranches.flatMap((original) =>
-    canRemiseRepeat && original[0] === "heads"
-      ? enumerateFaces(placed.length).map((repeat) => ({
-          faces: [...original, ...repeat],
-          probability: (1 / originalBranches.length) * (1 / 2 ** placed.length),
+    canRemiseRepeat && original.faces[0] === "heads"
+      ? enumerateWeightedFaces(state, placed, skill, true).map((repeat) => ({
+          faces: [...original.faces, ...repeat.faces],
+          probability: original.probability * repeat.probability,
         }))
-      : [{ faces: original, probability: 1 / originalBranches.length }],
+      : [original],
   );
   const chosen = hasChooseBasicInHand(skill) ? suggestedChosen(state, db) : undefined;
   const firstLivingTarget = state.enemies.findIndex((enemy) => enemy.hp > 0);
@@ -157,7 +214,10 @@ export const previewFlip = (
     const result = resolveFlip(
       {
         ...branchState,
-        rngImpl: { ...branchState.rngImpl, flip: scriptedFlips(branch.faces) },
+        rngImpl: {
+          ...branchState.rngImpl,
+          flip: scriptedFlips(branch.faces, branchState, placed),
+        },
       },
       slot,
       skill,

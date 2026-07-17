@@ -1,6 +1,16 @@
 import type { ContentDb, FlipSkillDef } from '../content-types';
 import { flipSkillEffects } from '../content-types';
-import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, PassiveId, SkillId, SlotId } from '../ids';
+import type {
+  CharacterId,
+  CoinDefId,
+  CoinEnchantId,
+  CoinUid,
+  EnemyDefId,
+  PassiveId,
+  PermanentCoinUid,
+  SkillId,
+  SlotId
+} from '../ids';
 import { derive, rngFrom, seedFromString } from '../rng';
 import { coinSatisfiesFlipRequirement, flipSkillRequiresEnemyTarget, skillRequiresSummonChoice } from './commands';
 import type { Command } from './commands';
@@ -21,6 +31,11 @@ export interface CreateCombatConfig {
   character: CharacterId;
   enemies: readonly EnemyDefId[];
   bag?: readonly CoinDefId[];
+  permanentCoins?: readonly {
+    uid: PermanentCoinUid;
+    defId: CoinDefId;
+    readonly enchant?: CoinEnchantId;
+  }[];
   equippedSkills?: readonly (SkillId | null)[];
   currentHp?: number;
   maxHp?: number;
@@ -179,9 +194,34 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   ) {
     throw new Error('bloodSwordInvestment must be an integer in [0, 30]');
   }
-  const bag = cfg.bag === undefined ? character.startingBag : [...cfg.bag];
+  const permanentCoins = cfg.permanentCoins;
+  const bag =
+    permanentCoins !== undefined
+      ? permanentCoins.map((coin) => coin.defId)
+      : cfg.bag === undefined
+        ? character.startingBag
+        : [...cfg.bag];
+  if (
+    permanentCoins !== undefined &&
+    cfg.bag !== undefined &&
+    (cfg.bag.length !== permanentCoins.length ||
+      cfg.bag.some((defId, index) => String(defId) !== String(permanentCoins[index]?.defId)))
+  ) {
+    throw new Error('permanent coin records must match bag order');
+  }
+  if (
+    permanentCoins !== undefined &&
+    new Set(permanentCoins.map((coin) => Number(coin.uid))).size !== permanentCoins.length
+  ) {
+    throw new Error('permanent coin ids must be unique');
+  }
   for (const coin of bag) {
     if (db.coins[String(coin)] === undefined) throw new Error(`unknown coin: ${String(coin)}`);
+  }
+  for (const coin of permanentCoins ?? []) {
+    if (coin.enchant !== undefined && db.enchants?.[String(coin.enchant)] === undefined) {
+      throw new Error(`unknown coin enchant: ${String(coin.enchant)}`);
+    }
   }
   // P7 D2 — 슬롯 8 일반화: 1~8개 전달, null=빈 슬롯, 부족분은 null 패딩
   if (cfg.equippedSkills !== undefined && (cfg.equippedSkills.length < 1 || cfg.equippedSkills.length > MAX_SKILL_SLOTS)) {
@@ -204,7 +244,22 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
   const shuffleRng = rngFrom(shuffle);
   const shuffledBag = shuffleRng.shuffle(bag.map((_coinDefId, index) => uid(index + 1)));
 
-  const coins = Object.fromEntries(bag.map((defId, index) => [index + 1, { uid: uid(index + 1), defId, permanent: true, grants: [] }]));
+  const coins = Object.fromEntries(
+    bag.map((defId, index) => {
+      const persisted = permanentCoins?.[index];
+      return [
+        index + 1,
+        {
+          uid: uid(index + 1),
+          defId,
+          permanent: true as const,
+          permanentUid: persisted?.uid ?? (index + 1 as PermanentCoinUid),
+          grants: [],
+          ...(persisted?.enchant === undefined ? {} : { enchant: persisted.enchant })
+        }
+      ];
+    })
+  );
 
   const enemyScale = cfg.enemyScale ?? 1;
   if (!Number.isFinite(enemyScale) || enemyScale < 1) throw new Error('enemyScale must be >= 1');

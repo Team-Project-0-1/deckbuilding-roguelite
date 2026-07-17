@@ -1,10 +1,12 @@
-import { isSuccessLadderFlipSkill } from "../content-types";
+import { COIN_ENCHANT_IDS, isSuccessLadderFlipSkill } from "../content-types";
 import type { ContentDb, EventDef, SkillDef } from "../content-types";
 import type {
   CharacterId,
   CoinDefId,
+  CoinEnchantId,
   EventDefId,
   PassiveId,
+  PermanentCoinUid,
   SkillId,
 } from "../ids";
 import { derive, rngFrom, seedFromString } from "../rng";
@@ -23,12 +25,106 @@ import type {
   EquippedSkills,
   PendingRewards,
   PendingShop,
+  PermanentCoinLedger,
   PendingTreasure,
   RunState,
   UpgradedSlots,
 } from "./types";
 
 const eventId = (value: string): EventDefId => value as EventDefId;
+// Persisted ledgers reserve Number.MAX_SAFE_INTEGER as invalid so every saved
+// `nextUid` remains safe to increment. Keep one successor in range when
+// issuing a new coin; otherwise the returned run could not be saved.
+const MAX_ISSUABLE_PERMANENT_COIN_UID = Number.MAX_SAFE_INTEGER - 1;
+
+const permanentCoinLedgerForBag = (
+  bag: readonly CoinDefId[],
+): PermanentCoinLedger => ({
+  nextUid: bag.length + 1,
+  coins: bag.map((defId, index) => ({
+    uid: (index + 1) as PermanentCoinUid,
+    defId,
+  })),
+});
+
+const ledgerMatchesBag = (
+  ledger: PermanentCoinLedger | undefined,
+  bag: readonly CoinDefId[],
+): boolean =>
+  ledger !== undefined &&
+  ledger.coins.length === bag.length &&
+  ledger.coins.every(
+    (coin, index) => coin.defId === bag[index],
+  );
+
+const compatiblePermanentCoins = (run: RunState): PermanentCoinLedger => {
+  if (ledgerMatchesBag(run.permanentCoins, run.bag)) return run.permanentCoins;
+  if (run.permanentCoins.coins.some((coin) => coin.enchant !== undefined)) {
+    throw new Error('permanent coin ledger does not match bag');
+  }
+  // Source compatibility for direct test/tool states created before v10. The
+  // persistence boundary rejects mismatches; only an unenchanted ledger may be
+  // reconstructed here.
+  return permanentCoinLedgerForBag(run.bag);
+};
+
+const appendPermanentCoin = (
+  run: RunState,
+  defId: CoinDefId,
+  enchant?: CoinEnchantId,
+): Pick<RunState, 'bag' | 'permanentCoins'> => {
+  const ledger = compatiblePermanentCoins(run);
+  if (ledger.nextUid >= MAX_ISSUABLE_PERMANENT_COIN_UID) {
+    throw new Error('coin UID exhausted');
+  }
+  return {
+    bag: [...run.bag, defId],
+    permanentCoins: {
+      nextUid: ledger.nextUid + 1,
+      coins: [
+        ...ledger.coins,
+        {
+          uid: ledger.nextUid as PermanentCoinUid,
+          defId,
+          ...(enchant === undefined ? {} : { enchant }),
+        },
+      ],
+    },
+  };
+};
+
+const removePermanentCoin = (
+  run: RunState,
+  index: number,
+): Pick<RunState, 'bag' | 'permanentCoins'> => {
+  const ledger = compatiblePermanentCoins(run);
+  return {
+    bag: run.bag.filter((_coin, coinIndex) => coinIndex !== index),
+    permanentCoins: {
+      ...ledger,
+      coins: ledger.coins.filter((_coin, coinIndex) => coinIndex !== index),
+    },
+  };
+};
+
+const replacePermanentCoin = (
+  run: RunState,
+  index: number,
+  defId: CoinDefId,
+): Pick<RunState, 'bag' | 'permanentCoins'> => {
+  const ledger = compatiblePermanentCoins(run);
+  return {
+    bag: run.bag.map((coin, coinIndex) =>
+      coinIndex === index ? defId : coin,
+    ),
+    permanentCoins: {
+      ...ledger,
+      coins: ledger.coins.map((coin, coinIndex) =>
+        coinIndex === index ? { ...coin, defId } : coin,
+      ),
+    },
+  };
+};
 
 // 캐릭터 대표 속성은 스키마 확장 없이 시작 가방의 비기본 최빈 속성에서 유도한다
 // (모든 캐릭터가 "기본 8 + 대표 2" 규격 — content-design-guide 캐릭터 양식).
@@ -595,6 +691,17 @@ export const completedCombatCount = (run: RunState): number => {
   return count;
 };
 
+export const coinEnchantOptionsFor = (
+  runSeed: string,
+  completedCombatIndex: number,
+  count: number,
+): CoinEnchantId[] =>
+  rngFrom(
+    derive(seedFromString(runSeed), "reward-enchant", completedCombatIndex - 1),
+  )
+    .shuffle(COIN_ENCHANT_IDS)
+    .slice(0, count) as CoinEnchantId[];
+
 const coinShopPrice = (
   db: ContentDb,
   character: CharacterId,
@@ -849,9 +956,18 @@ const pendingRewardsFor = (
       : [];
   const passiveOptions =
     nodeKind === "boss" ? rolledPassivesFor(run, settledLayerIndex, 3, db) : [];
+  const coinEnchantOptions =
+    nodeKind === "elite" || nodeKind === "boss"
+      ? coinEnchantOptionsFor(
+          run.runSeed,
+          completedCombatIndex,
+          coinOptions.length,
+        )
+      : undefined;
 
   return {
     coinOptions,
+    ...(coinEnchantOptions === undefined ? {} : { coinEnchantOptions }),
     coinChoiceResolved: false,
     coinRemovalResolved: true,
     skillOptions,
@@ -887,6 +1003,7 @@ export const createRun = (config: CreateRunConfig, db: ContentDb): RunState => {
     currentHp: character.maxHp,
     maxHp: character.maxHp,
     bag: [...character.startingBag],
+    permanentCoins: permanentCoinLedgerForBag(character.startingBag),
     equippedSkills: equippedSkills(character.startingSkills),
     upgradedSlots: Array.from(
       { length: MAX_EQUIPPED_SKILLS },
@@ -954,11 +1071,13 @@ export const startRunCombat = (
       : node.encounter;
   if (enemies === undefined || enemies.length === 0)
     throw new Error("encounter does not exist");
+  const permanentCoins = compatiblePermanentCoins(run);
   const combat = createCombat(
     {
       character: run.character,
       enemies: [...enemies],
       bag: run.bag,
+      permanentCoins: permanentCoins.coins,
       equippedSkills: run.equippedSkills,
       currentHp: run.currentHp,
       maxHp: run.maxHp,
@@ -974,6 +1093,7 @@ export const startRunCombat = (
   return {
     run: {
       ...run,
+      permanentCoins,
       phase: "combat",
       pendingRewards: undefined,
       pendingShop: undefined,
@@ -1145,11 +1265,17 @@ export const acceptEvent = (
   if (event.risk === "hp") {
     if (run.currentHp <= event.requireCurrentHpAbove)
       throw new Error("not enough HP to accept event");
+    let rewardedRun = run;
+    for (let count = 0; count < event.reward.count; count += 1) {
+      rewardedRun = {
+        ...rewardedRun,
+        ...appendPermanentCoin(rewardedRun, signature),
+      };
+    }
     return advanceAfterEvent(
       {
-        ...run,
+        ...rewardedRun,
         currentHp: run.currentHp - event.hpCost,
-        bag: [...run.bag, signature],
         eventCoinGains: run.eventCoinGains + event.reward.count,
       },
       db,
@@ -1163,13 +1289,11 @@ export const acceptEvent = (
     throw new Error("event requires a basic coin");
   if (event.risk === "gold") {
     if (run.gold < event.goldCost) throw new Error("not enough gold");
-    const bag = [...run.bag];
-    bag[bagIndex] = signature;
     return advanceAfterEvent(
       {
         ...run,
+        ...replacePermanentCoin(run, bagIndex, signature),
         gold: run.gold - event.goldCost,
-        bag,
         eventCoinGains: run.eventCoinGains + 1,
         eventCoinLosses: run.eventCoinLosses + 1,
       },
@@ -1178,12 +1302,12 @@ export const acceptEvent = (
   }
   if (run.bag.length <= event.sacrifice.minimumBagSize)
     throw new Error("cannot sacrifice the last coin");
-  const bag = [...run.bag];
-  bag.splice(bagIndex, 1);
+  const removed = removePermanentCoin(run, bagIndex);
+  const replaced = appendPermanentCoin({ ...run, ...removed }, signature);
   return advanceAfterEvent(
     {
       ...run,
-      bag: [...bag, signature],
+      ...replaced,
       eventCoinGains: run.eventCoinGains + 1,
       eventCoinLosses: run.eventCoinLosses + 1,
     },
@@ -1212,8 +1336,18 @@ export const chooseCoinReward = (
   if (coin !== null && !isCoinEligibleForCharacter(db, run.character, coin))
     throw new Error("coin reward is not eligible for this character");
   const pendingRewards = { ...pending, coinChoiceResolved: true };
-  const bag = coin === null ? [...run.bag] : [...run.bag, coin];
-  return finishRewardsIfComplete({ ...run, bag }, pendingRewards, db);
+  if (coin === null) {
+    return finishRewardsIfComplete({ ...run }, pendingRewards, db);
+  }
+  const optionIndex = pending.coinOptions.findIndex(
+    (option) => option === coin,
+  );
+  const added = appendPermanentCoin(
+    run,
+    coin,
+    pending.coinEnchantOptions?.[optionIndex],
+  );
+  return finishRewardsIfComplete({ ...run, ...added }, pendingRewards, db);
 };
 
 export const resolveCoinRemoval = (
@@ -1225,12 +1359,15 @@ export const resolveCoinRemoval = (
   requireCoinChoiceResolved(pending);
   if (pending.coinRemovalResolved)
     throw new Error("coin removal is already resolved");
-  const bag = [...run.bag];
+  let coinState: Pick<RunState, 'bag' | 'permanentCoins'> = {
+    bag: [...run.bag],
+    permanentCoins: compatiblePermanentCoins(run),
+  };
   if (bagIndex !== null) {
-    if (!Number.isInteger(bagIndex) || bagIndex < 0 || bagIndex >= bag.length) {
+    if (!Number.isInteger(bagIndex) || bagIndex < 0 || bagIndex >= run.bag.length) {
       throw new Error("bag index is out of range");
     }
-    bag.splice(bagIndex, 1);
+    coinState = removePermanentCoin(run, bagIndex);
   }
   const pendingRewards = { ...pending, coinRemovalResolved: true };
   const completedCount = completedCombatCount(run);
@@ -1240,15 +1377,19 @@ export const resolveCoinRemoval = (
     // chooseCoinReward callers remain source compatible.
     return {
       ...run,
-      bag,
+      ...coinState,
       pendingRewards: {
-        ...pendingRewards,
+        ...(() => {
+          const plainReward = { ...pendingRewards };
+          delete plainReward.coinEnchantOptions;
+          return plainReward;
+        })(),
         coinOptions: fallbackCoinOptionsFor(run, completedCount - 1, db),
         coinChoiceResolved: false,
       },
     };
   }
-  return finishRewardsIfComplete({ ...run, bag }, pendingRewards, db);
+  return finishRewardsIfComplete({ ...run, ...coinState }, pendingRewards, db);
 };
 
 export const chooseSkillReward = (
@@ -1501,10 +1642,11 @@ export const buyShopCoin = (
   if (price !== coinShopPrice(db, run.character, coin))
     throw new Error("shop coin price is invalid");
   if (run.gold < price) throw new Error("not enough gold");
+  const added = appendPermanentCoin(run, coin);
   return {
     ...run,
+    ...added,
     gold: run.gold - price,
-    bag: [...run.bag, coin],
     shopPurchasedCoins: run.shopPurchasedCoins + 1,
     pendingShop: {
       ...pending,
@@ -1588,12 +1730,11 @@ export const buyShopRemoval = (
   }
   const price = 75 + 25 * run.shopRemovals;
   if (run.gold < price) throw new Error("not enough gold");
-  const bag = [...run.bag];
-  bag.splice(bagIndex, 1);
+  const removed = removePermanentCoin(run, bagIndex);
   return {
     ...run,
+    ...removed,
     gold: run.gold - price,
-    bag,
     shopRemovals: run.shopRemovals + 1,
   };
 };

@@ -79,6 +79,7 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
     case "coinFlipped":
     case "bloodCoinFizzle":
     case "resonanceTriggered":
+    case "enchantTriggered":
     case "blockCleared":
     case "traitTriggered":
     case "passiveTriggered":

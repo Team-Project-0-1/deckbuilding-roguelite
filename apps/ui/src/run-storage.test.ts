@@ -2,9 +2,13 @@ import { CONTENT_VERSION as CURRENT_CONTENT_VERSION, contentDb } from "@game/con
 import {
   RUN_ENCOUNTERS,
   RUN_SAVE_VERSION,
+  COIN_ENCHANT_IDS,
   chooseCoinReward,
   chooseRunNode,
   createRun,
+  derive,
+  rngFrom,
+  seedFromString,
   settleRunCombat,
   startRunCombat,
   type CombatState,
@@ -38,6 +42,10 @@ const padSkills = (skills: readonly unknown[]): (string | null)[] => [
 ];
 const PADDED_STARTING_SKILLS = padSkills(STARTING_SKILLS);
 const NO_UPGRADES = Array.from({ length: MAX_SLOTS }, () => false);
+const ledgerForBag = (bag: readonly unknown[]) => ({
+  nextUid: bag.length + 1,
+  coins: bag.map((defId, index) => ({ uid: index + 1, defId: String(defId) })),
+});
 
 const legacyGraph = (): RunSave["graph"] => ({
   layers: RUN_ENCOUNTERS.map((encounter, index) => [
@@ -49,6 +57,15 @@ const legacyGraph = (): RunSave["graph"] => ({
   ]),
 });
 
+const rewardGraph = (completedKind: "combat" | "elite" | "boss"): RunSave["graph"] => ({
+  layers: [
+    legacyGraph().layers[0]!,
+    [{ ...legacyGraph().layers[1]![0]!, id: `reward-${completedKind}`, kind: completedKind }],
+    legacyGraph().layers[2]!,
+  ],
+  acts: [{ start: 0 }],
+});
+
 const readySave = (): RunSave => ({
   version: RUN_SAVE_VERSION,
   contentVersion: CONTENT_VERSION,
@@ -57,6 +74,7 @@ const readySave = (): RunSave => ({
   currentHp: 63,
   maxHp: 70,
   bag: [...STARTING_BAG.slice(1), "mana"] as never,
+  permanentCoins: ledgerForBag([...STARTING_BAG.slice(1), "mana"]) as never,
   // 첫 빈 슬롯(4)에 smash 장착 = 변경 슬롯 1 (완료 보상 1회로 커버)
   equippedSkills: padSkills([...STARTING_SKILLS, "smash"]) as never,
   gold: 40,
@@ -96,6 +114,7 @@ const rewardsSave = (): RunSave => ({
 const combatOneRewardsSave = (): RunSave => ({
   ...readySave(),
   bag: [...STARTING_BAG] as never,
+  permanentCoins: ledgerForBag(STARTING_BAG) as never,
   equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   combatIndex: 1,
   attempt: 0,
@@ -113,6 +132,7 @@ const freshSave = (): RunSave => ({
   ...readySave(),
   currentHp: 70,
   bag: [...STARTING_BAG] as never,
+  permanentCoins: ledgerForBag(STARTING_BAG) as never,
   equippedSkills: [...PADDED_STARTING_SKILLS] as never,
   gold: 0,
   upgradedSlots: [...NO_UPGRADES] as never,
@@ -154,6 +174,18 @@ const legacyRawWith = (overrides: Record<string, unknown>): string => {
 };
 const parse = (raw: string): RunSave | null => parseRunSave(raw, CONTENT_VERSION, contentDb);
 const serialize = (save: RunSave): string => serializeRunSave(save, contentDb);
+
+type PermanentCoinLedgerView = {
+  nextUid: number;
+  coins: readonly { uid: number; defId: string; enchant?: string }[];
+};
+
+const permanentCoinsOf = (save: unknown): PermanentCoinLedgerView => {
+  const ledger = (save as { permanentCoins?: PermanentCoinLedgerView })
+    .permanentCoins;
+  if (ledger === undefined) throw new Error("missing permanent coin ledger");
+  return ledger;
+};
 
 const exhaustedSkillContext = {
   ...contentDb,
@@ -292,6 +324,205 @@ describe("run save serialization boundary", () => {
     expect(loadRun(unavailable, CONTENT_VERSION, contentDb)).toBeNull();
   });
 
+  it("migrates a v9 bag to v10 stable per-copy permanent coin identities without enchants", () => {
+    const v9 = { ...readySave(), version: 9 } as Record<string, unknown>;
+    delete v9.permanentCoins;
+    const migrated = parse(JSON.stringify(v9));
+    if (migrated === null) throw new Error("v9 migration failed");
+
+    const ledger = permanentCoinsOf(migrated);
+    expect(ledger.coins).toEqual(
+      migrated.bag.map((defId, index) => ({
+        uid: index + 1,
+        defId: String(defId),
+      })),
+    );
+    expect(ledger.nextUid).toBe(migrated.bag.length + 1);
+    expect(ledger.coins.every((coin) => coin.enchant === undefined)).toBe(true);
+  });
+
+  it.each(["elite", "boss", "combat"] as const)(
+    "migrates v9 paused %s rewards with the current deterministic enchant contract",
+    (completedKind) => {
+      const v9 = {
+        ...readySave(),
+        version: 9,
+        graph: rewardGraph(completedKind),
+        nodeChoices: [0, 0, 0],
+        combatIndex: 2,
+        attempt: 0,
+        phase: "rewards" as const,
+        equippedSkills: [...PADDED_STARTING_SKILLS] as never,
+        pendingRewards: {
+          coinOptions: ["basic", "fire", "mana"] as never,
+          coinChoiceResolved: false,
+          coinRemovalResolved: true,
+          skillOptions: completedKind === "elite" ? (["furnace"] as never) : [],
+          skillChoiceResolved: completedKind !== "elite",
+        },
+      } as Record<string, unknown>;
+      delete v9.permanentCoins;
+
+      const migrated = parse(JSON.stringify(v9));
+      if (migrated === null) throw new Error("v9 paused reward migration failed");
+
+      if (completedKind === "combat") {
+        expect(migrated.pendingRewards).not.toHaveProperty("coinEnchantOptions");
+        return;
+      }
+      expect(migrated.pendingRewards?.coinEnchantOptions).toEqual(
+        rngFrom(derive(seedFromString(migrated.runSeed), "reward-enchant", 1))
+          .shuffle(COIN_ENCHANT_IDS)
+          .slice(0, 3),
+      );
+    },
+  );
+
+  it("rejects an injected valid-but-wrong v9 enchant offer", () => {
+    const v9 = {
+      ...readySave(),
+      version: 9,
+      graph: rewardGraph("elite"),
+      nodeChoices: [0, 0, 0],
+      combatIndex: 2,
+      attempt: 0,
+      phase: "rewards" as const,
+      equippedSkills: [...PADDED_STARTING_SKILLS] as never,
+      pendingRewards: {
+        coinOptions: ["basic", "fire", "mana"] as never,
+        coinEnchantOptions: rngFrom(derive(seedFromString("STORAGE-BOUNDARY"), "reward-enchant", 1))
+          .shuffle(COIN_ENCHANT_IDS)
+          .slice(0, 3)
+          .reverse() as never,
+        coinChoiceResolved: false,
+        coinRemovalResolved: true,
+        skillOptions: ["furnace"] as never,
+        skillChoiceResolved: false,
+      },
+    } as Record<string, unknown>;
+    delete v9.permanentCoins;
+
+    expect(parse(JSON.stringify(v9))).toBeNull();
+  });
+
+  it("round-trips one immutable enchant on a v10 permanent coin", () => {
+    const v10 = {
+      ...readySave(),
+      version: 10,
+      permanentCoins: {
+        nextUid: readySave().bag.length + 1,
+        coins: readySave().bag.map((defId, index) => ({
+          uid: index + 1,
+          defId: String(defId),
+          ...(index === 0 ? { enchant: "sharpness" } : {}),
+        })),
+      },
+    };
+    const parsed = parse(JSON.stringify(v10));
+    if (parsed === null) throw new Error("v10 enchanted save rejected");
+
+    expect(permanentCoinsOf(parse(serialize(parsed)))).toEqual(
+      permanentCoinsOf(parsed),
+    );
+    expect(permanentCoinsOf(parsed).coins[0]).toMatchObject({
+      enchant: "sharpness",
+    });
+  });
+
+  it("rejects a v10 permanent coin counter that cannot safely issue another UID", () => {
+    const v10 = {
+      ...readySave(),
+      version: 10,
+      permanentCoins: {
+        ...ledgerForBag(readySave().bag),
+        nextUid: Number.MAX_SAFE_INTEGER,
+      },
+    };
+
+    expect(parse(JSON.stringify(v10))).toBeNull();
+  });
+
+  it("round-trips a high legal permanent coin counter after awarding a coin", () => {
+    const highNextUid = Number.MAX_SAFE_INTEGER - 10;
+    const rewards = {
+      ...rewardsSave(),
+      permanentCoins: {
+        ...ledgerForBag(rewardsSave().bag),
+        nextUid: highNextUid,
+      } as never,
+    };
+    const awarded = chooseCoinReward(rewards, "fire" as never, contentDb);
+    const serialized = serialize(awarded);
+    const restored = parse(serialized);
+
+    expect(permanentCoinsOf(awarded).coins.at(-1)).toMatchObject({
+      uid: highNextUid,
+      defId: "fire",
+    });
+    expect(permanentCoinsOf(restored)).toEqual(permanentCoinsOf(awarded));
+  });
+
+  it.each([
+    ["duplicate permanent coin IDs", (save: Record<string, unknown>) => ({
+      ...save,
+      permanentCoins: {
+        nextUid: 99,
+        coins: [
+          { uid: 1, defId: String(readySave().bag[0]) },
+          { uid: 1, defId: String(readySave().bag[1]) },
+        ],
+      },
+    })],
+    ["bag and ledger def mismatch", (save: Record<string, unknown>) => ({
+      ...save,
+      permanentCoins: {
+        nextUid: save.bag instanceof Array ? save.bag.length + 1 : 1,
+        coins: (save.bag as string[]).map((defId, index) => ({
+          uid: index + 1,
+          defId: index === 0 ? "fire" : defId,
+        })),
+      },
+    })],
+    ["unknown enchant", (save: Record<string, unknown>) => ({
+      ...save,
+      permanentCoins: {
+        nextUid: (save.bag as string[]).length + 1,
+        coins: (save.bag as string[]).map((defId, index) => ({
+          uid: index + 1,
+          defId,
+          ...(index === 0 ? { enchant: "not-a-real-enchant" } : {}),
+        })),
+      },
+    })],
+    ["multiple enchants on one permanent coin", (save: Record<string, unknown>) => ({
+      ...save,
+      permanentCoins: {
+        nextUid: (save.bag as string[]).length + 1,
+        coins: (save.bag as string[]).map((defId, index) => ({
+          uid: index + 1,
+          defId,
+          ...(index === 0
+            ? { enchant: ["sharpness", "heads-polish"] }
+            : {}),
+        })),
+      },
+    })],
+    ["temporary enchanted coin persisted in the permanent ledger", (save: Record<string, unknown>) => ({
+      ...save,
+      permanentCoins: {
+        nextUid: (save.bag as string[]).length + 1,
+        coins: (save.bag as string[]).map((defId, index) => ({
+          uid: index + 1,
+          defId,
+          ...(index === 0 ? { temporary: true, enchant: "sharpness" } : {}),
+        })),
+      },
+    })],
+  ])("rejects v10 enchant persistence with %s", (_label, mutate) => {
+    const v10 = mutate({ ...readySave(), version: 10 } as Record<string, unknown>);
+    expect(parse(JSON.stringify(v10))).toBeNull();
+  });
+
   it("migrates legacy m5 content-version saves and normalizes to current", () => {
     // m5 콘텐츠는 현 버전의 부분집합·수치 불변 — 레거시 저장은 안전 로드 + 현 버전으로 정규화
     const legacy = parse(rawWith({ contentVersion: LEGACY_CONTENT_VERSION }));
@@ -304,6 +535,7 @@ describe("run save serialization boundary", () => {
     const frost = contentDb.characters["frost-knight"]!;
     const p10 = {
       ...freshSave(),
+      version: 9,
       contentVersion: P10_CONTENT_VERSION,
       character: "frost-knight",
       maxHp: frost.maxHp,
@@ -311,6 +543,7 @@ describe("run save serialization boundary", () => {
       bag: frost.startingBag.map(String),
       equippedSkills: padSkills(["slash", "guard", "frost-slash", "glacial-wall"]),
     };
+    delete (p10 as Record<string, unknown>).permanentCoins;
     const migrated = parse(JSON.stringify(p10));
     expect(migrated).toMatchObject({
       contentVersion: CONTENT_VERSION,
@@ -478,6 +711,37 @@ describe("run save serialization boundary", () => {
     ).toBeNull();
   });
 
+  it("limits three aligned enchant offers to elite and boss rewards", () => {
+    const rewardSave = (completedKind: "combat" | "elite" | "boss"): RunSave => ({
+      ...readySave(),
+      graph: rewardGraph(completedKind),
+      nodeChoices: [0, 0, 0],
+      combatIndex: 2,
+      attempt: 0,
+      phase: "rewards",
+      equippedSkills: [...PADDED_STARTING_SKILLS] as never,
+      pendingRewards: {
+        coinOptions: ["basic", "fire", "mana"] as never,
+        coinEnchantOptions: ["sharpness", "echo", "pendulum"] as never,
+        coinChoiceResolved: false,
+        coinRemovalResolved: true,
+        skillOptions: [],
+        skillChoiceResolved: true,
+      },
+    });
+
+    expect(parse(JSON.stringify(rewardSave("combat")))).toBeNull();
+    for (const kind of ["elite", "boss"] as const) {
+      expect(parse(JSON.stringify(rewardSave(kind)))).toEqual(rewardSave(kind));
+      const missing = rewardSave(kind);
+      delete missing.pendingRewards!.coinEnchantOptions;
+      expect(parse(JSON.stringify(missing))).toBeNull();
+      const misaligned = rewardSave(kind);
+      misaligned.pendingRewards!.coinOptions = ["basic", "fire"] as never;
+      expect(parse(JSON.stringify(misaligned))).toBeNull();
+    }
+  });
+
   it("rejects a save that removes the Blood Spellblade's locked unique skill", () => {
     const bloodRun = createRun(
       {
@@ -519,6 +783,7 @@ describe("run save serialization boundary", () => {
       restUpgrades: 0,
       combatIndex: 2,
       bag: [...STARTING_BAG, "fire", "mana"] as never,
+      permanentCoins: ledgerForBag([...STARTING_BAG, "fire", "mana"]) as never,
       equippedSkills: padSkills([...STARTING_SKILLS, "smash", "furnace"]) as never,
     };
     expect(parse(JSON.stringify(save))).toBeNull();
@@ -527,6 +792,7 @@ describe("run save serialization boundary", () => {
         JSON.stringify({
           ...save,
           bag: [...STARTING_BAG, "fire"],
+          permanentCoins: ledgerForBag([...STARTING_BAG, "fire"]),
           equippedSkills: [...PADDED_STARTING_SKILLS] as never,
         }),
       ),
@@ -974,11 +1240,13 @@ describe("run save serialization boundary", () => {
     const selectedFallback: RunSave = {
       ...readySave(),
       bag: [...STARTING_BAG, "basic", "fire", "mana"] as never,
+      permanentCoins: ledgerForBag([...STARTING_BAG, "basic", "fire", "mana"]) as never,
       equippedSkills: [...PADDED_STARTING_SKILLS] as never,
     };
     const skippedFallback: RunSave = {
       ...selectedFallback,
       bag: [...STARTING_BAG, "basic", "fire"] as never,
+      permanentCoins: ledgerForBag([...STARTING_BAG, "basic", "fire"]) as never,
     };
     for (const save of [initial, afterNormalCoin, fallbackCoin, skippedFallback]) {
       const serialized = serializeRunSave(save, exhaustedSkillContext);

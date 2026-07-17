@@ -31,11 +31,42 @@ import {
   upgradedContentDb,
   leaveShop,
   declineEvent,
+  acceptEvent,
+  buyShopRemoval,
 } from "./run";
 import { RUN_SAVE_VERSION } from "./types";
 import type { RunSave, RunState, UpgradedSlots } from "./types";
 
 const id = <T extends string>(value: string): T => value as T;
+
+/**
+ * D9 persistence contract. Kept structural while the production model is
+ * introduced so these tests describe the save/API boundary rather than a
+ * particular branded-id implementation.
+ */
+type PermanentCoinLedgerView = {
+  nextUid: number;
+  coins: readonly {
+    uid: number;
+    defId: string;
+    enchant?: string;
+  }[];
+};
+
+const permanentCoinsOf = (run: unknown): PermanentCoinLedgerView => {
+  const ledger = (run as { permanentCoins?: PermanentCoinLedgerView })
+    .permanentCoins;
+  if (ledger === undefined) throw new Error("missing permanent coin ledger");
+  return ledger;
+};
+
+const rewardEnchantsOf = (run: RunState): readonly string[] => {
+  const options = (run.pendingRewards as unknown as {
+    coinEnchantOptions?: readonly string[];
+  } | undefined)?.coinEnchantOptions;
+  if (options === undefined) throw new Error("missing enchanted coin options");
+  return options;
+};
 
 const simpleSkill = (value: string): SkillDef => ({
   id: id<SkillId>(value),
@@ -784,6 +815,23 @@ describe("run progression", () => {
     expect(chosen.bag).toHaveLength(rewards.bag.length + 1);
   });
 
+  it("keeps normal weighted coin options byte-stable without an enchant offer", () => {
+    const db = testDb();
+    const settle = () => {
+      const started = startRunCombat(newRun("D9-NORMAL-REWARD"), db);
+      return settleRunCombat(started.run, endedCombat(started.combat, "victory"), db);
+    };
+    const rewards = settle();
+    const replay = settle();
+
+    expect(replay.pendingRewards?.coinOptions).toEqual(
+      rewards.pendingRewards?.coinOptions,
+    );
+    expect(
+      "coinEnchantOptions" in (rewards.pendingRewards ?? {}),
+    ).toBe(false);
+  });
+
   // P7 D2: 빈 슬롯이 있으면 replaceSlot 생략 시 첫 빈 슬롯에 자동 장착, 만석일 때만 필수
   it("offers one elite skill, auto-fills the first empty slot, and requires replaceSlot only when full", () => {
     const db = testDb();
@@ -840,6 +888,154 @@ describe("run progression", () => {
     expect(() => chooseSkillReward(full, skill, undefined, db)).toThrow(
       "replaceSlot is required when all slots are filled",
     );
+  });
+
+  it("offers deterministic paired coin and enchant choices for an elite reward", () => {
+    const first = eliteRewardState(testDb(), "D9-ELITE-ENCHANT");
+    const replay = eliteRewardState(testDb(), "D9-ELITE-ENCHANT");
+    const firstEnchants = rewardEnchantsOf(first);
+
+    expect(first.pendingRewards?.coinOptions).toHaveLength(3);
+    expect(firstEnchants).toHaveLength(3);
+    expect(new Set(firstEnchants).size).toBe(3);
+    expect(rewardEnchantsOf(replay)).toEqual(firstEnchants);
+  });
+
+  it("adds the selected elite enchant to exactly the awarded permanent coin", () => {
+    const rewards = eliteRewardState(testDb(), "D9-ELITE-SELECT");
+    const coin = rewards.pendingRewards?.coinOptions[1];
+    const enchant = rewardEnchantsOf(rewards)[1];
+    if (coin === undefined || enchant === undefined)
+      throw new Error("missing paired elite reward");
+
+    const before = permanentCoinsOf(rewards);
+    const selected = chooseCoinReward(rewards, coin, testDb());
+    const after = permanentCoinsOf(selected);
+
+    expect(after.coins).toHaveLength(before.coins.length + 1);
+    expect(after.coins.at(-1)).toMatchObject({
+      uid: before.nextUid,
+      defId: String(coin),
+      enchant,
+    });
+    expect(after.coins.filter((entry) => entry.enchant !== undefined)).toHaveLength(
+      1,
+    );
+  });
+
+  it.each([Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER])(
+    "refuses to issue a permanent coin when next UID %s would create a non-persistable counter",
+    (nextUid) => {
+    const rewards = eliteRewardState(testDb(), "D9-UID-OVERFLOW");
+    const coin = rewards.pendingRewards?.coinOptions[0];
+    if (coin === undefined) throw new Error("missing elite coin option");
+
+    expect(() =>
+      chooseCoinReward(
+        {
+          ...rewards,
+          permanentCoins: {
+            ...rewards.permanentCoins,
+            nextUid,
+          },
+        },
+        coin,
+        testDb(),
+      ),
+    ).toThrow("coin UID exhausted");
+    },
+  );
+
+  it("leaves the permanent coin ledger unchanged when an elite enchant offer is declined", () => {
+    const rewards = eliteRewardState(testDb(), "D9-ELITE-DECLINE");
+    const before = permanentCoinsOf(rewards);
+    const declined = chooseCoinReward(rewards, null, testDb());
+
+    expect(permanentCoinsOf(declined)).toEqual(before);
+  });
+
+  it("deletes only the removed permanent coin identity after an enchanted reward", () => {
+    const rewards = eliteRewardState(testDb(), "D9-LEDGER-REMOVE");
+    const awarded = rewards.pendingRewards?.coinOptions[0];
+    if (awarded === undefined) throw new Error("missing elite coin option");
+    const selected = chooseCoinReward(rewards, awarded, testDb());
+    const beforeRemoval = permanentCoinsOf(selected);
+    const removed = resolveCoinRemoval(
+      {
+        ...selected,
+        pendingRewards: {
+          ...selected.pendingRewards!,
+          coinRemovalResolved: false,
+        },
+      },
+      0,
+      testDb(),
+    );
+
+    expect(permanentCoinsOf(removed).coins.map((coin) => coin.uid)).toEqual(
+      beforeRemoval.coins.slice(1).map((coin) => coin.uid),
+    );
+    expect(permanentCoinsOf(removed).coins.at(-1)).toMatchObject({
+      defId: String(awarded),
+      enchant: rewardEnchantsOf(rewards)[0],
+    });
+  });
+
+  it("deletes only the selected permanent coin identity through shop removal", () => {
+    const db = testDb();
+    const base = newRun("D9-SHOP-REMOVE", db);
+    const shop: RunState = {
+      ...base,
+      gold: 75,
+      graph: {
+        layers: [
+          [{ id: "d9-shop", kind: "shop" }],
+          [combatNode("d9-shop-next", "raider")],
+        ],
+        acts: [{ start: 0 }],
+      },
+      nodeChoices: [0, 0],
+      phase: "shop",
+      pendingShop: {
+        coinOptions: [],
+        coinPrices: [],
+        skillOptions: [],
+        skillPrices: [],
+      },
+    };
+    const before = permanentCoinsOf(shop);
+    const removed = buyShopRemoval(shop, 1, db);
+
+    expect(permanentCoinsOf(removed).coins.map((coin) => coin.uid)).toEqual(
+      before.coins.filter((_, index) => index !== 1).map((coin) => coin.uid),
+    );
+  });
+
+  it("preserves existing permanent coin identities when an event adds a signature coin", () => {
+    const db = testDb();
+    const base = newRun("D9-EVENT-ADD", db);
+    const eventRun: RunState = {
+      ...base,
+      graph: {
+        layers: [
+          [{ id: "d9-event", kind: "event" }],
+          [combatNode("d9-event-next", "raider")],
+        ],
+        acts: [{ start: 0 }],
+      },
+      nodeChoices: [0, 0],
+      phase: "event",
+      pendingEvent: { eventId: id("blood-offering") },
+    };
+    const before = permanentCoinsOf(eventRun);
+    const accepted = acceptEvent(eventRun, db);
+    const after = permanentCoinsOf(accepted);
+
+    expect(after.coins.slice(0, before.coins.length)).toEqual(before.coins);
+    expect(after.coins.at(-1)).toMatchObject({
+      uid: before.nextUid,
+      defId: "fire",
+    });
   });
 
   it("supports skipping both coin and skill rewards", () => {

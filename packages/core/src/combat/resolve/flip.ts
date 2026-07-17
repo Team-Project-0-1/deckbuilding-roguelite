@@ -4,6 +4,7 @@ import type { Element, EquipmentDefId, CoinUid, Face, SkillId, SlotId } from '..
 import { rngFrom } from '../../rng';
 import { drawCards, drawSpecificCoin, HAND_LIMIT } from '../draw';
 import type { CombatEvent } from '../events';
+import { assertCoinEnchantEligibility, firstUseEchoCoins, rollEnchantedFace } from '../enchant';
 import { MAX_PRESERVED_COINS, statusStacks, statusTurns } from '../state';
 import type { CombatState, StatusState, TurnTriggerInstance } from '../state';
 import { actSummon, addSummon, defaultEquipmentId, tickSummonDuration } from '../summons';
@@ -170,7 +171,7 @@ const addTemporaryCoin = (state: CombatState, atom: Extract<EffectAtom, { kind: 
     const coin = nextState.nextUid as CoinUid;
     const coins = {
       ...nextState.coins,
-      [Number(coin)]: { uid: coin, defId: atom.coin, permanent: false, grants: [] }
+      [Number(coin)]: { uid: coin, defId: atom.coin, permanent: false as const, grants: [] }
     };
 
     if (atom.zone === 'draw') {
@@ -954,6 +955,7 @@ export const resolveFlip = (
 
   const placed = input.zones.placed[slot] ?? [];
   if (placed.length !== skill.cost) throw new Error('placed coin count must equal skill cost');
+  assertCoinEnchantEligibility(input, placed);
   if (skill.requiredCoin !== undefined && placed.some((coin) => String(input.coins[Number(coin)]?.defId) !== String(skill.requiredCoin))) {
     throw new Error('placed coin does not satisfy required coin');
   }
@@ -986,14 +988,16 @@ export const resolveFlip = (
   // P7 D5 — 과열 강화 분기 보유 스킬이 성공 해결되면 해결 후 과열 소비 (finish 단일 경로)
   const consumesOverheat = input.player.overheat && (skill.overheatBonus?.length ?? 0) > 0;
   const finish = (finishedState: CombatState): ResolveResult => {
-    const handCoin = undefined;
+    const echoed = firstUseEchoCoins(finishedState, placed, events);
+    const echoCoins = new Set(echoed.coins);
+    const routedState = echoed.state;
     const returnElement = skill.returnUsedElementToDrawTop?.element;
     const minimumUsed = skill.returnUsedElementToDrawTop?.minimumUsed ?? 1;
     const canReturnUsedElement =
       returnElement !== undefined &&
       placed.length >= minimumUsed &&
       placed.every((coin) => {
-        const instance = finishedState.coins[Number(coin)];
+        const instance = routedState.coins[Number(coin)];
         return instance !== undefined && db.coins[String(instance.defId)]?.element === returnElement;
       });
     const skillReturned = new Set(
@@ -1001,33 +1005,37 @@ export const resolveFlip = (
         ? []
         : placed
             .filter((coin) => {
-              const instance = finishedState.coins[Number(coin)];
+              const instance = routedState.coins[Number(coin)];
               return instance !== undefined && db.coins[String(instance.defId)]?.element === skill.returnUsedElementToDrawTop!.element;
             })
             .slice(0, skill.returnUsedElementToDrawTop.count)
     );
-    const routedToDraw = new Set([retrievalCoin, residualCoin, ...skillReturned].filter((coin): coin is CoinUid => coin !== undefined && coin !== handCoin));
+    const routedToDraw = new Set(
+      [retrievalCoin, residualCoin, ...skillReturned].filter(
+        (coin): coin is CoinUid => coin !== undefined && !echoCoins.has(coin),
+      ),
+    );
     // Cost order is the deterministic top-of-draw order. Two passives may route
     // different coins, while a coin claimed by both is returned only once.
     const topDraw = placed.filter((coin) => routedToDraw.has(coin));
-    const discarded = placed.filter((coin) => coin !== handCoin && !routedToDraw.has(coin));
+    const discarded = placed.filter((coin) => !echoCoins.has(coin) && !routedToDraw.has(coin));
     events.push({ type: 'coinsDiscarded', coins: [...discarded], reason: 'skillCost' });
     let state = {
-      ...finishedState,
+      ...routedState,
       coins: Object.fromEntries(
-        Object.entries(finishedState.coins).map(([key, coin]) => [key, placed.includes(coin.uid) ? { ...coin, preserved: false } : coin])
+        Object.entries(routedState.coins).map(([key, coin]) => [key, placed.includes(coin.uid) ? { ...coin, preserved: false } : coin])
       ),
       player: {
-        ...finishedState.player,
-        retrievalHabitUsed: finishedState.player.retrievalHabitUsed || retrievalCoin !== undefined,
-        residualChargeUsed: finishedState.player.residualChargeUsed || residualCoin !== undefined
+        ...routedState.player,
+        retrievalHabitUsed: routedState.player.retrievalHabitUsed || retrievalCoin !== undefined,
+        residualChargeUsed: routedState.player.residualChargeUsed || residualCoin !== undefined
       },
       zones: {
-        ...finishedState.zones,
-        placed: { ...finishedState.zones.placed, [slot]: [] },
-        hand: handCoin === undefined ? finishedState.zones.hand : [...finishedState.zones.hand, handCoin],
-        draw: topDraw.length === 0 ? finishedState.zones.draw : [...topDraw, ...finishedState.zones.draw],
-        discard: [...finishedState.zones.discard, ...discarded]
+        ...routedState.zones,
+        placed: { ...routedState.zones.placed, [slot]: [] },
+        hand: [...echoed.coins, ...routedState.zones.hand],
+        draw: topDraw.length === 0 ? routedState.zones.draw : [...topDraw, ...routedState.zones.draw],
+        discard: [...routedState.zones.discard, ...discarded]
       }
     };
     if (consumesOverheat && state.player.overheat) {
@@ -1053,9 +1061,16 @@ export const resolveFlip = (
   const rng = state.rngImpl?.flip ?? rngFrom(state.rng.flip);
   const faces: Face[] = [];
   for (const coin of placed) {
-    const face = rng.flip();
-    faces.push(face);
-    events.push({ type: 'coinFlipped', coin, face });
+    const rolled = rollEnchantedFace(
+      state,
+      coin,
+      rng,
+      isSuccessLadderFlipSkill(skill) ? skill.successFace : undefined,
+      events,
+    );
+    state = rolled.state;
+    faces.push(rolled.face);
+    events.push({ type: 'coinFlipped', coin, face: rolled.face });
   }
   state = { ...state, rng: { ...state.rng, flip: rng.snapshot() } };
 
@@ -1269,6 +1284,26 @@ export const resolveFlip = (
         if (state.phase === 'victory' || state.phase === 'defeat') return false;
       }
     }
+    if (effectSkill.tags.includes('attack') && isSuccessLadderFlipSkill(effectSkill)) {
+      for (let index = 0; index < resolutionFaces.length; index += 1) {
+        if (resolutionFaces[index] !== effectSkill.successFace) continue;
+        const coinUid = resolutionCoins[index];
+        if (coinUid === undefined) continue;
+        const coin = state.coins[Number(coinUid)];
+        if (coin?.permanent !== true || coin.enchant !== 'sharpness') continue;
+        events.push({
+          type: 'enchantTriggered',
+          coin: coinUid,
+          enchant: coin.enchant!,
+          effect: 'damage',
+        });
+        const atom: EffectAtom = { kind: 'coinDamage', amount: 1 };
+        for (const damageTarget of targetsForElementProc(state, atom, skill, resolutionTarget, target)) {
+          state = applyEffectAtom(state, atom, damageTarget, db, events);
+          if (state.phase === 'victory' || state.phase === 'defeat') return false;
+        }
+      }
+    }
     return true;
   };
 
@@ -1293,9 +1328,16 @@ export const resolveFlip = (
     const repeatTarget = repeatTargetForSkill(state, skill, skillTarget);
     if (repeatTarget === undefined) return finish(state);
     const reuseFaces = placed.map((coin) => {
-      const face = rng.flip();
-      events.push({ type: 'coinFlipped', coin, face });
-      return face;
+      const rolled = rollEnchantedFace(
+        state,
+        coin,
+        rng,
+        isSuccessLadderFlipSkill(skill) ? skill.successFace : undefined,
+        events,
+      );
+      state = rolled.state;
+      events.push({ type: 'coinFlipped', coin, face: rolled.face });
+      return rolled.face;
     });
     state = { ...state, rng: { ...state.rng, flip: rng.snapshot() } };
     const repeatSkill: FlipSkillDef = {

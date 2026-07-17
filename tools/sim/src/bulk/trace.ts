@@ -167,6 +167,17 @@ const applyEventsToTurn = (
   }
 };
 
+const observeEnchantActivations = (
+  activations: Map<string, number>,
+  events: readonly CombatEvent[],
+): void => {
+  for (const event of events) {
+    if (event.type !== "enchantTriggered") continue;
+    const key = `${String(event.enchant)}:${event.effect}`;
+    activations.set(key, (activations.get(key) ?? 0) + 1);
+  }
+};
+
 const multiCoinOpportunity = (
   state: CombatState,
   commands: readonly Command[],
@@ -308,9 +319,11 @@ export const playPolicyCombat = (
   const turns: M6TurnTrace[] = [];
   const opportunities: M6OpportunitySnapshot[] = [];
   const commandEvents: M6CommandEventTrace[] = [];
+  const enchantActivations = new Map<string, number>();
   let activeTurn = newTurnTrace(state.turn, state.zones.hand);
   for (const coin of state.zones.hand) observeCoin(activeTurn, state, coin);
   applyEventsToTurn(activeTurn, state.events, state);
+  observeEnchantActivations(enchantActivations, state.events);
   let crash: { code: string } | null =
     invariantViolations.length > 0 ? { code: "INVARIANT_VIOLATION" } : null;
 
@@ -374,6 +387,7 @@ export const playPolicyCombat = (
     }
 
     state = result.state;
+    observeEnchantActivations(enchantActivations, result.events);
     commandEvents.push({
       schemaVersion: M6_TRANSCRIPT_SCHEMA_VERSION,
       combatIndex,
@@ -454,6 +468,11 @@ export const playPolicyCombat = (
       endingPlayerHp: state.player.hp,
       result,
       invariantViolations,
+      enchantActivations: Object.fromEntries(
+        [...enchantActivations.entries()].sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      ),
       turns,
     },
     transcript: {

@@ -1,11 +1,17 @@
 import type { EnemyIntent, StatusId, TargetRef } from '../content-types';
-import type { CoinUid, Element, Face, SkillId, SlotId } from '../ids';
+import type { CoinEnchantId, CoinUid, Element, Face, SkillId, SlotId } from '../ids';
 
 export type CombatEvent =
   | { type: 'coinsDrawn'; coins: CoinUid[] }
   | { type: 'coinPlaced'; coin: CoinUid; slot: SlotId }
   | { type: 'coinUnplaced'; coin: CoinUid; slot: SlotId }
   | { type: 'coinFlipped'; coin: CoinUid; face: Face }
+  | {
+      type: 'enchantTriggered';
+      coin: CoinUid;
+      enchant: CoinEnchantId;
+      effect: 'face' | 'damage' | 'return';
+    }
   | { type: 'resonanceTriggered'; skill: SkillId; element: Element }
   | { type: 'skillUsed'; slot: SlotId; skill: SkillId; kind: 'flip' | 'consume' }
   | {

@@ -50,6 +50,15 @@ const bulk = runBulk({
 });
 const outcomes = bulk.report.metrics.outcomes;
 const seed42Actual = simulateRun("42").summary;
+const enchantAttribution = Object.fromEntries(
+  bulk.traces
+    .flatMap((trace) => trace.combats)
+    .flatMap((combat) => Object.entries(combat.enchantActivations ?? {}))
+    .reduce((counts, [key, count]) => {
+      counts.set(key, (counts.get(key) ?? 0) + count);
+      return counts;
+    }, new Map<string, number>()),
+);
 
 const gates = {
   allRunsTerminal: outcomes.runs === EXPECTED_RUNS && outcomes.terminalRuns === EXPECTED_RUNS,
@@ -76,6 +85,7 @@ const report = {
     hpLossPerCombat: bulk.report.metrics.hpLossPerCombat,
     opportunities: bulk.report.metrics.opportunities,
     consumeVsFlip: bulk.report.metrics.consumeVsFlip,
+    enchantAttribution,
     anomalySeedCount: bulk.report.anomalySeeds.length,
     globalAnomalyCount: bulk.report.globalAnomalies.length,
   },

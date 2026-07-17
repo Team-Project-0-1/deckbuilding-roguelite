@@ -1,6 +1,9 @@
 export type Brand<T, B extends string> = T & { readonly __brand: B };
 
 export type CoinDefId = Brand<string, 'CoinDefId'>;
+export type CoinEnchantId = Brand<string, 'CoinEnchantId'>;
+// Stable identity for one permanent coin copy across combats and save/load.
+export type PermanentCoinUid = Brand<number, 'PermanentCoinUid'>;
 // 전투 내 인스턴스 id — nextUid 카운터 발급 (총량 원장 추적)
 export type CoinUid = Brand<number, 'CoinUid'>;
 export type SkillId = Brand<string, 'SkillId'>;

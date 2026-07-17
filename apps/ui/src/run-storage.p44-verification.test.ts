@@ -40,6 +40,13 @@ const eventSave = (): RunSave => {
     currentHp: 50,
     maxHp: 70,
     bag: [...WARRIOR_BAG] as never,
+    permanentCoins: {
+      nextUid: WARRIOR_BAG.length + 1,
+      coins: WARRIOR_BAG.map((defId, index) => ({
+        uid: (index + 1) as never,
+        defId,
+      })),
+    },
     equippedSkills: [...WARRIOR_SKILLS] as never,
     // P6 재고정: 이 시드의 이벤트 레이어는 1 — 완료 레이어는 0(전투 35)뿐이므로
     // 골드는 총수입 35 이내여야 경제 보존 법칙에 정합한다

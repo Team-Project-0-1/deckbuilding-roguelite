@@ -63,6 +63,27 @@ describe("M6 bulk episode integration", () => {
     }
 
     expect(result.report.metrics).toEqual(foldM6Metrics(result.traces));
+    const transcriptActivations = Object.fromEntries(
+      transcript.combats
+        .flatMap((combat) => combat.commands)
+        .flatMap((command) => command.events)
+        .filter((event) => event.type === "enchantTriggered")
+        .reduce((counts, event) => {
+          if (event.type !== "enchantTriggered") return counts;
+          const key = `${String(event.enchant)}:${event.effect}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+          return counts;
+        }, new Map<string, number>()),
+    );
+    const tracedActivations = Object.fromEntries(
+      trace.combats
+        .flatMap((combat) => Object.entries(combat.enchantActivations ?? {}))
+        .reduce((counts, [key, count]) => {
+          counts.set(key, (counts.get(key) ?? 0) + count);
+          return counts;
+        }, new Map<string, number>()),
+    );
+    expect(tracedActivations).toEqual(transcriptActivations);
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
   });
 

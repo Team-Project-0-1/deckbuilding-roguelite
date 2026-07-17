@@ -62,6 +62,8 @@ export interface M6CombatTrace {
   readonly endingPlayerHp: number;
   readonly result: M6CombatResult;
   readonly invariantViolations: readonly string[];
+  /** Counts resolver-emitted enchant activations by `<enchant>:<effect>`. */
+  readonly enchantActivations?: Readonly<Record<string, number>>;
   readonly turns: readonly M6TurnTrace[];
 }
 

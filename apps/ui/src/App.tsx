@@ -705,13 +705,15 @@ const withCombatEventResolutionLines = (
 const coinLabel = (state: CombatState, coin: CoinUid): string => {
   const instance = state.coins[Number(coin)];
   const def = instance === undefined ? undefined : contentDb.coins[String(instance.defId)];
+  const enchant = instance?.permanent ? contentDb.enchants?.[String(instance.enchant)] : undefined;
   const granted = instance?.grants.includes("fire") === true && def?.element !== "fire";
   const base = granted
     ? "기본+화염"
     : def?.element !== null && def?.element !== undefined
       ? elementKo(def.element)
       : "기본";
-  return instance?.preserved === true ? `${base}·보존` : base;
+  const label = instance?.preserved === true ? `${base}·보존` : base;
+  return enchant === undefined ? label : `${label} · ${enchant.name}`;
 };
 
 const coinVisualClasses = (state: CombatState, coin: CoinUid): string => {
@@ -779,6 +781,7 @@ const PilePopover = ({
         <ul>
           {groups.map((group) => {
             const granted = group.grants.filter((element) => element !== group.element);
+            const enchant = group.enchant === null ? undefined : contentDb.enchants?.[group.enchant];
             const lifecycle =
               zone === "exhausted"
                 ? group.temporary
@@ -790,7 +793,7 @@ const PilePopover = ({
                     ? "전투 후 소멸"
                     : "영구 동전";
             return (
-              <li key={`${group.defId}-${String(group.temporary)}-${group.grants.join("-")}`}>
+              <li key={`${group.defId}-${String(group.temporary)}-${group.enchant ?? "none"}-${group.grants.join("-")}`}>
                 <span
                   aria-hidden="true"
                   className={`pop-coin ${group.element ?? ""} ${granted.includes("fire") ? "granted-fire" : ""} ${group.temporary ? "temporary" : ""}`}
@@ -800,6 +803,12 @@ const PilePopover = ({
                   {granted.length > 0 ? ` · ${granted.map(elementKo).join("+")} 취급` : ""}
                   {group.temporary ? " (임시)" : ""} ×{group.count}
                   <small>{lifecycle}</small>
+                  {enchant !== undefined ? (
+                    <small className="coin-enchant-copy">
+                      {enchant.name} · {enchant.description}
+                      {" · 인챈트 변경·교체 불가"}
+                    </small>
+                  ) : null}
                 </span>
               </li>
             );
@@ -823,16 +832,21 @@ const CoinDisc = ({
   face?: Face;
   flipping?: boolean;
   vfx?: boolean;
-}) => (
-  <span
-    className={`socket-coin ${coinVisualClasses(state, coin)} ${flipping === true ? "flipping" : ""} ${
-      face !== undefined ? `face-${face}` : ""
-    } ${vfx ? "vfx-reveal" : ""}`}
-    style={vfx && face === undefined ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" } : undefined}
-  >
-    {face !== undefined ? <span className={`coin-face-mark ${face}`}>{face === "heads" ? "앞" : "뒤"}</span> : null}
-  </span>
-);
+}) => {
+  const instance = state.coins[Number(coin)];
+  const enchant = instance?.permanent ? contentDb.enchants?.[String(instance.enchant)] : undefined;
+  return (
+    <span
+      className={`socket-coin ${coinVisualClasses(state, coin)} ${flipping === true ? "flipping" : ""} ${
+        face !== undefined ? `face-${face}` : ""
+      } ${vfx ? "vfx-reveal" : ""}`}
+      style={vfx && face === undefined ? { animation: "vfx-coin-heads-reveal 300ms steps(3) 1" } : undefined}
+    >
+      {face !== undefined ? <span className={`coin-face-mark ${face}`}>{face === "heads" ? "앞" : "뒤"}</span> : null}
+      {enchant !== undefined ? <span data-enchant={enchant.name} /> : null}
+    </span>
+  );
+};
 
 interface RunSession {
   run: RunState;
@@ -1558,29 +1572,39 @@ const RunGame = ({ initialSession, onExitToTitle, onLoadSaved, onStartNewRun }: 
                         : "주머니에 영구 코인 하나를 추가합니다."}
                     </p>
                     <div className="reward-grid coin-rewards">
-                      {pending.coinOptions.map((coin, index) => (
-                        <button
-                          className={`reward-choice coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
-                          data-testid={`coin-reward-${String(coin)}`}
-                          key={String(coin)}
-                          ref={index === 0 ? primaryRef : undefined}
-                          type="button"
-                          onClick={() =>
-                            commitReward(chooseCoinReward(run, coin, contentDb), {
-                              combatIndex: run.combatIndex - 1,
-                              stage: rewardStage === "fallback-coin" ? "fallback-coin" : "coin",
-                              options: pending.coinOptions.map(String),
-                              choice: String(coin),
-                              resolution: "selected",
-                            })
-                          }
-                        >
-                          <span className="reward-coin" aria-hidden="true" />
-                          <strong>{coinName(coin)}</strong>
-                          <small>{coinRewardDetail(coin)}</small>
-                          <em>주머니 +1</em>
-                        </button>
-                      ))}
+                      {pending.coinOptions.map((coin, index) => {
+                        const enchant = contentDb.enchants?.[String(pending.coinEnchantOptions?.[index])];
+                        return (
+                          <button
+                            className={`reward-choice coin-${String(contentDb.coins[String(coin)]?.element ?? "basic")}`}
+                            data-testid={`coin-reward-${String(coin)}`}
+                            key={String(coin)}
+                            ref={index === 0 ? primaryRef : undefined}
+                            type="button"
+                            onClick={() =>
+                              commitReward(chooseCoinReward(run, coin, contentDb), {
+                                combatIndex: run.combatIndex - 1,
+                                stage: rewardStage === "fallback-coin" ? "fallback-coin" : "coin",
+                                options: pending.coinOptions.map(String),
+                                choice: String(coin),
+                                resolution: "selected",
+                              })
+                            }
+                          >
+                            <span className="reward-coin" aria-hidden="true" />
+                            <strong>{coinName(coin)}</strong>
+                            <small>{coinRewardDetail(coin)}</small>
+                            {enchant !== undefined ? (
+                              <span className="reward-enchant">
+                                <b>{enchant.name}</b>
+                                <small>{enchant.description}</small>
+                                <small>인챈트 불변 · 코인 제거 가능</small>
+                              </span>
+                            ) : null}
+                            <em>주머니 +1</em>
+                          </button>
+                        );
+                      })}
                     </div>
                     <button
                       className="secondary-action"
@@ -1596,7 +1620,7 @@ const RunGame = ({ initialSession, onExitToTitle, onLoadSaved, onStartNewRun }: 
                         })
                       }
                     >
-                      {rewardStage === "fallback-coin" ? "대체 코인 건너뛰기" : "코인 보상 건너뛰기"}
+                      {rewardStage === "fallback-coin" ? "대체 코인 건너뛰기" : "코인 보상 거절"}
                     </button>
                   </div>
                 ) : null}
@@ -4174,7 +4198,7 @@ const CombatBoard = ({
                           ? selectedCoin !== null
                             ? "선택한 동전 장전"
                             : "동전 장전"
-                          : "장전된 동전 회수"
+                          : `${coinLabel(state, coin)} 장전 동전 회수`
                       }
                       className={`socket ${coin !== undefined ? "loaded" : ""} ${coin === undefined && canPlace ? "accept" : ""} ${swapAccept ? "swap-accept" : ""} ${swapOver ? "swap-over" : ""}`}
                       data-coin={coin === undefined ? undefined : Number(coin)}

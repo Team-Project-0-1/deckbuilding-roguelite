@@ -87,6 +87,7 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
     case "blockCleared":
     case "statusTicked":
     case "resonanceTriggered":
+    case "enchantTriggered":
     case "traitTriggered":
     case "passiveTriggered":
     case "turnTriggerAdded":

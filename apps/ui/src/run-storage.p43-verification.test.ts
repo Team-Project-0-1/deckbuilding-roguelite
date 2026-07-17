@@ -20,6 +20,13 @@ const victoryViaShopsSave = (): RunSave => ({
   currentHp: 1,
   maxHp: 70,
   bag: [...contentDb.characters.warrior!.startingBag] as never,
+  permanentCoins: {
+    nextUid: contentDb.characters.warrior!.startingBag.length + 1,
+    coins: contentDb.characters.warrior!.startingBag.map((defId, index) => ({
+      uid: (index + 1) as never,
+      defId,
+    })),
+  },
   equippedSkills: [
     "flame-sword",
     "heart-of-flame",

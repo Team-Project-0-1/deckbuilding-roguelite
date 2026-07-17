@@ -2,6 +2,7 @@ import type { ConsumeSkillDef, ContentDb, TargetRef } from '../../content-types'
 import { effectiveElements, skillCooldown } from '../../content-types';
 import type { CoinDefId, CoinUid, SlotId } from '../../ids';
 import type { CombatEvent } from '../events';
+import { assertCoinEnchantEligibility, firstUseEchoCoins } from '../enchant';
 import type { CombatState } from '../state';
 import { consumeRequirementFor } from '../consume-requirement';
 import {
@@ -66,6 +67,7 @@ export const resolveConsume = (
     if (coins.length < requirement.min || coins.length > requirement.max) throw new Error('consumed coin count exceeds skill limit');
   } else if (coins.length !== requirement.min) throw new Error('consumed coin count must equal skill cost');
   if (new Set(coins).size !== coins.length) throw new Error('consumed coins must be unique');
+  assertCoinEnchantEligibility(input, coins);
 
   for (const coin of coins) {
     if (!input.zones.hand.includes(coin)) throw new Error('consumed coin is not in hand');
@@ -99,6 +101,20 @@ export const resolveConsume = (
       events.push({ type: 'overheatConsumed', skill: skill.id });
       state = { ...state, player: { ...state.player, overheat: false } };
     }
+    const echoed = firstUseEchoCoins(state, coins, events);
+    if (echoed.coins.length > 0) {
+      const returned = new Set(echoed.coins);
+      state = {
+        ...echoed.state,
+        zones: {
+          ...echoed.state.zones,
+          hand: [...echoed.state.zones.hand, ...echoed.coins],
+          exhausted: removeCoins(echoed.state.zones.exhausted, returned)
+        }
+      };
+    } else {
+      state = echoed.state;
+    }
     return { state, events };
   };
 
@@ -118,7 +134,12 @@ export const resolveConsume = (
       hand: removeCoins(input.zones.hand, consumed),
       exhausted: [...input.zones.exhausted, ...coins]
     },
-    coins: Object.fromEntries(Object.entries(input.coins).map(([key, coin]) => [key, consumed.has(coin.uid) ? { ...coin, preserved: false } : coin]))
+    coins: Object.fromEntries(
+      Object.entries(input.coins).map(([key, coin]) => [
+        key,
+        consumed.has(coin.uid) ? { ...coin, preserved: false } : coin,
+      ]),
+    )
   };
   const passiveMechanics = new Set(
     input.passives.flatMap((id) => {

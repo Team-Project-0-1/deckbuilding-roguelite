@@ -1,4 +1,17 @@
-import type { CharacterId, CoinDefId, PassiveId, EquipmentDefId, CoinUid, Element, EventDefId, EnemyDefId, Face, SkillId } from './ids';
+import type {
+  CharacterId,
+  CoinDefId,
+  CoinEnchantId,
+  PassiveId,
+  EquipmentDefId,
+  CoinUid,
+  PermanentCoinUid,
+  Element,
+  EventDefId,
+  EnemyDefId,
+  Face,
+  SkillId
+} from './ids';
 
 // 확정 어휘 (docs/implementation-plan.md §6): 화상 burn(M3), 동상 frostbite·감전 shock(포스트 MVP 예약)
 export type StatusId = 'burn' | 'frostbite' | 'shock';
@@ -13,14 +26,50 @@ export interface CoinDef {
   procs?: { heads?: EffectAtom[]; tails?: EffectAtom[] };
 }
 
-export interface CoinInstance {
+export const COIN_ENCHANT_IDS = [
+  'sharpness',
+  'heads-polish',
+  'tails-polish',
+  'echo',
+  'pendulum'
+] as const;
+
+export type CoinEnchantMechanic = (typeof COIN_ENCHANT_IDS)[number];
+
+export const isCoinEnchantId = (value: unknown): value is CoinEnchantId =>
+  typeof value === 'string' && (COIN_ENCHANT_IDS as readonly string[]).includes(value);
+
+export interface CoinEnchantDef {
+  id: CoinEnchantId;
+  name: string;
+  description: string;
+  mechanic: CoinEnchantMechanic;
+}
+
+interface CoinInstanceBase {
   uid: CoinUid;
   defId: CoinDefId;
-  permanent: boolean;
   grants: Element[];
   // P11 — 보존 동전은 턴 정리에서 제외되며 실제 사용/소비 시 해제된다.
   preserved?: boolean;
 }
+
+export interface PermanentCoinInstance extends CoinInstanceBase {
+  permanent: true;
+  permanentUid: PermanentCoinUid;
+  readonly enchant?: CoinEnchantId;
+  /** Battle-local latch for Pendulum or Echo. Never persisted to the run save. */
+  enchantUsed?: boolean;
+}
+
+export interface TemporaryCoinInstance extends CoinInstanceBase {
+  permanent: false;
+  permanentUid?: never;
+  enchant?: never;
+  enchantUsed?: never;
+}
+
+export type CoinInstance = PermanentCoinInstance | TemporaryCoinInstance;
 
 // P6 D3 — 스킬 강화: 스킬당 정의 1종, 런당 1회 (휴식 노드에서 적용).
 // patch는 선언적 — deriveUpgradedSkill이 순수 적용. 요구 5종 그대로.
@@ -361,6 +410,7 @@ export type EventDef =
 
 export interface ContentDb {
   coins: Record<string, CoinDef>;
+  enchants?: Record<string, CoinEnchantDef>;
   skills: Record<string, SkillDef>;
   enemies: Record<string, EnemyDef>;
   characters: Record<string, CharacterDef>;
@@ -829,8 +879,21 @@ const validateSkillUpgrades = (skills: readonly SkillDef[]): string[] => {
   return errors;
 };
 
+const validateEnchantDefs = (enchants: ContentDb['enchants']): string[] => {
+  const errors: string[] = [];
+  const allowed = new Set<string>(COIN_ENCHANT_IDS);
+  for (const [key, enchant] of Object.entries(enchants ?? {})) {
+    if (String(enchant.id) !== key) errors.push(`enchant ${key}: record key must match id`);
+    if (!allowed.has(enchant.mechanic)) errors.push(`enchant ${key}: unknown mechanic ${String(enchant.mechanic)}`);
+    if (enchant.name.trim().length === 0) errors.push(`enchant ${key}: name is required`);
+    if (enchant.description.trim().length === 0) errors.push(`enchant ${key}: description is required`);
+  }
+  return errors;
+};
+
 export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => [
   ...duplicateIds(Object.values(db.coins), 'coin'),
+  ...duplicateIds(Object.values(db.enchants ?? {}), 'enchant'),
   ...duplicateIds(Object.values(db.skills), 'skill'),
   ...duplicateIds(Object.values(db.enemies), 'enemy'),
   ...duplicateIds(Object.values(db.characters), 'character'),
@@ -847,7 +910,8 @@ export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => 
   ...validateEnemyPassives(db.enemies),
   ...validatePassives(db.passives),
   ...validateEquipment(db.equipment),
-  ...validateSkillUpgrades(Object.values(db.skills))
+  ...validateSkillUpgrades(Object.values(db.skills)),
+  ...validateEnchantDefs(db.enchants)
 ];
 
 export const effectiveElements = (coin: CoinInstance, db: ContentDb): Element[] => {
