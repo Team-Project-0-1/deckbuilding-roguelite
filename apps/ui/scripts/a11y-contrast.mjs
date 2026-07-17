@@ -147,7 +147,7 @@ const report = await measure(combatPage, [
   [".unit-name", "유닛 이름"],
   [".hp-num", "HP 숫자"],
   [".card-title", "카드 제목"],
-  [".card-action", "카드 상태 및 행동"],
+  [".repeat-label", "카드 반복 상태"],
   [".card-effect-copy", "카드 효과 본문"],
   [".run-meta strong", "진행 메타"],
   [".end-turn", "턴 종료 버튼"],
@@ -173,11 +173,11 @@ await shopPage.addInitScript(
   ([k, v]) => window.localStorage.setItem(k, v),
   [
     "deckbuilding-roguelite.run-save",
-    // P7 v7 저장 (8슬롯·시작 4스킬 — 경제 보존:
+    // 현재 저장 (8슬롯·시작 4스킬 — 경제 보존:
     // 골드 135 ≤ 엘리트 2승 140, rest/treasure 레이어 없음 = 카운터 0)
     JSON.stringify({
-      version: 7,
-      contentVersion: "1.5.0-p11",
+      version: 9,
+      contentVersion: "1.7.0-revision",
       runSeed: "A11Y-SHOP",
       character: "warrior",
       currentHp: 63,
@@ -186,8 +186,8 @@ await shopPage.addInitScript(
       equippedSkills: [
         "jab",
         "fist-guard",
-        "burning-fist",
-        "inner-passion",
+        "fire-fist",
+        "direct-hit",
         null,
         null,
         null,
@@ -223,6 +223,8 @@ await shopPage.addInitScript(
         coinPrices: [25, 50, 70],
         skillOptions: ["smash", "fire-infusion"],
         skillPrices: [50, 80],
+        passiveOptions: ["iron-body"],
+        passivePrices: [70],
       },
     }),
   ],

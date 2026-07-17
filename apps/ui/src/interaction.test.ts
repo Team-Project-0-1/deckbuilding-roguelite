@@ -52,10 +52,10 @@ const placeFirst = (
   return { state: result.state, coin };
 };
 
-describe("cardActionView — 카드 하단 상태 겸 행동 바", () => {
+describe("cardActionView — 소비형 카드 하단 행동 바", () => {
   const base = {
     cooldownRemaining: 0,
-    kind: "flip" as const,
+    kind: "consume" as const,
     loaded: 0,
     ready: false,
     resolving: false,
@@ -64,15 +64,10 @@ describe("cardActionView — 카드 하단 상태 겸 행동 바", () => {
     usedThisCombat: false,
   };
 
-  it("미장전·부분 장전·발동 가능을 한 줄 문구로 구분한다", () => {
+  it("소비 자원 부족과 발동 가능을 한 줄 문구로 구분한다", () => {
     expect(cardActionView(base)).toEqual({
       actionable: false,
-      label: "동전 0/2",
-      tone: "idle",
-    });
-    expect(cardActionView({ ...base, loaded: 1 })).toEqual({
-      actionable: false,
-      label: "동전 1/2",
+      label: "속성 동전 2개 필요",
       tone: "idle",
     });
     expect(cardActionView({ ...base, loaded: 2, ready: true })).toEqual({
@@ -111,7 +106,6 @@ describe("cardActionView — 카드 하단 상태 겸 행동 바", () => {
     expect(
       cardActionView({
         ...base,
-        kind: "consume",
         loaded: 1,
         ready: false,
         selecting: true,
@@ -121,7 +115,6 @@ describe("cardActionView — 카드 하단 상태 겸 행동 바", () => {
     expect(
       cardActionView({
         ...base,
-        kind: "consume",
         loaded: 2,
         ready: true,
         selecting: true,

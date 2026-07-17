@@ -11,7 +11,6 @@ export type BackgroundEffectsPreference = "full" | "reduced";
 
 export interface CombatPreferences {
   flipSpeed: FlipSpeed;
-  autoExecuteLoadedSkills: boolean;
   screenShake: boolean;
   damageNumberSize: CombatSizePreference;
   tooltipSize: CombatSizePreference;
@@ -34,9 +33,6 @@ export const LEGACY_MUTE_STORAGE_KEY = "deckbuilding-roguelite.muted";
 
 export const DEFAULT_COMBAT_PREFERENCES: CombatPreferences = {
   flipSpeed: "normal",
-  // Manual activation stays the default. Players can opt in from the
-  // contextual turn-end warning or the combat settings panel.
-  autoExecuteLoadedSkills: false,
   screenShake: true,
   damageNumberSize: "normal",
   tooltipSize: "normal",
@@ -103,10 +99,6 @@ export const loadCombatPreferences = (
       flipSpeed: isFlipSpeed(parsed.flipSpeed)
         ? parsed.flipSpeed
         : fallback.flipSpeed,
-      autoExecuteLoadedSkills: booleanPreference(
-        parsed.autoExecuteLoadedSkills,
-        fallback.autoExecuteLoadedSkills,
-      ),
       screenShake: booleanPreference(
         parsed.screenShake,
         fallback.screenShake,

@@ -346,7 +346,7 @@ try {
     await basicCoin.first().click();
     await page.locator(".skill-card").first().locator(".socket").click();
 
-    await page.locator(".skill-card").first().locator(".card-action").click();
+    await page.locator(".end-turn").click();
     await page.locator(".unit.enemy.vfx-hit").waitFor({
       state: "visible",
       timeout: 10000,
@@ -417,7 +417,7 @@ try {
     );
     await basicCoin.first().click();
     await page.locator(".skill-card").first().locator(".socket").click();
-    await page.locator(".skill-card").first().locator(".card-action").click();
+    await page.locator(".end-turn").click();
     await page.locator(".unit.enemy .float-text").waitFor({
       state: "visible",
       timeout: 10000,

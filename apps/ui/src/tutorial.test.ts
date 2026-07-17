@@ -21,14 +21,15 @@ const freshCombat = () =>
   );
 
 describe("activeTutorialTip", () => {
-  it("기본 안내는 장전 → 수동 사용·실행 순서 → 선택적 자동 실행을 가르친다", () => {
+  it("기본 안내는 3개 드로우 → 자유 배분 → 전역 확정 순서를 가르친다", () => {
     const copy = `${TUTORIAL_TIP_COPY["basic-loop"]} ${TUTORIAL_TIP_COPY["turn-flow"]}`;
+    expect(copy).toContain("동전 3개");
     expect(copy).toContain("장전");
     expect(copy).toContain("실행 순서");
-    expect(copy).toContain("턴 종료");
-    expect(copy).toContain("자동 실행");
-    expect(copy).toContain("스킬 사용");
-    expect(copy).toContain("실행할지 묻고");
+    expect(copy).toContain("행동 확정");
+    expect(copy).toContain("번호 순서대로 판정");
+    expect(copy).not.toContain("자동 실행");
+    expect(copy).not.toContain("스킬 사용");
   });
 
   it("첫 전투에서는 기본 루프 팁이 최우선이다", () => {

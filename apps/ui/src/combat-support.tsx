@@ -21,10 +21,10 @@ export function CombatHelp({ open, onOpenChange }: { open: boolean; onOpenChange
           <header><strong>전투 도움말</strong><button aria-label="전투 도움말 닫기" data-testid="combat-help-close" type="button" onClick={() => onOpenChange(false)}>×</button></header>
           <dl>
             <div><dt>장전</dt><dd>손패 동전을 스킬 슬롯에 넣습니다. 장전한 동전은 발동 전까지 다시 빼거나 서로 바꿀 수 있습니다.</dd></div>
-            <div><dt>수동 사용</dt><dd>완전히 장전되면 카드 하단의 스킬 사용을 눌러 바로 발동할 수 있습니다.</dd></div>
+            <div><dt>행동 확정</dt><dd>동전을 모두 배분하고 실행 순서를 정한 뒤, 화면 아래 행동 확정을 한 번 누르세요.</dd></div>
             <div><dt>실행 순서</dt><dd>아직 사용하지 않은 완전 장전 스킬에 번호가 붙습니다. 실행 레일의 앞·뒤 버튼이나 드래그로 순서를 바꿉니다.</dd></div>
-            <div><dt>턴 종료</dt><dd>수동 모드에서는 미사용 장전 스킬이 있을 때만 실행 여부를 묻습니다. 앞으로 자동 실행을 체크하면 이후에는 번호 순서대로 바로 처리합니다.</dd></div>
-            <div><dt>대상</dt><dd>선택이 필요한 스킬은 자동 실행을 잠시 멈춥니다. 강조된 적이나 장비를 고르세요.</dd></div>
+            <div><dt>순차 판정</dt><dd>확정하면 완전히 장전된 스킬을 번호 순서대로 판정하고, 이후 적 턴으로 넘어갑니다.</dd></div>
+            <div><dt>대상</dt><dd>선택이 필요한 스킬은 실행을 잠시 멈춥니다. 강조된 적이나 장비를 고르세요.</dd></div>
             <div><dt>버림·보존</dt><dd>실행하지 않은 동전은 턴 종료 때 버립니다. 보존 능력이 있으면 마지막에 남길 동전을 고릅니다.</dd></div>
             <div><dt>쿨타임</dt><dd>사용한 스킬은 표시된 턴 동안 다시 장전할 수 없습니다.</dd></div>
             <div><dt>상태</dt><dd>화상·동상·감전 아이콘의 숫자는 현재 중첩입니다. 아이콘을 가리키거나 눌러 설명을 확인하세요.</dd></div>

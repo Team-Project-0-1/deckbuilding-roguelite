@@ -35,7 +35,7 @@ const browser = await chromium.launch(
     : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
 );
 
-const boot = async (url = URL, compressTimers = true, autoExecute = true) => {
+const boot = async (url = URL, compressTimers = true, legacyAutoExecution = false) => {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 1,
@@ -64,7 +64,7 @@ const boot = async (url = URL, compressTimers = true, autoExecute = true) => {
     )
       errors.push("console: " + message.text());
   });
-  if (autoExecute)
+  if (legacyAutoExecution)
     await page.addInitScript(() => {
       localStorage.setItem(
         "deckbuilding-roguelite.combat-preferences",
@@ -105,17 +105,16 @@ const setFlipSpeed = async (page, speed) => {
 };
 
 const placeInto = async (page, cardIndex, socketIndex = 0) => {
-  await page.locator(".hand-tray .coin").first().click();
+  const basic = page.locator(
+    ".hand-tray .coin:not(.fire):not(.mana):not(.frost):not(.lightning):not(.blood):not(.granted-fire)",
+  );
+  if ((await basic.count()) > 0) await basic.first().click();
+  else await page.locator(".hand-tray .coin").first().click();
   await card(page, cardIndex).locator(".socket").nth(socketIndex).click();
 };
 
-const useLoadedCard = async (page, cardIndex) => {
-  const action = card(page, cardIndex).locator(".card-action");
-  check(
-    "\uC7A5\uC804 \uC644\uB8CC \uD6C4\uC5D0\uB3C4 \uC218\uB3D9 \uC0AC\uC6A9 \uBC84\uD2BC \uC720\uC9C0",
-    /\uC2A4\uD0AC \uC0AC\uC6A9/.test(await action.innerText()) && !(await action.isDisabled()),
-  );
-  await action.click();
+const confirmLoadedCards = async (page) => {
+  await page.locator(".end-turn").click();
   await waitReady(page);
 };
 const chipText = async (page) =>
@@ -123,69 +122,76 @@ const chipText = async (page) =>
 
 try {
   {
-    const { page, errors } = await boot(URL, true, false);
+    const { page, errors } = await boot();
+    const beforeConfirm = {
+      enemyHp: await page.locator(".unit.enemy .hp-num").innerText(),
+      playerHp: await page.locator(".unit.player .hp-num").innerText(),
+      history: await page.getByTestId("combat-history").innerText(),
+    };
     await placeInto(page, 0);
-    const action = card(page, 0).locator(".card-action");
     check(
-      "\uC218\uB3D9 \uAE30\uBCF8 \uBAA8\uB4DC\uC5D0\uC11C \uC7A5\uC804 \uC2A4\uD0AC \uBC84\uD2BC \uD65C\uC131",
-      /\uC2A4\uD0AC \uC0AC\uC6A9/.test(await action.innerText()) && !(await action.isDisabled()),
+      "플립 스킬별 수동 사용 버튼 제거",
+      (await card(page, 0).locator(".card-action").count()) === 0,
     );
     check(
-      "\uC218\uB3D9 \uAE30\uBCF8 \uBAA8\uB4DC\uC758 \uD134 \uC885\uB8CC \uB808\uC774\uBE14",
-      (await page.locator(".end-turn").innerText()) === "\uD134 \uC885\uB8CC",
+      "전역 확정 전에는 장전 상태 유지",
+      (await card(page, 0).locator(".socket.loaded").count()) === 1 &&
+        (await page.locator(".end-turn").innerText()) === "행동 확정 · 스킬 1개",
     );
-    await page.locator(".end-turn").click();
-    await page.getByTestId("turn-end-warning").waitFor({ state: "visible" });
     check(
-      "\uBBF8\uC0AC\uC6A9 \uC7A5\uC804 \uC2A4\uD0AC\uC774 \uC788\uC744 \uB54C\uB9CC \uACBD\uACE0",
-      (await card(page, 0).locator(".socket.loaded").count()) === 1,
+      "전역 확정 전에는 전투 상태를 변경하지 않음",
+      (await page.locator(".unit.enemy .hp-num").innerText()) === beforeConfirm.enemyHp &&
+        (await page.locator(".unit.player .hp-num").innerText()) === beforeConfirm.playerHp &&
+        (await page.getByTestId("combat-history").innerText()) === beforeConfirm.history &&
+        (await page.locator(".resolution-ticket").count()) === 0,
     );
-    await page.getByRole("button", { name: "\uB3CC\uC544\uAC00\uAE30", exact: true }).click();
-    await action.click();
-    await waitReady(page);
+    await confirmLoadedCards(page);
     check(
-      "\uACBD\uACE0 \uCDE8\uC18C \uD6C4 \uC218\uB3D9 \uC0AC\uC6A9",
+      "전역 확정 뒤 장전 스킬 순차 판정",
       (await card(page, 0).locator(".socket.loaded").count()) === 0,
     );
-    check("\uC218\uB3D9 \uBAA8\uB4DC \uC624\uB958 0", errors.length === 0, errors.join(" | "));
+    check("전역 확정 기본 흐름 오류 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
   {
-    const { page, errors } = await boot(URL, true, false);
+    const { page, errors } = await boot(URL, true, true);
     await placeInto(page, 0);
-    await page.locator(".end-turn").click();
-    await page.getByTestId("turn-end-warning-remember").check();
-    await page.getByTestId("turn-end-warning-confirm").click();
-    await waitReady(page);
     check(
-      "\uACBD\uACE0\uC5D0\uC11C \uC55E\uC73C\uB85C \uC790\uB3D9 \uC2E4\uD589 \uC800\uC7A5",
-      (await page.locator("main").getAttribute("data-auto-execute-loaded")) === "true",
+      "레거시 자동 실행 키는 UI 동작에 영향 없음",
+      (await page.locator("main").getAttribute("data-auto-execute-loaded")) === null &&
+        (await page.getByTestId("preference-auto-execute").count()) === 0 &&
+        (await page.locator(".end-turn").innerText()) === "행동 확정 · 스킬 1개",
     );
-    const savedAutoExecution = await page.evaluate(() => {
+    await setFlipSpeed(page, "fast");
+    const legacyKeyRemovedOnSave = await page.evaluate(() => {
       const raw = localStorage.getItem("deckbuilding-roguelite.combat-preferences");
-      return raw !== null && JSON.parse(raw).autoExecuteLoadedSkills === true;
+      return raw !== null && !("autoExecuteLoadedSkills" in JSON.parse(raw));
     });
     check(
-      "\uC790\uB3D9 \uC2E4\uD589 \uC124\uC815 \uC800\uC7A5\uC18C \uC720\uC9C0",
-      savedAutoExecution,
+      "레거시 자동 실행 키는 다음 저장에서 제거",
+      legacyKeyRemovedOnSave,
     );
-    check("\uC790\uB3D9 \uBAA8\uB4DC \uC800\uC7A5 \uC624\uB958 0", errors.length === 0, errors.join(" | "));
+    await confirmLoadedCards(page);
+    check("레거시 설정 호환 오류 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
   {
-    const { page, errors } = await boot(URL, true, false);
-    await placeInto(page, 0);
-    await page.locator(".end-turn").click();
-    await page.getByTestId("turn-end-warning-discard").click();
+    const { page, errors } = await boot(`${URL}&skills=burning-fist&encounter=raider`);
+    await placeInto(page, 0, 0);
+    check(
+      "부분 장전은 전역 확정 예약에서 제외",
+      (await page.getByTestId("execution-rail").count()) === 0 &&
+        (await page.locator(".end-turn").innerText()) === "행동 확정",
+    );
+    await confirmLoadedCards(page);
     await waitReady(page);
     check(
-      "\uC0AC\uC6A9\uD558\uC9C0 \uC54A\uACE0 \uD134 \uC885\uB8CC \uC120\uD0DD",
-      (await page.getByTestId("turn-end-warning").count()) === 0 &&
-        (await card(page, 0).locator(".socket.loaded").count()) === 0,
+      "부분 장전은 기존 턴 종료 회수·버림 적용",
+      (await card(page, 0).locator(".socket.loaded").count()) === 0,
     );
-    check("\uBBF8\uC0AC\uC6A9 \uC885\uB8CC \uC624\uB958 0", errors.length === 0, errors.join(" | "));
+    check("부분 장전 확정 오류 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -196,8 +202,8 @@ try {
     const rail = page.getByTestId("execution-rail");
     check("완전 장전 2개 실행 레일 표시", (await rail.locator("li").count()) === 2);
     check(
-      "턴 종료 기본 동작이 일괄 실행으로 표시",
-      /\uC2A4\uD0AC 2\uAC1C \uC790\uB3D9 \uC2E4\uD589 \uD6C4 \uD134 \uC885\uB8CC/.test(await page.locator(".end-turn").innerText()),
+      "전역 확정 버튼에 실행 스킬 수 표시",
+      (await page.locator(".end-turn").innerText()) === "행동 확정 · 스킬 2개",
     );
     const beforeOrder = await rail.locator(".execution-name").allInnerTexts();
     await rail.locator("li").first().getByRole("button", { name: /뒤로/ }).click();
@@ -215,7 +221,7 @@ try {
       (await card(page, 0).locator(".socket.loaded").count()) === 0 &&
         (await card(page, 1).locator(".socket.loaded").count()) === 0,
     );
-    check("자동 실행 순서 시나리오 에러 0", errors.length === 0, errors.join(" | "));
+    check("확정 실행 순서 시나리오 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -226,7 +232,7 @@ try {
     await page.locator(".end-turn").click();
     await waitReady(page);
     check(
-      `${speed} 모드 자동 실행 완료`,
+      `${speed} 모드 확정 실행 완료`,
       (await card(page, 0).locator(".socket.loaded").count()) === 0,
     );
     check(`${speed} 모드 에러 0`, errors.length === 0, errors.join(" | "));
@@ -239,7 +245,7 @@ try {
     await page.locator(".end-turn").click();
     await page.locator(".targeting-prompt").waitFor({ state: "visible" });
     check(
-      "다중 적 자동 실행이 대상 선택에서 일시정지",
+      "다중 적 확정 실행이 대상 선택에서 일시정지",
       (await page.locator("main").getAttribute("data-auto-turn-end-phase")) === "choosing",
     );
     await page.locator(".unit.enemy.targetable .sprite").last().click();
@@ -249,7 +255,7 @@ try {
       (await card(page, 0).locator(".socket.loaded").count()) === 0 &&
         (await page.locator(".targeting-prompt").count()) === 0,
     );
-    check("대상 선택 자동 실행 에러 0", errors.length === 0, errors.join(" | "));
+    check("대상 선택 확정 실행 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -260,14 +266,16 @@ try {
       "부분 장전은 실행 순서에서 제외되고 명시적으로 표시",
       (await page.getByTestId("execution-rail").count()) === 0 &&
         /미완료/.test(await card(page, 0).locator(".execution-partial-badge").innerText()) &&
-        (await page.locator(".end-turn").innerText()) === "턴 종료",
+        (await page.locator(".end-turn").innerText()) === "행동 확정",
     );
     check("부분 장전 시나리오 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
   {
-    const { page, errors } = await boot(`${URL}&skills=furnace&encounter=raider`);
+    const { page, errors } = await boot(
+      `${baseUrl}?seed=FURNACE-10&skills=furnace&encounter=raider`,
+    );
     const basicCoin = page.locator(
       ".hand-tray .coin:not(.fire):not(.mana):not(.frost):not(.lightning):not(.granted-fire)",
     );
@@ -283,7 +291,7 @@ try {
       (await validChoice.count()) === 1 &&
         !(await validChoice.isDisabled()) &&
         !(await card(page, 0).locator(".card-action").isDisabled()) &&
-        (await card(page, 1).locator(".card-action").isDisabled()),
+        (await card(page, 1).locator(".card-action").count()) === 0,
     );
     const invalidHand = page.locator(".hand-tray .coin:not(.fuel-valid)").first();
     if ((await invalidHand.count()) > 0) {
@@ -300,7 +308,7 @@ try {
       "코인 선택 확정 뒤 자동 큐 재개",
       (await card(page, 0).locator(".socket.loaded").count()) === 0,
     );
-    check("코인 선택 자동 실행 에러 0", errors.length === 0, errors.join(" | "));
+    check("코인 선택 확정 실행 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -342,7 +350,7 @@ try {
       (await card(page, 0).locator(".socket.loaded").count()) === 0 &&
         (await card(page, 1).locator(".socket.loaded").count()) === 0,
     );
-    check("장비·소환 자동 실행 에러 0", errors.length === 0, errors.join(" | "));
+    check("장비·소환 확정 실행 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -371,10 +379,10 @@ try {
   }
 
   {
-    const url = `${URL}&skills=comet-blow,jab&encounter=slime`;
+    const url = `${baseUrl}?seed=WINQ-32&skills=smash,jab&encounter=slime`;
     const { page, errors } = await boot(url, false);
     await setFlipSpeed(page, "instant");
-    for (let socketIndex = 0; socketIndex < 4; socketIndex += 1)
+    for (let socketIndex = 0; socketIndex < 2; socketIndex += 1)
       await placeInto(page, 0, socketIndex);
     await placeInto(page, 1);
     const playerHpBefore = await page.locator(".unit.player .hp-num").innerText();
@@ -424,19 +432,31 @@ try {
       cancelledState.defenseLoaded === 0 && cancelledState.firstLoaded === 1 && cancelledState.phase === "cancelled",
       JSON.stringify(cancelledState),
     );
-    check("자동 실행 취소 에러 0", errors.length === 0, errors.join(" | "));
+    check("확정 실행 취소 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
   {
     const { page, errors } = await boot();
+
+    await placeInto(page, 0);
+    const slashPreviewTip = page.locator("#skill-preview-0");
+    await page.mouse.move(0, 0);
+    await card(page, 0).hover();
+    await slashPreviewTip.waitFor({ state: "visible" });
+    const slashPreview = await slashPreviewTip.innerText();
+    check("공격 프리뷰 자해 없음", !/자해/.test(slashPreview), slashPreview);
+    await card(page, 0).locator(".socket.loaded").click();
+
     await placeInto(page, 2, 0);
     await placeInto(page, 2, 1);
-    await useLoadedCard(page, 2);
-    const text = await card(page, 2).locator(".card-action").innerText();
-    check("자동 실행 후 장전 상태 초기화", /동전 0\/2|재사용까지/.test(text), text);
-    check("자동 실행 후 셸 생존", await shellAlive(page));
-    check("자동 실행 단일 카드 시나리오 에러 0", errors.length === 0, errors.join(" | "));
+    await confirmLoadedCards(page);
+    check(
+      "확정 실행 후 장전 상태 초기화",
+      (await card(page, 2).locator(".socket.loaded").count()) === 0,
+    );
+    check("확정 실행 후 셸 생존", await shellAlive(page));
+    check("확정 실행 단일 카드 시나리오 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -467,18 +487,15 @@ try {
       strikePreview,
     );
     check(
-      "불타는 일격 프리뷰 코인 생성",
-      /코인 생성/.test(strikePreview),
+      "불타는 일격 프리뷰 v1.2 화상 성공 단계",
+      /화상/.test(strikePreview),
       strikePreview,
     );
-
-    await placeInto(page, 0);
-    const slashPreviewTip = page.locator("#skill-preview-0");
-    await page.mouse.move(0, 0);
-    await card(page, 0).hover();
-    await slashPreviewTip.waitFor({ state: "visible" });
-    const slashPreview = await slashPreviewTip.innerText();
-    check("공격 프리뷰 자해 없음", !/자해/.test(slashPreview), slashPreview);
+    check(
+      "불타는 일격 프리뷰 레거시 코인 생성 없음",
+      !/코인 생성/.test(strikePreview),
+      strikePreview,
+    );
     check("프리뷰 시나리오 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
@@ -489,18 +506,18 @@ try {
     check(
       "냉기 도적도 장전 스킬 실행 대기 표시",
       (await page.getByTestId("execution-rail").count()) === 1 &&
-        /\uC2A4\uD0AC \uC0AC\uC6A9/.test(await card(page, 0).locator(".card-action").innerText()),
+        (await card(page, 0).locator(".card-action").count()) === 0,
     );
     await page.locator(".end-turn").click();
     await page.locator(".preserve-picker").waitFor({ state: "visible" });
     check(
-      "자동 실행 뒤 기존 보존 선택 흐름으로 일시정지",
+      "확정 실행 뒤 기존 보존 선택 흐름으로 일시정지",
       (await card(page, 0).locator(".socket.loaded").count()) === 0 &&
         (await page.locator("main").getAttribute("data-auto-turn-end-phase")) === "preserving",
     );
     check(
-      "보존 단계에 자동 턴 종료 취소가 명시적으로 표시",
-      (await page.getByRole("button", { name: "자동 턴 종료 취소" }).count()) >= 1,
+      "보존 단계에 확정 흐름 취소가 명시적으로 표시",
+      (await page.getByRole("button", { name: "확정 흐름 취소" }).count()) >= 1,
     );
     await page.locator(".end-turn").click();
     await waitReady(page);
@@ -509,7 +526,7 @@ try {
       (await page.locator(".preserve-picker").count()) === 0,
     );
     check(
-      "자동 실행 보존 시나리오 에러 0",
+      "확정 실행 보존 시나리오 에러 0",
       errors.length === 0,
       errors.join(" | "),
     );

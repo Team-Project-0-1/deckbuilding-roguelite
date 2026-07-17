@@ -23,7 +23,7 @@ export type CardActionTone = "idle" | "ready" | "busy" | "targeting";
 
 export interface CardActionViewInput {
   cooldownRemaining: number;
-  kind: "flip" | "consume";
+  kind: "consume";
   loaded: number;
   ready: boolean;
   resolving: boolean;
@@ -58,7 +58,7 @@ export const cardActionView = (input: CardActionViewInput): CardActionView => {
       label: "대상 선택 중 · 취소",
       tone: "targeting",
     };
-  if (input.kind === "consume" && input.selecting) {
+  if (input.selecting) {
     return {
       actionable: input.ready,
       label: `${input.loaded}/${input.total} 소비${input.ready ? " · 확정" : ""}`,
@@ -67,15 +67,9 @@ export const cardActionView = (input: CardActionViewInput): CardActionView => {
   }
   if (input.ready)
     return { actionable: true, label: "스킬 사용", tone: "ready" };
-  if (input.kind === "consume")
-    return {
-      actionable: false,
-      label: `속성 동전 ${input.total}개 필요`,
-      tone: "idle",
-    };
   return {
     actionable: false,
-    label: `동전 ${input.loaded}/${input.total}`,
+    label: `속성 동전 ${input.total}개 필요`,
     tone: "idle",
   };
 };

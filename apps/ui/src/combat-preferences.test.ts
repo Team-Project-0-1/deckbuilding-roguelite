@@ -44,6 +44,8 @@ describe("combat preferences", () => {
       [COMBAT_PREFERENCES_STORAGE_KEY]: JSON.stringify({
         version: 1,
         flipSpeed: "warp",
+        // Legacy v1 field is deliberately read and ignored after the global
+        // confirm flow replaced optional auto execution.
         autoExecuteLoadedSkills: true,
         screenShake: false,
         damageNumberSize: "large",
@@ -59,7 +61,6 @@ describe("combat preferences", () => {
 
     expect(loadCombatPreferences(storage)).toEqual({
       flipSpeed: "instant",
-      autoExecuteLoadedSkills: true,
       screenShake: false,
       damageNumberSize: "large",
       tooltipSize: "normal",

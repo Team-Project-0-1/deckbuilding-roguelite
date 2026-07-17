@@ -2397,8 +2397,6 @@ const CombatBoard = ({
   const [choiceExecution, setChoiceExecution] = useState<ChoiceExecutionContext | null>(null);
   const [executionOrder, setExecutionOrder] = useState<ExecutionOrder>([]);
   const [autoTurnEnd, setAutoTurnEnd] = useState<AutoTurnEndState>(() => createIdleAutoTurnEnd());
-  const [turnEndWarningOpen, setTurnEndWarningOpen] = useState(false);
-  const [rememberAutoExecution, setRememberAutoExecution] = useState(false);
   const [executionDragSlot, setExecutionDragSlot] = useState<SlotId | null>(null);
   const [lastAttackTarget, setLastAttackTarget] = useState<number | null>(null);
   const [shakeCoin, setShakeCoin] = useState<CoinUid | null>(null);
@@ -2417,8 +2415,6 @@ const CombatBoard = ({
   const discardPileButtonRef = useRef<HTMLButtonElement | null>(null);
   const exhaustedPileButtonRef = useRef<HTMLButtonElement | null>(null);
   const endTurnButtonRef = useRef<HTMLButtonElement | null>(null);
-  const turnEndWarningRef = useRef<HTMLDivElement | null>(null);
-  const turnEndWarningPrimaryRef = useRef<HTMLButtonElement | null>(null);
   const handTrayRef = useRef<HTMLDivElement | null>(null);
   const pendingResolution = useRef<PendingResolution | null>(null);
   const resolutionTimer = useRef<number | null>(null);
@@ -2530,40 +2526,9 @@ const CombatBoard = ({
   }, [state.zones.hand.length]);
 
   useEffect(() => {
-    if (locked || executionBusy || turnEndWarningOpen || !recommendedLoad.requiresConfirmation)
+    if (locked || executionBusy || !recommendedLoad.requiresConfirmation)
       setRecommendedLoadOpen(false);
-  }, [executionBusy, locked, recommendedLoad.requiresConfirmation, turnEndWarningOpen]);
-
-  useEffect(() => {
-    if (!turnEndWarningOpen) return undefined;
-    turnEndWarningPrimaryRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setTurnEndWarningOpen(false);
-        endTurnButtonRef.current?.focus();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [
-        ...(turnEndWarningRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled])',
-        ) ?? []),
-      ];
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [turnEndWarningOpen]);
+  }, [executionBusy, locked, recommendedLoad.requiresConfirmation]);
 
   useEffect(() => {
     if (!initialEventsQueued.current && state.events.length > 0) {
@@ -2705,7 +2670,8 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
     }
-    clearResolutionTicket();
+    if (!(source === "auto-turn-end" && legalCommand.type === "endTurn"))
+      clearResolutionTicket();
     onTelemetryDecision(state, [legalCommand], result.state, result.events, source);
     if (
       (legalCommand.type === "useFlipSkill" || legalCommand.type === "useConsumeSkill") &&
@@ -2730,7 +2696,8 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
     }
-    clearResolutionTicket();
+    if (!(source === "auto-turn-end" && cmd.type === "endTurn"))
+      clearResolutionTicket();
     onTelemetryDecision(state, [cmd], result.state, result.events, source);
     if ((cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") && cmd.target !== undefined)
       setLastAttackTarget(cmd.target);
@@ -2764,24 +2731,12 @@ const CombatBoard = ({
     nextWorkflowId.current += 1;
     launchedExecutionTokens.current.clear();
     preserveWorkflowRequested.current = null;
-    setTurnEndWarningOpen(false);
     setPreviewSlot(null);
     setAutoTurnEnd(beginAutoTurnEnd(workflowId, executionSnapshot.order));
     return true;
   };
 
-  const confirmQueuedExecution = (): boolean => {
-    if (rememberAutoExecution && !preferences.autoExecuteLoadedSkills)
-      onPreferencesChange({ ...preferences, autoExecuteLoadedSkills: true });
-    return startQueuedExecution();
-  };
-
-  const discardLoadedSkillsAndEndTurn = (): boolean => {
-    setTurnEndWarningOpen(false);
-    return beginOrConfirmPreserve("manual");
-  };
-
-  const requestTurnEnd = (): boolean => {
+  const confirmTurnPlan = (): boolean => {
     if (preserveSelection !== null) {
       const source = autoTurnEnd.phase === "preserving" ? "auto-turn-end" : "manual";
       const committed = beginOrConfirmPreserve(source);
@@ -2789,16 +2744,7 @@ const CombatBoard = ({
         setAutoTurnEnd((current) => finishAutoTurnEnd(current));
       return committed;
     }
-    if (executionSnapshot.order.length > 0) {
-      if (preferences.autoExecuteLoadedSkills) return startQueuedExecution();
-      setRememberAutoExecution(false);
-      setPreviewSlot(null);
-      setOpenPile(null);
-      setRecommendedLoadOpen(false);
-      onUtilityPanelChange(null);
-      setTurnEndWarningOpen(true);
-      return true;
-    }
+    if (executionSnapshot.order.length > 0) return startQueuedExecution();
     return beginOrConfirmPreserve();
   };
 
@@ -3690,16 +3636,15 @@ const CombatBoard = ({
       setEquipmentChoice(null);
       setChoiceExecution(null);
       setPreviewSlot(null);
-      setTurnEndWarningOpen(false);
     }
   }, [ended]);
 
   const endTurnLabel =
     preserveSelection !== null
       ? "\uBCF4\uC874 \uD655\uC815"
-      : preferences.autoExecuteLoadedSkills && executionSnapshot.order.length > 0
-        ? "\uC2A4\uD0AC " + executionSnapshot.order.length + "\uAC1C \uC790\uB3D9 \uC2E4\uD589 \uD6C4 \uD134 \uC885\uB8CC"
-        : "\uD134 \uC885\uB8CC";
+      : executionSnapshot.order.length > 0
+        ? `행동 확정 · 스킬 ${executionSnapshot.order.length}개`
+        : "행동 확정";
   return (
     <main
       className="combat-shell"
@@ -3717,7 +3662,6 @@ const CombatBoard = ({
       data-background-effects={preferences.backgroundEffects}
       data-reduced-motion={String(preferences.reducedMotion)}
       data-sound={preferences.sound ? "on" : "off"}
-      data-auto-execute-loaded={String(preferences.autoExecuteLoadedSkills)}
       data-auto-turn-end-phase={autoTurnEnd.phase}
       data-test-encounter={isTestEncounter ? "duo-raiders" : undefined}
       data-run-phase={run.phase}
@@ -3914,7 +3858,7 @@ const CombatBoard = ({
           className={`execution-rail ${executionBusy ? "frozen" : ""}`}
           data-testid="execution-rail"
         >
-          <strong>턴 종료 실행 순서</strong>
+          <strong>행동 실행 순서</strong>
           <ol>
             {visibleExecutionOrder.map((slotId, index) => {
               const slotState = state.slots[Number(slotId)];
@@ -3970,7 +3914,7 @@ const CombatBoard = ({
           autoTurnEnd.phase === "choosing" ||
           autoTurnEnd.phase === "preserving" ? (
             <button className="execution-cancel" type="button" onClick={cancelAutomaticExecution}>
-              {autoTurnEnd.phase === "preserving" ? "자동 턴 종료 취소" : "남은 실행 취소"}
+              {autoTurnEnd.phase === "preserving" ? "확정 흐름 취소" : "남은 실행 취소"}
             </button>
           ) : null}
           {autoTurnEnd.phase === "blocked" ? (
@@ -4072,18 +4016,13 @@ const CombatBoard = ({
                 ? (consumeRequirement?.max ?? skill?.consume.count ?? 0)
                 : (consumeRequirement?.min ?? skill?.consume.count ?? 0);
           const baseAction =
-            skill === undefined
+            skill === undefined || skill.type === "flip"
               ? null
               : cardActionView({
                   cooldownRemaining: slotState.cooldownRemaining,
                   kind: skill.type,
-                  loaded: skill.type === "flip" ? placed.length : selectingFuel ? fuelSelection.coins.length : 0,
-                  ready:
-                    skill.type === "flip"
-                      ? use !== undefined
-                      : selectingFuel
-                        ? selectedFuelCommand !== null
-                        : consumeUse !== undefined,
+                  loaded: selectingFuel ? fuelSelection.coins.length : 0,
+                  ready: selectingFuel ? selectedFuelCommand !== null : consumeUse !== undefined,
                   resolving: isResolving,
                   selecting: selectingFuel,
                   targeting: targetingThis,
@@ -4126,11 +4065,10 @@ const CombatBoard = ({
                       }
                   : baseAction;
           const cardActionAllowed =
-            !turnEndWarningOpen &&
-            (!executionBusy ||
-              (autoTurnEnd.phase === "choosing" &&
-                autoTurnEnd.active?.slot === slot(index) &&
-                choosingCoin));
+            !executionBusy ||
+            (autoTurnEnd.phase === "choosing" &&
+              autoTurnEnd.active?.slot === slot(index) &&
+              choosingCoin);
           const placeSelectedFromCardArt = (event: ReactPointerEvent<HTMLElement>) => {
             if (selectedCoin === null || executionBusy) return;
             event.preventDefault();
@@ -4153,7 +4091,15 @@ const CombatBoard = ({
             if (action?.actionable !== true || skill === undefined) return;
             setPreviewSlot(null);
             if (skill.type === "consume") activateConsumeSkill(slot(index), skill, consumeUse, true);
-            else activateFlipSkill(slot(index), skill, use?.type === "useFlipSkill" ? use : undefined, true);
+            else if (choosingCoin)
+              activateFlipSkill(
+                slot(index),
+                skill,
+                use?.type === "useFlipSkill" ? use : undefined,
+                true,
+                "auto-turn-end",
+                choiceExecution?.token ?? null,
+              );
           };
           return (
             <article
@@ -4409,64 +4355,6 @@ const CombatBoard = ({
       ) : null}
 
       <section className="bottom-hud">
-        {turnEndWarningOpen ? (
-          <>
-            <button
-              aria-label={"\uC804\uD22C\uB85C \uB3CC\uC544\uAC00\uAE30"}
-              className="turn-end-warning-backdrop"
-              type="button"
-              onClick={() => setTurnEndWarningOpen(false)}
-            />
-            <div
-              aria-describedby="turn-end-warning-description"
-              aria-labelledby="turn-end-warning-title"
-              aria-modal="true"
-              className="preserve-picker turn-end-warning"
-              data-testid="turn-end-warning"
-              ref={turnEndWarningRef}
-              role="alertdialog"
-            >
-              <div>
-                <strong id="turn-end-warning-title">
-                  {"\uC7A5\uC804\uB41C \uC2A4\uD0AC\uC774 \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4"}
-                </strong>
-                <span id="turn-end-warning-description">
-                  {"\uC2E4\uD589 \uC21C\uC11C\uB300\uB85C " + executionSnapshot.order.length + "\uAC1C\uB97C \uC0AC\uC6A9\uD55C \uB4A4 \uD134\uC744 \uC885\uB8CC\uD560\uAE4C\uC694?"}
-                </span>
-                <label className="turn-end-warning-remember">
-                  <input
-                    checked={rememberAutoExecution}
-                    data-testid="turn-end-warning-remember"
-                    type="checkbox"
-                    onChange={(event) => setRememberAutoExecution(event.currentTarget.checked)}
-                  />
-                  {"\uC55E\uC73C\uB85C \uC7A5\uC804 \uC2A4\uD0AC \uC790\uB3D9 \uC2E4\uD589"}
-                </label>
-              </div>
-              <div className="turn-end-warning-actions">
-                <button
-                  data-testid="turn-end-warning-confirm"
-                  ref={turnEndWarningPrimaryRef}
-                  type="button"
-                  onClick={confirmQueuedExecution}
-                >
-                  {"\uC2E4\uD589 \uD6C4 \uD134 \uC885\uB8CC"}
-                </button>
-                <button
-                  className="turn-end-warning-discard"
-                  data-testid="turn-end-warning-discard"
-                  type="button"
-                  onClick={discardLoadedSkillsAndEndTurn}
-                >
-                  {"\uC0AC\uC6A9\uD558\uC9C0 \uC54A\uACE0 \uD134 \uC885\uB8CC"}
-                </button>
-                <button type="button" onClick={() => setTurnEndWarningOpen(false)}>
-                  {"\uB3CC\uC544\uAC00\uAE30"}
-                </button>
-              </div>
-            </div>
-          </>
-        ) : null}
         {preserveSelection !== null ? (
           <div aria-label="턴 종료 동전 보존 선택" className="preserve-picker" role="group">
             <strong>
@@ -4499,7 +4387,7 @@ const CombatBoard = ({
             ) : null}
             {autoTurnEnd.phase === "preserving" ? (
               <button className="preserve-placed-coin" type="button" onClick={cancelAutomaticExecution}>
-                자동 턴 종료 취소
+                확정 흐름 취소
               </button>
             ) : null}
           </div>
@@ -4664,7 +4552,7 @@ const CombatBoard = ({
             aria-expanded={recommendedLoadOpen}
             className="recommended-load-open"
             data-testid="recommended-load-open"
-            disabled={!recommendedLoad.requiresConfirmation || locked || executionBusy || turnEndWarningOpen}
+            disabled={!recommendedLoad.requiresConfirmation || locked || executionBusy}
             type="button"
             onClick={() => setRecommendedLoadOpen(true)}
           >
@@ -4676,13 +4564,12 @@ const CombatBoard = ({
           className="end-turn"
           disabled={
             locked ||
-            turnEndWarningOpen ||
             (executionBusy && preserveSelection === null) ||
             findLegal({ type: "endTurn" }) === undefined
           }
           ref={endTurnButtonRef}
           type="button"
-          onClick={requestTurnEnd}
+          onClick={confirmTurnPlan}
         >
           {endTurnLabel}
         </button>

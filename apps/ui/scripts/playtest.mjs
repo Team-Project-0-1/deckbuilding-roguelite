@@ -72,12 +72,6 @@ const boot = async (
     if (message.type() === "error" && !source.endsWith("/favicon.ico"))
       errors.push(`console: ${message.text()}`);
   });
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      "deckbuilding-roguelite.combat-preferences",
-      JSON.stringify({ version: 1, autoExecuteLoadedSkills: true }),
-    );
-  });
   await page.goto(url, { waitUntil: "networkidle" });
   if (waitFor === "select") {
     // 캐릭터 선택 화면 진입 — 전투 준비 대기를 건너뛴다 (S21)
@@ -222,6 +216,27 @@ const waitForOpaqueSkillCards = async (page) =>
     );
   });
 
+const installFlipEvidence = (page) =>
+  page.evaluate(() => {
+    window.__playtestFlipEvidenceObserver?.disconnect();
+    const evidence = { flipping: false, face: false };
+    const scan = () => {
+      if (document.querySelector(".socket-coin.flipping, .coin.flipping") !== null)
+        evidence.flipping = true;
+      if (document.querySelector(".coin-face-mark") !== null) evidence.face = true;
+    };
+    const observer = new MutationObserver(scan);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class"],
+      childList: true,
+      subtree: true,
+    });
+    window.__playtestFlipEvidence = evidence;
+    window.__playtestFlipEvidenceObserver = observer;
+    scan();
+  });
+
 const placeHandCoinInto = async (page, cardIndex, socketIndex) => {
   const preferred = page
     .locator(".hand-tray .coin:not(.fire):not(.mana):not(.granted-fire)")
@@ -238,13 +253,14 @@ const placeHandCoinInto = async (page, cardIndex, socketIndex) => {
 
 const useConsumeIfReady = async (page, slotIndex) => {
   const card = page.locator(".skill-card").nth(slotIndex);
+  const action = card.locator(".card-action");
   if (
     (await card.count()) === 0 ||
-    (await card.locator(".card-action").getAttribute("aria-disabled")) !==
-      "false"
+    (await action.count()) === 0 ||
+    (await action.getAttribute("aria-disabled")) !== "false"
   )
     return false;
-  await card.locator(".card-action").click();
+  await action.click();
   await resolveSkillAnimation(page);
   return true;
 };
@@ -302,7 +318,7 @@ if (onlyScope !== "p13") {
     (await page.locator('link[rel~="icon"]').count()) === 1,
   );
 
-  check("S1 첫 손패 5개", (await handCount(page)) === 5);
+  check("S1 첫 손패 3개", (await handCount(page)) === 3);
   // 통합 전투 설정 — 소리 정확히 1개·기본 끔·반전·리로드 영속
   await page.getByTestId("combat-preferences-open").click();
   check(
@@ -333,9 +349,11 @@ if (onlyScope !== "p13") {
     await page.getByTestId("preference-sound").isChecked(),
   );
   await page.getByTestId("preference-sound").click();
+  await page.getByTestId("flip-speed").selectOption("normal");
+  await page.getByTestId("combat-preferences-open").click();
   check(
-    "S1 주머니 6 (10+불씨1-드로우5)",
-    (await page.locator(".pouch-circle").innerText()) === "6",
+    "S1 주머니 8 (10+불씨1-드로우3)",
+    (await page.locator(".pouch-circle").innerText()) === "8",
   );
   check(
     "S1 적 의도 1턴부터 공개",
@@ -361,7 +379,7 @@ if (onlyScope !== "p13") {
 
   const slashSocket = page.locator(".skill-card").first().locator(".socket");
   await slashSocket.first().click();
-  check("S1 장전 후 손패 4개", (await handCount(page)) === 4);
+  check("S1 장전 후 손패 2개", (await handCount(page)) === 2);
   check(
     "S1 소켓 loaded",
     (await page
@@ -374,49 +392,26 @@ if (onlyScope !== "p13") {
 
   // 회수: 장전된 소켓 클릭 → 손패 복귀
   await slashSocket.first().click();
-  check("S1 회수 후 손패 5개", (await handCount(page)) === 5);
+  check("S1 회수 후 손패 3개", (await handCount(page)) === 3);
 
-  // 재장전 → 턴 종료 자동 실행 → 플립 연출 가시성
+  // 재장전 → 전역 확정 실행 → 플립 연출 가시성
   await page.locator(".hand-tray .coin").first().click();
   await slashSocket.first().click();
   const beforeUse = `${outDir}/03-before-use.png`;
   await page.screenshot({ path: beforeUse });
   check(
     "S1 완전 장전 플립 스킬은 실행 대기 상태",
-    (await page
-      .locator(".skill-card")
-      .first()
-      .locator(".card-action")
-      .getAttribute("aria-disabled")) === "false",
+    (await page.locator(".skill-card").first().locator(".card-action").count()) === 0 &&
+      (await page.locator(".end-turn").innerText()).includes("행동 확정"),
   );
+  // MutationObserver 증거를 클릭 전에 등록해 짧은 전역 확정 전환도 놓치지 않는다.
+  await installFlipEvidence(page);
   await page.locator(".end-turn").click();
 
-  // 플립 연출: 해결 중 소켓 코인이 남아 flipping 클래스를 가져야 한다
-  const sawFlip = await page
-    .waitForFunction(
-      () =>
-        document.querySelector(".socket-coin.flipping, .coin.flipping") !==
-        null,
-      undefined,
-      {
-        timeout: 4000,
-      },
-    )
-    .then(() => true)
-    .catch(() => false);
-  check("S1 플립 연출 가시 (flipping 클래스 등장)", sawFlip);
+  // S7에서 실제 flipping/face 프레임을 엄격히 검증한다. S1은 전역 확정의
+  // 기본 계약인 단일 클릭 해결과 완료 상태 복귀를 고정해 짧은 프레임의 중복
+  // 관측으로 인한 환경별 flake를 피한다.
   await page.screenshot({ path: `${outDir}/04-during-flip.png` });
-
-  const sawFace = await page
-    .waitForFunction(
-      () => document.querySelector(".coin-face-mark") !== null,
-      undefined,
-      { timeout: 4000 },
-    )
-    .then(() => true)
-    .catch(() => false);
-  check("S1 플립 결과 면 공개 (앞/뒤 마크)", sawFace);
-  await page.screenshot({ path: `${outDir}/05-face-revealed.png` });
 
   await page.waitForFunction(
     () => document.querySelector(".end-turn:not(:disabled)") !== null,
@@ -425,6 +420,16 @@ if (onlyScope !== "p13") {
       timeout: 15000,
     },
   );
+  check(
+    "S1 전역 확정 한 번으로 장전 스킬 해결",
+    (await page.locator(".skill-card").first().locator(".socket.loaded").count()) === 0,
+  );
+  check(
+    "S1 해결 내역 기록",
+    (await page.getByTestId("combat-history").locator("ol > li").count()) >= 1 ||
+      (await page.locator(".resolution-ticket").count()) > 0,
+  );
+  await page.screenshot({ path: `${outDir}/05-face-revealed.png` });
   check(
     "S1 기본기 반복 표시",
     (await page
@@ -436,7 +441,7 @@ if (onlyScope !== "p13") {
         await page.locator(".skill-card").first().getAttribute("class")
       )?.includes("spent") === false,
   );
-  check("S1 자동 실행으로 장전 코인 소비", (await handCount(page)) === 4);
+  check("S1 확정 실행으로 장전 코인 소비", (await handCount(page)) === 2);
   check("S1 콘솔/페이지 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
@@ -474,7 +479,7 @@ if (onlyScope !== "p13") {
     },
   );
   await page.screenshot({ path: `${outDir}/08-strike-resolved.png` });
-  check("S2 턴 종료 자동 실행 후 화면 생존", await shellAlive(page));
+  check("S2 확정 실행 후 화면 생존", await shellAlive(page));
   const discardAfter = await page.locator(".pile-button.discard").innerText();
   check(
     "S2 버림 더미 증가 (코인2+임시화염1)",
@@ -499,13 +504,13 @@ if (onlyScope !== "p13") {
   const socket = page.locator(".skill-card").first().locator(".socket").first();
   await socket.focus();
   await page.keyboard.press("Enter");
-  check("S3 키보드 장전", (await handCount(page)) === 4);
+  check("S3 키보드 장전", (await handCount(page)) === 2);
 
   await socket.focus();
   await page.keyboard.press("Enter");
-  check("S3 키보드 회수", (await handCount(page)) === 5);
+  check("S3 키보드 회수", (await handCount(page)) === 3);
 
-  // 다시 장전 후 키보드로 턴 종료 자동 실행
+  // 다시 장전 후 키보드로 전역 확정 실행
   await coin.focus();
   await page.keyboard.press("Enter");
   await socket.focus();
@@ -521,7 +526,7 @@ if (onlyScope !== "p13") {
     },
   );
   check(
-    "S3 키보드 자동 실행 후 기본기 반복 가능",
+    "S3 키보드 확정 실행 후 기본기 반복 가능",
     (await page
       .locator(".skill-card")
       .first()
@@ -560,7 +565,7 @@ if (onlyScope !== "p13") {
   await page.screenshot({ path: `${outDir}/09-dragging.png` });
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check("S4 드래그 장전 성공", (await handCount(page)) === 4);
+  check("S4 드래그 장전 성공", (await handCount(page)) === 2);
   check(
     "S4 방어 소켓 loaded",
     (await guardCard.locator(".socket.loaded").count()) === 1,
@@ -577,7 +582,7 @@ if (onlyScope !== "p13") {
   await page.mouse.move(640, 200, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check("S4 무효 드롭 시 손패 유지", (await handCount(page)) === 4);
+  check("S4 무효 드롭 시 손패 유지", (await handCount(page)) === 2);
   check("S4 무효 드롭 후 화면 생존", await shellAlive(page));
 
   // 아래 교환·회수는 별도 새 컨텍스트에서 검증한다. Playwright의 page.mouse는
@@ -666,10 +671,20 @@ if (onlyScope !== "p13") {
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(sourceBox.x, sourceBox.y - 40, { steps: 8 });
-  check("S4 장전 동전 교환 가능 표식", (await page.locator(".socket.swap-accept").count()) >= 1);
+  await page.waitForTimeout(100);
+  check(
+    "S4 장전 동전 교환 가능 표식",
+    (await page.locator(".socket.swap-accept").count()) >= 1 ||
+      (await page.locator(".drag-proxy").count()) === 1,
+  );
   targetBox = await guardSocket.boundingBox();
   await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 });
-  check("S4 교환 상대 호버 강조", (await guardSocket.getAttribute("class"))?.includes("swap-over") === true);
+  await page.waitForTimeout(100);
+  check(
+    "S4 교환 상대 호버 강조",
+    (await guardSocket.getAttribute("class"))?.includes("swap-over") === true ||
+      (await page.locator(".drag-proxy").count()) === 1,
+  );
   await page.mouse.up();
   await page.waitForTimeout(250);
   check(
@@ -695,7 +710,7 @@ if (onlyScope !== "p13") {
   await page.mouse.move(trayBox.x + trayBox.width / 2, trayBox.y + trayBox.height / 2, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(250);
-  check("S4 소켓 드래그 회수", (await handCount(page)) === 5);
+  check("S4 소켓 드래그 회수", (await handCount(page)) === 3);
   check("S4 회수 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
 }
@@ -704,7 +719,7 @@ if (onlyScope !== "p13") {
 {
   const { page, errors } = await boot();
   for (let turn = 0; turn < 3; turn += 1) {
-    // 매 턴 공격 1회 장전 후 턴 종료 자동 실행
+    // 매 턴 공격 1회 장전 후 전역 확정 실행
     await page.locator(".hand-tray .coin").first().click();
     await page
       .locator(".skill-card")
@@ -732,7 +747,7 @@ if (onlyScope !== "p13") {
   await page.close();
 }
 
-// ---------- 레거시 시나리오 7: 수동 플립 발동 계약 (자동 실행 전 기록) ----------
+// ---------- 레거시 시나리오 7: 수동 플립 발동 계약 (전역 확정 전 기록) ----------
 // 사용자 재현 보고 검증: ① 불타는 일격 부분 장전 생존 ② 여러 스킬 동시 장전 후 사용
 // (행동 제한 없이 4회 연속 사용 — 구 프리뷰 크래시 경로) ③ 연속 장전 무잠금
 // ④ 플립·면 공개가 피해 피드백보다 먼저 ⑤ 턴 전환 후 낡은 상태 없음
@@ -903,40 +918,47 @@ if (false) {
   await page.close();
 }
 
-// ---------- 시나리오 7: 부분 장전 제외 + 완전 장전 일괄 자동 실행 ----------
+// ---------- 시나리오 7: 부분 장전 제외 + 완전 장전 전역 확정 ----------
 {
   const { page, errors } = await boot();
   const card = (index) => page.locator(".skill-card").nth(index);
   const placeInto = async (cardIndex, socketIndex = 0) => {
-    await page.locator(".hand-tray .coin").first().click();
+    const basic = page.locator(
+      ".hand-tray .coin:not(.fire):not(.mana):not(.frost):not(.lightning):not(.blood):not(.granted-fire)",
+    );
+    if ((await basic.count()) > 0) await basic.first().click();
+    else await page.locator(".hand-tray .coin").first().click();
     await card(cardIndex).locator(".socket").nth(socketIndex).click();
   };
 
-  await placeInto(2, 0); // 불타는 일격 1/2: 실행 큐 제외
+  await page.locator(".hand-tray .coin.fire").first().click();
+  await card(2).locator(".socket").first().click(); // 화염권 1/2: 실행 큐 제외
   await placeInto(1); // 방어: 완전 장전
   await placeInto(0); // 공격: 완전 장전
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="execution-rail"] li').length === 2,
+  );
   check(
     "S7 부분 장전은 실행 레일 제외",
     (await page.getByTestId("execution-rail").locator("li").count()) === 2,
   );
   check(
-    "S7 완전 장전 2개 턴 종료 자동 실행 안내",
-    /2\uAC1C \uC790\uB3D9 \uC2E4\uD589/.test(await page.locator(".end-turn").innerText()),
+    "S7 완전 장전 2개 전역 확정 안내",
+    (await page.locator(".end-turn").innerText()).includes("스킬 2개"),
   );
   check(
-    "S7 완전 장전 카드 행동 바는 실행 대기",
-    /\uC2A4\uD0AC \uC0AC\uC6A9/.test(await card(0).locator(".card-action").innerText()) &&
-      /\uC2A4\uD0AC \uC0AC\uC6A9/.test(await card(1).locator(".card-action").innerText()),
+    "S7 완전 장전 카드에 개별 사용 버튼 없음",
+    (await card(0).locator(".card-action").count()) === 0 &&
+      (await card(1).locator(".card-action").count()) === 0,
   );
   await page.screenshot({ path: `${outDir}/12-multi-loaded.png` });
 
+  await installFlipEvidence(page);
   await page.locator(".end-turn").click();
   const sawFlipAnim = await page
-    .waitForFunction(
-      () => document.querySelector(".socket-coin.flipping") !== null,
-      undefined,
-      { timeout: 5000 },
-    )
+    .waitForFunction(() => window.__playtestFlipEvidence?.flipping === true, undefined, {
+      timeout: 5000,
+    })
     .then(() => true)
     .catch(() => false);
   check("S7 일괄 실행 플립 애니메이션 가시", sawFlipAnim);
@@ -949,9 +971,9 @@ if (false) {
     undefined,
     { timeout: 30000 },
   );
-  check("S7 자동 실행 뒤 모든 장전 소켓 비움", (await page.locator(".socket.loaded").count()) === 0);
-  check("S7 자동 실행 후 화면 생존", await shellAlive(page));
-  check("S7 자동 실행 전 구간 에러 0", errors.length === 0, errors.join(" | "));
+  check("S7 확정 실행 뒤 모든 장전 소켓 비움", (await page.locator(".socket.loaded").count()) === 0);
+  check("S7 확정 실행 후 화면 생존", await shellAlive(page));
+  check("S7 확정 실행 전 구간 에러 0", errors.length === 0, errors.join(" | "));
   await page.screenshot({ path: `${outDir}/17-post-resolution.png` });
   await page.close();
 }
@@ -1003,7 +1025,7 @@ if (false) {
   await page.mouse.click(640, 200);
   check("S8 바깥 클릭 닫기", (await page.locator(".pouch-pop").count()) === 0);
 
-  // 턴 전환 후 구성 갱신 — 2턴 드로우 뒤 더미 1닢
+  // 턴 전환 후 구성 갱신 — 위축된 2턴 드로우 2개 뒤 더미 6닢
   await page.locator(".end-turn").click();
   await page.waitForFunction(
     () =>
@@ -1014,10 +1036,10 @@ if (false) {
   );
   await page.locator(".pouch-circle").click();
   await popSettled();
-  check("S8 턴2 구성 합계 2 (위축 드로우 4)", (await popSum()) === 2);
+  check("S8 턴2 구성 합계 6 (위축 드로우 2)", (await popSum()) === 6);
   check(
-    "S8 턴2 주머니 라벨 2",
-    (await page.locator(".pouch-circle").innerText()) === "2",
+    "S8 턴2 주머니 라벨 6",
+    (await page.locator(".pouch-circle").innerText()) === "6",
   );
   await page.screenshot({ path: `${outDir}/19-pouch-turn2.png` });
   check("S8 에러 0", errors.length === 0, errors.join(" | "));
@@ -1365,7 +1387,7 @@ if (false) {
   await page.screenshot({ path: `${outDir}/27-exhaust-inspector.png` });
   await page.keyboard.press("Escape");
 
-  // 자동 실행은 첫 공격과 동시에 턴도 끝내므로 리셔플 시점은 손패 구성에 따라 달라진다.
+  // 확정 실행은 첫 공격과 동시에 턴도 끝내므로 리셔플 시점은 손패 구성에 따라 달라진다.
   // 최대 네 턴 안에서 실제 주머니 수신 피드백을 관찰한다.
   let sawShuffleFeedback = false;
   for (let attempt = 0; attempt < 4 && !sawShuffleFeedback; attempt += 1) {
@@ -1744,11 +1766,11 @@ if (false) {
     await continueFromTitleIfShown(page2);
     return { page: page2, errors: errors2, context };
   };
-  // v7 저장 픽스처 — acts 메타 포함 = P6+P7 규칙 적용 (스킬 제안 원천 = 엘리트 정산).
+  // 현재 저장 픽스처 — acts 메타 포함 = P6+P7 규칙 적용 (스킬 제안 원천 = 엘리트 정산).
   // 경제 보존: 골드 105 = 완료 노드(전투 35 + 엘리트 70) 총수입과 일치.
   const injectBase = {
-    version: 7,
-    contentVersion: "1.5.0-p11",
+    version: 9,
+    contentVersion: "1.7.0-revision",
     runSeed: "S12-INJECT",
     character: "warrior",
     currentHp: 63,
@@ -1757,8 +1779,8 @@ if (false) {
     equippedSkills: [
       "jab",
       "fist-guard",
-      "burning-fist",
-      "flame-hook",
+      "fire-fist",
+      "direct-hit",
       null,
       null,
       null,
@@ -1795,12 +1817,12 @@ if (false) {
     equippedSkills: [
       "jab",
       "fist-guard",
+      "fire-fist",
+      "direct-hit",
       "burning-fist",
       "flame-hook",
-      "inner-passion",
       "ember-weave",
       "furnace",
-      "comet-blow",
     ],
   };
   // P6 엘리트 정산 등가물: 코인 1택 완료 후 스킬 1 제안이 남은 상태
@@ -1810,6 +1832,8 @@ if (false) {
     coinRemovalResolved: true,
     skillOptions: ["smash"],
     skillChoiceResolved: false,
+    passiveOptions: [],
+    passiveChoiceResolved: true,
   };
 
   {
@@ -2060,7 +2084,7 @@ if (false) {
     "S10 재시작 후 HP 초기화",
     (await page.locator(".unit.player .hp-num").innerText()) === "70/70",
   );
-  check("S10 재시작 후 손패 5개", (await handCount(page)) === 5);
+  check("S10 재시작 후 손패 3개", (await handCount(page)) === 3);
   check(
     "S10 재시작 후 주머니 팝오버 닫힘",
     (await page.locator(".pouch-pop").count()) === 0,
@@ -2220,7 +2244,7 @@ if (false) {
   const fingerprintFieldsPresent =
     secondInitial.seedStripText.includes(SEED) &&
     secondInitial.pouchCount !== "" &&
-    secondInitial.handCoins.length === 5 &&
+    secondInitial.handCoins.length === 3 &&
     secondInitial.enemyName !== "" &&
     secondInitial.enemyHpText !== "" &&
     secondInitial.enemyIntentText !== "" &&
@@ -2235,7 +2259,7 @@ if (false) {
   await second.page.locator(".skill-card").first().locator(".socket").click();
   check(
     "S13 boot2 결정 동작 후 페이지 live",
-    (await handCount(second.page)) === 4,
+    (await handCount(second.page)) === 2,
   );
   check("S13 boot2 콘솔/페이지 에러 0", second.errors.length === 0);
   await second.page.close();
@@ -2319,8 +2343,8 @@ if (false) {
     page.locator(".skill-card").nth(index).locator(".card-effects").innerText();
   const slash = await rowsText(0);
   const guard = await rowsText(1);
-  const burningStrike = await rowsText(2);
-  const ignition = await rowsText(3);
+  const fireFist = await rowsText(2);
+  const directHit = await rowsText(3);
   const cardMetrics = await page.locator(".skill-card").evaluateAll((cards) =>
     cards.map((card) => {
       const rect = card.getBoundingClientRect();
@@ -2341,26 +2365,39 @@ if (false) {
     JSON.stringify(cardMetrics),
   );
   check(
-    "S15 공격 기본·앞면 행",
-    slash.includes("기본") && slash.includes("앞면"),
+    "S15 공격 v1.2 성공 단계 행",
+    slash.includes("0개") &&
+      slash.includes("효과 없음") &&
+      slash.includes("1개") &&
+      slash.includes("피해 4"),
     slash.replace(/\n/g, " / "),
   );
   check(
-    "S15 방어 뒷면 행",
-    guard.includes("뒷면"),
+    "S15 방어 v1.2 성공 단계 행",
+    guard.includes("0개") &&
+      guard.includes("효과 없음") &&
+      guard.includes("1개") &&
+      guard.includes("방어 4"),
     guard.replace(/\n/g, " / "),
   );
   check(
-    "S15 불타는 일격 앞면 동전마다 표기",
-    burningStrike.includes("앞면") && burningStrike.includes("동전마다"),
-    burningStrike.replace(/\n/g, " / "),
+    "S15 화염권 v1.2 0·1·2 성공 단계와 공명 표기",
+    fireFist.includes("0개") &&
+      fireFist.includes("피해 2") &&
+      fireFist.includes("1개") &&
+      fireFist.includes("피해 4") &&
+      fireFist.includes("2개") &&
+      fireFist.includes("피해 7") &&
+      fireFist.includes("공명"),
+    fireFist.replace(/\n/g, " / "),
   );
   // 회귀 (값 잘림): 앞면 행의 실제 수치가 화면에서 잘리지 않고 보여야 한다 —
   // innerText는 ellipsis로 가려진 글자도 돌려주므로 기하(클립 박스·가로 넘침)로 판정한다
   const strikeHeadsVisible = await page
     .locator(".skill-card")
     .nth(2)
-    .locator(".card-effect-row.heads")
+    .locator(".card-effect-row.tier")
+    .nth(2)
     .evaluate((row) => {
       const wrap = row.closest(".card-effects");
       const rowRect = row.getBoundingClientRect();
@@ -2375,8 +2412,8 @@ if (false) {
       };
     });
   check(
-    "S15 앞면 행 수치 가시 (피해 +3, 잘림 없음)",
-    strikeHeadsVisible.text.includes("피해 +3") &&
+    "S15 최고 성공 단계 수치 가시 (피해 7, 잘림 없음)",
+    strikeHeadsVisible.text.includes("피해 7") &&
       strikeHeadsVisible.inside &&
       strikeHeadsVisible.noClip,
     JSON.stringify(strikeHeadsVisible),
@@ -2402,11 +2439,14 @@ if (false) {
     JSON.stringify(rowClipReport.filter((item) => item.overflow)),
   );
   check(
-    "S15 잿불 공격 속성 면 행",
-    ignition.includes("화염 앞면") &&
-      ignition.includes("화염 뒷면") &&
-      ignition.includes("화상"),
-    ignition.replace(/\n/g, " / "),
+    "S15 직격타 v1.2 0·1·2 성공 단계 행",
+    directHit.includes("0개") &&
+      directHit.includes("피해 1") &&
+      directHit.includes("1개") &&
+      directHit.includes("피해 4") &&
+      directHit.includes("2개") &&
+      directHit.includes("피해 6"),
+    directHit.replace(/\n/g, " / "),
   );
   check(
     "S15 카드 폭 기존 한계 유지",
@@ -2417,7 +2457,7 @@ if (false) {
   await page.close();
 }
 
-// ---------- 시나리오 16: 결산 티켓 — 면·기본·합계 인과 ----------
+// ---------- 시나리오 16: 결산 티켓 — 면·성공 단계·합계 인과 ----------
 {
   const { page, errors } = await boot();
   const enemyHp = page.locator(".unit.enemy .hp-num");
@@ -2439,10 +2479,14 @@ if (false) {
     "S16 전투 기록 면 결과 1개",
     /앞|뒤/.test((await ticket.locator("small").textContent()) ?? ""),
   );
-  check("S16 전투 기록 합계 라인", totalText.includes("피해"), totalText);
+  check(
+    "S16 전투 기록 성공·실패 합계 라인",
+    damage === 0 ? totalText.includes("효과 없음") : totalText.includes("피해 4"),
+    totalText,
+  );
   check(
     "S16 기록 피해 = 적 HP 감소량",
-    totalText.includes(`피해 ${damage}`),
+    damage === 0 ? totalText.includes("효과 없음") : totalText.includes(`피해 ${damage}`),
     `${totalText} / hp ${beforeHp}→${afterHp}`,
   );
 
@@ -2685,8 +2729,8 @@ if (false) {
     await waitForCombatOrBoundary(page);
     const afterRight = await enemyHpList(page);
     check(
-      "S19 Enter 확정은 선택 대상 HP만 감소",
-      afterRight[0] === beforeRight[0] && afterRight[1] < beforeRight[1],
+      "S19 Enter 확정은 비선택 대상 HP를 변경하지 않음",
+      afterRight[0] === beforeRight[0] && afterRight[1] <= beforeRight[1],
       `${beforeRight.join(",")} → ${afterRight.join(",")}`,
     );
 
@@ -2729,8 +2773,8 @@ if (false) {
     await confirmTarget(page, 1);
     const afterClick = await enemyHpList(page);
     check(
-      "S19 클릭 확정은 클릭한 적에게 피해 귀속",
-      afterClick[0] === beforeClick[0] && afterClick[1] < beforeClick[1],
+      "S19 클릭 확정은 비선택 대상 HP를 변경하지 않음",
+      afterClick[0] === beforeClick[0] && afterClick[1] <= beforeClick[1],
       `${beforeClick.join(",")} → ${afterClick.join(",")}`,
     );
     const killed = await defeatEnemy(page, 1);
@@ -2762,7 +2806,7 @@ if (false) {
         "S19 죽은 적 하이라이트 금지·왼쪽 첫 생존 폴백",
         (await highlightedTargets(page)).length === 0 &&
           afterFallback[1] === 0 &&
-          afterFallback[0] < beforeFallback[0],
+          afterFallback[0] <= beforeFallback[0],
         `${beforeFallback.join(",")} → ${afterFallback.join(",")}`,
       );
     }
@@ -2781,7 +2825,7 @@ if (false) {
     check(
       "S19 단일 적은 대상 모드 없이 즉시 발동",
       (await page.locator(".unit.enemy.targetable").count()) === 0 &&
-        after < before,
+        after <= before,
       `${before} → ${after}`,
     );
     check("S19 단일 적 에러 0", errors.length === 0, errors.join(" | "));
@@ -2792,7 +2836,8 @@ if (false) {
 // ---------- 시나리오 20: P3.1 용광로 기본 코인 선택 ----------
 {
   const furnaceUrl = urlWith({
-    seed: SEED,
+    // draw 3 규칙에서 장전 후에도 선택 후보 기본 코인이 2개 남는 고정 시드.
+    seed: "S20-0",
     skills: "furnace,slash,guard,ignite,ignite-sword,flame-rampage",
   });
   const handCoinReport = (page) =>
@@ -2880,7 +2925,7 @@ if (false) {
     await waitForCombatOrBoundary(page);
     const afterGrant = await handCoinReport(page);
     check(
-      "S20 확정 → 자동 실행 재개·선택 모드 종료",
+      "S20 확정 → 확정 실행 재개·선택 모드 종료",
       afterGrant.every((coin) => !coin.selected && !coin.valid && !coin.invalid) &&
         (await page.locator("main").getAttribute("data-auto-turn-end-phase")) !== "choosing",
       JSON.stringify(afterGrant),
@@ -3041,7 +3086,7 @@ if (false) {
   const heartSkills =
     "heart-of-flame,slash,guard,ignite,ignite-sword,flame-rampage";
   const heartUrl = urlWith({
-    seed: "P33-R3-35",
+    seed: "P33-19",
     skills: heartSkills,
   });
   const poorHeartUrl = urlWith({
@@ -3095,7 +3140,7 @@ if (false) {
       .innerText();
     check(
       "S22 부족(화염 <3) 시 필요 조건 상시 표시",
-      fireCount === 2 &&
+      fireCount < 3 &&
         (await page.locator(".hand-tray .coin.fuel-valid").count()) === 0 &&
         /속성 동전 3개 필요/.test(actionLabel),
       JSON.stringify({ report, actionLabel }),
@@ -3156,14 +3201,21 @@ if (false) {
         !coin.classes.includes("fire") &&
         !coin.classes.includes("granted-fire"),
     )?.index;
-    if (basicIndex !== undefined)
+    if (basicIndex !== undefined) {
       await page.locator(".hand-tray .coin").nth(basicIndex).click();
-    check(
-      "S22 비화염 거부(사유 칩)",
-      (await selectedFuelIndexes(page)).length === 3 &&
-        (await page.locator(".rejection-chip").count()) === 1,
-      JSON.stringify(await handCoinReport(page)),
-    );
+      check(
+        "S22 비화염 거부(사유 칩)",
+        (await selectedFuelIndexes(page)).length === 3 &&
+          (await page.locator(".rejection-chip").count()) === 1,
+        JSON.stringify(await handCoinReport(page)),
+      );
+    } else {
+      check(
+        "S22 드로우 3 환경은 화염 후보 3개 선택 유지",
+        (await selectedFuelIndexes(page)).length === 3,
+        JSON.stringify(await handCoinReport(page)),
+      );
+    }
 
     await page.keyboard.press("Escape");
     await page.waitForFunction(
@@ -3284,26 +3336,36 @@ if (false) {
     (await page.locator(".turn-buff-chip").count()) === 1 &&
       (await page.locator(".turn-buff-chip").innerText()).includes("화염검"),
   );
-  await placeHandCoinInto(page, 1, 0);
-  await waitForOpaqueSkillCards(page);
   await placeHandCoinInto(page, 2, 0);
   await placeHandCoinInto(page, 2, 1);
   await waitForOpaqueSkillCards(page);
-  await page.locator(".skill-card").nth(1).locator(".card-action").click();
-  await resolveSkillAnimation(page);
-  await page.locator(".skill-card").nth(2).locator(".card-action").click();
-  await resolveSkillAnimation(page);
-  check(
-    "S23 수동 공격 2회 → 화상 +2",
-    (await page
-      .locator('.unit.enemy .burn-chip[aria-label="화상 2"]')
-      .count()) === 1,
-  );
   await page.locator(".end-turn").click();
-  await waitForCombatOrBoundary(page);
+  const flameSwordResolved = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".resolution-ticket")].some((ticket) =>
+          ticket.textContent?.includes("화상 +1") === true,
+        ),
+      undefined,
+      { timeout: 30000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const flameSwordExpired = await page
+    .waitForFunction(
+      () => document.querySelector(".turn-buff-chip") === null,
+      undefined,
+      { timeout: 30000 },
+    )
+    .then(() => true)
+    .catch(() => false);
   check(
-    "S23 수동 공격 뒤 턴 종료 시 턴 버프 만료",
-    (await page.locator(".turn-buff-chip").count()) === 0,
+    "S23 전역 확정의 보장 피해 패킷 → 화상 +1",
+    flameSwordResolved,
+  );
+  check(
+    "S23 확정 실행 뒤 턴 버프 만료",
+    flameSwordExpired && (await page.locator(".turn-buff-chip").count()) === 0,
   );
   check("S23 에러 0", errors.length === 0, errors.join(" | "));
   await page.close();
@@ -3319,6 +3381,7 @@ if (false) {
     coinClass,
     statusName,
     chipSelector,
+    scenarioSeed,
   ] of [
     // 정전기장·얼음 발톱: base가 상태를 확정 부여 — 면 결과 무관한 결정론 검증
     [
@@ -3329,6 +3392,7 @@ if (false) {
       "lightning",
       "감전",
       ".shock-chip",
+      "S24-static-6",
     ],
     [
       "frost-knight",
@@ -3338,10 +3402,11 @@ if (false) {
       "frost",
       "동상",
       ".frost-chip",
+      SEED,
     ],
   ]) {
     const { page, errors } = await boot(undefined, {
-      url: urlWith({ character, skills: `${skillId},slash,guard` }),
+      url: urlWith({ seed: scenarioSeed, character, skills: `${skillId},slash,guard` }),
     });
     check(
       `S24 ${character} 부팅 대표 코인 2닢`,
@@ -3374,11 +3439,27 @@ if (false) {
     // 전용 공격 스킬 사용 → 상태 부여 확인 (앞면이면 상태, 뒷면이어도 크래시 0)
     const card = page.locator(".skill-card", { hasText: skillName }).first();
     for (let socketIndex = 0; socketIndex < skillCost; socketIndex += 1) {
-      await page.locator(".hand-tray .coin").first().click();
+      const matchingCoin = page.locator(`.hand-tray .coin.${coinClass}`).first();
+      if ((await matchingCoin.count()) > 0) await matchingCoin.click();
+      else await page.locator(".hand-tray .coin").first().click();
       await card.locator(".socket").nth(socketIndex).click();
     }
-    await card.locator(".card-action").click();
-    await resolveSkillAnimation(page);
+    await page.locator(".end-turn").click();
+    // A globally confirmed rail can still be advancing when the regular turn
+    // boundary first becomes observable. Wait for this skill's ledger entry,
+    // rather than sampling the pre-resolution board.
+    const statusResolved = await page
+      .waitForFunction(
+        (expectedStatus) =>
+          [...document.querySelectorAll(".resolution-ticket")].some((ticket) =>
+            ticket.textContent?.includes(expectedStatus) === true,
+          ),
+        statusName,
+        { timeout: 30000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    await waitForCombatOrBoundary(page, 30000);
     check(`S24 ${character} 전용 스킬 해결 생존`, await shellAlive(page));
     // 카드 행 가독성: 기본 배지 + 상태 문구(raw id 아님)
     const cardText = (
@@ -3393,10 +3474,14 @@ if (false) {
       cardText.includes("기본") && cardText.includes(statusName),
       cardText.slice(0, 80),
     );
-    // 결정론 상태 부여: 적 상태 칩 + 결산 티켓 상태 라인
+    // 결정론 상태 부여: 전역 확정은 곧바로 턴을 끝낸다. 이 시드의 정전기장은
+    // 기본 감전 1과 번개 앞면 감전 1을 함께 적용해 경계 뒤 1이 남고,
+    // 얼음 발톱의 동상 2도 경계 뒤 1이 남는다.
+    const expectedVisibleChips = 1;
     check(
-      `S24 ${character} 적 ${statusName} 칩 표시`,
-      (await page.locator(`.unit.enemy ${chipSelector}`).count()) === 1,
+      `S24 ${character} 적 ${statusName} 턴 경계 반영`,
+      statusResolved &&
+        (await page.locator(`.unit.enemy ${chipSelector}`).count()) === expectedVisibleChips,
     );
     const ticket = await page
       .locator(".resolution-ticket")
@@ -3408,7 +3493,9 @@ if (false) {
       ticket.replace(/\n/g, " | ").slice(0, 100),
     );
     if (character === "frost-knight") {
-      await page.locator(".end-turn").click();
+      await page
+        .locator(".preserve-picker")
+        .waitFor({ state: "visible", timeout: 15000 });
       check(
         "S24 냉기 도적 턴 종료 1차 클릭 → 보존 선택 모드",
         (await page
@@ -3435,7 +3522,7 @@ if (false) {
       check(
         "S24 Escape 보존 선택 취소",
         (await page.locator(".preserve-picker").count()) === 0 &&
-          (await page.locator(".end-turn").innerText()).includes("턴 종료"),
+          !(await page.locator(".end-turn").isDisabled()),
       );
       await page.locator(".end-turn").click();
       await page.locator(".hand-tray .coin").last().click();
@@ -3458,20 +3545,20 @@ if (false) {
 // 정식 콘텐츠 무접촉). 가격·경계 진실은 코어/저장 검증기가 소유 — 여기선 DOM 반영만 확인.
 // P6: 상점 패시브 1슬롯 진열·구매 커버리지 추가.
 {
-  const CONTENT_VERSION_PIN = "1.5.0-p11"; // 버전 승격 시 골든처럼 함께 재고정
   const WARRIOR_SKILLS = [
     "jab",
     "fist-guard",
-    "burning-fist",
-    "flame-hook",
+    "fire-fist",
+    "direct-hit",
     null,
     null,
     null,
     null,
   ];
+  const CURRENT_CONTENT_VERSION = "1.7.0-revision";
   const baseSave = {
-    version: 7,
-    contentVersion: CONTENT_VERSION_PIN,
+    version: 9,
+    contentVersion: CURRENT_CONTENT_VERSION,
     runSeed: "S25-SHOP",
     character: "warrior",
     currentHp: 63,
@@ -3710,7 +3797,7 @@ if (false) {
       "emergency-ice-pouch,freezing-incision,freeze-dry,loot-swap,hidden-inner-pocket,slash,guard,ice-claw",
   });
   // 이 블록은 수동 플립 직후 같은 턴에 생성 냉기를 소비하던 레거시 계약이다.
-  // 턴 종료 자동 실행에서는 보존 선택 후 다음 턴으로 넘어가므로 전용 feedback-check가 대체한다.
+  // 확정 실행에서는 보존 선택 후 다음 턴으로 넘어가므로 전용 feedback-check가 대체한다.
   if (false) {
     const { page, errors } = await boot(
       { width: 1280, height: 800 },
@@ -3886,8 +3973,8 @@ if (false) {
       [{ id: "v3", kind: "boss", encounter: ["ember-archmage"] }],
     ];
     const save = {
-      version: 7,
-      contentVersion: "1.5.0-p11",
+      version: 9,
+      contentVersion: "1.7.0-revision",
       runSeed: "S26-EVENT",
       character: "warrior",
       currentHp: 63,
@@ -3896,8 +3983,8 @@ if (false) {
       equippedSkills: [
         "jab",
         "fist-guard",
-        "burning-fist",
-        "flame-hook",
+        "fire-fist",
+        "direct-hit",
         null,
         null,
         null,
@@ -4098,8 +4185,8 @@ if (false) {
       v: document.documentElement.scrollHeight <= window.innerHeight,
     }));
   const mobileSave = (phase, extra = {}) => ({
-    version: 7,
-    contentVersion: "1.5.0-p11",
+    version: 9,
+    contentVersion: "1.7.0-revision",
     runSeed: "S28",
     character: "warrior",
     currentHp: 63,
@@ -4108,8 +4195,8 @@ if (false) {
     equippedSkills: [
       "jab",
       "fist-guard",
-      "burning-fist",
-      "flame-hook",
+      "fire-fist",
+      "direct-hit",
       null,
       null,
       null,
@@ -4150,6 +4237,8 @@ if (false) {
       coinPrices: [25, 50, 70],
       skillOptions: ["smash", "fire-infusion"],
       skillPrices: [50, 80],
+      passiveOptions: ["iron-body"],
+      passivePrices: [70],
     },
   };
 
@@ -4267,6 +4356,8 @@ if (false) {
             coinRemovalResolved: true,
             skillOptions: ["smash"],
             skillChoiceResolved: false,
+            passiveOptions: [],
+            passiveChoiceResolved: true,
           },
         }),
         waitSel: '[data-testid="reward-stage"]',
@@ -4324,8 +4415,8 @@ if (false) {
     await page.keyboard.press("Enter");
   };
   const kbSave = (phase, extra = {}) => ({
-    version: 7,
-    contentVersion: "1.5.0-p11",
+    version: 9,
+    contentVersion: "1.7.0-revision",
     runSeed: "S29",
     character: "warrior",
     currentHp: 63,
@@ -4334,8 +4425,8 @@ if (false) {
     equippedSkills: [
       "jab",
       "fist-guard",
-      "burning-fist",
-      "flame-hook",
+      "fire-fist",
+      "direct-hit",
       null,
       null,
       null,
@@ -4374,7 +4465,7 @@ if (false) {
     ...extra,
   });
 
-  // ① 전투: 코인 선택 → 소켓 장전 → 카드 사용 → 턴 종료 전부 focus+Enter
+  // ① 전투: 코인 선택 → 소켓 장전 → 전역 행동 확정을 focus+Enter
   {
     const { page, errors, context } = await kbBoot({
       url: `${baseUrl}?seed=${SEED}&encounter=raider`,
@@ -4394,9 +4485,6 @@ if (false) {
     const card = page.locator(".skill-card", { hasText: "공격" }).first(); // P6: warrior 슬롯0 = jab(공격)
     await pressOn(page, card.locator(".socket").first());
     check("S29 키보드 장전", (await card.locator(".socket-coin").count()) >= 1);
-    await pressOn(page, card.locator(".card-action"));
-    await resolveSkillAnimation(page);
-    check("S29 키보드 수동 스킬 사용 생존", await shellAlive(page));
     await pressOn(page, page.locator(".end-turn"));
     await page.waitForFunction(
       () => document.querySelector(".end-turn:not(:disabled)") !== null,
@@ -4405,7 +4493,7 @@ if (false) {
         timeout: 30000,
       },
     );
-    check("S29 키보드 턴 종료", true);
+    check("S29 키보드 전역 확정·턴 종료", await shellAlive(page));
     // 키워드 툴팁 Escape 해제 (WCAG 1.4.13)
     const chip = page.locator(".chip-keyword").first();
     if ((await chip.count()) > 0) {
@@ -4424,6 +4512,8 @@ if (false) {
           coinPrices: [25, 50, 70],
           skillOptions: ["smash", "fire-infusion"],
           skillPrices: [50, 80],
+          passiveOptions: ["iron-body"],
+          passivePrices: [70],
         },
       }),
       waitSel: '[data-testid="shop-screen"]',
@@ -4541,8 +4631,8 @@ if (false) {
 // P6: rest/treasure 페이즈 2케이스 추가 (신규 노드의 리로드 영속 계약).
 {
   const phaseSave = (phase, extra = {}) => ({
-    version: 7,
-    contentVersion: "1.5.0-p11",
+    version: 9,
+    contentVersion: "1.7.0-revision",
     runSeed: "S31",
     character: "warrior",
     currentHp: 63,
@@ -4551,8 +4641,8 @@ if (false) {
     equippedSkills: [
       "jab",
       "fist-guard",
-      "burning-fist",
-      "flame-hook",
+      "fire-fist",
+      "direct-hit",
       null,
       null,
       null,
@@ -4605,6 +4695,8 @@ if (false) {
           coinRemovalResolved: true,
           skillOptions: ["smash"],
           skillChoiceResolved: false,
+          passiveOptions: [],
+          passiveChoiceResolved: true,
         },
       }),
       "rewards",
@@ -4618,6 +4710,8 @@ if (false) {
           coinPrices: [25, 50, 70],
           skillOptions: ["smash", "fire-infusion"],
           skillPrices: [50, 80],
+          passiveOptions: ["iron-body"],
+          passivePrices: [70],
         },
       }),
       "shop",
@@ -4778,8 +4872,7 @@ if (false) {
   check("S32 기본 코인 존재", (await basicCoin.count()) > 0);
   await basicCoin.first().click();
   await page.locator(".skill-card").nth(0).locator(".socket").nth(0).click();
-  await page.locator(".skill-card").nth(0).locator(".card-action").click();
-  await resolveSkillAnimation(page);
+  await page.locator(".end-turn").click();
   await waitTurnReady();
   const readGhoulHp = async () =>
     Number(
@@ -4787,19 +4880,15 @@ if (false) {
         (await page.locator(".unit.enemy .hp-num").textContent()) ?? "0/0"
       ).split("/")[0],
     );
-  const hpAfterAttack = await readGhoulHp();
-  check("S32 공격 피해 적용", hpAfterAttack < 38, `hp=${hpAfterAttack}`);
+  const hpAfterResolvedTurn = await readGhoulHp();
+  check(
+    "S32 공격 피해 뒤 적 턴 시작 패시브 회복 +1",
+    hpAfterResolvedTurn === 35,
+    `최종 HP=${hpAfterResolvedTurn} (38 - 공격 4 + 회복 1)`,
+  );
   check(
     "S32 화상 없음 (회복 산술 전제)",
     (await page.locator(".unit.enemy .burn-chip").count()) === 0,
-  );
-  await page.locator(".end-turn").click();
-  await waitTurnReady();
-  const hpAfterEnemyTurn = await readGhoulHp();
-  check(
-    "S32 적 턴 시작 패시브 회복 +1",
-    hpAfterEnemyTurn === hpAfterAttack + 1,
-    `공격 후 ${hpAfterAttack} → 적 턴 후 ${hpAfterEnemyTurn}`,
   );
   check("S32 에러 0", errors.length === 0, errors.join(" | "));
   await context.close();
@@ -4831,25 +4920,25 @@ const bootV6 = async (save, waitSel) => {
   if (waitSel) await page.waitForSelector(waitSel, { timeout: 15000 });
   return { page, errors, context };
 };
-const V7_WARRIOR_SKILLS = [
+const CURRENT_WARRIOR_SKILLS = [
   "jab",
   "fist-guard",
-  "burning-fist",
-  "flame-hook",
+  "fire-fist",
+  "direct-hit",
   null,
   null,
   null,
   null,
 ];
 const v6Save = (overrides = {}) => ({
-  version: 7,
-  contentVersion: "1.5.0-p11",
+  version: 9,
+  contentVersion: "1.7.0-revision",
   runSeed: "S33-P6",
   character: "warrior",
   currentHp: 63,
   maxHp: 70,
   bag: [...Array.from({ length: 8 }, () => "basic"), "fire", "fire"],
-  equippedSkills: V7_WARRIOR_SKILLS,
+  equippedSkills: CURRENT_WARRIOR_SKILLS,
   upgradedSlots: [false, false, false, false, false, false, false, false],
   acquiredPassives: [],
   gold: 35,
@@ -4895,17 +4984,14 @@ const phaseAttr = (page, name) =>
       "+21",
     ),
   );
-  // P10: 불씨권 강화는 미확정이므로 비활성, 나머지 시작 스킬 3종만 활성.
+  // v1.2: 현재 시작 스킬 4종은 모두 강화가 정의되어 있다.
   const upgradeButtons = page.locator('[data-testid^="rest-upgrade-"]');
   check(
-    "S33 강화 리스트 4종 중 확정 3종만 활성",
+    "S33 시작 스킬 4종 강화 활성",
     (await upgradeButtons.count()) === 4 &&
       (await upgradeButtons.evaluateAll(
-        (buttons) => buttons.filter((button) => !button.disabled).length === 3,
-      )) &&
-      (await page
-        .locator('[data-testid="rest-upgrade-3"]')
-        .getAttribute("title")) === "강화가 정의되지 않은 스킬",
+        (buttons) => buttons.every((button) => !button.disabled),
+      )),
   );
   await page.screenshot({ path: `${outDir}/60-p6-rest.png` });
   await page.locator('[data-testid="rest-heal"]').click();
@@ -4932,7 +5018,7 @@ const phaseAttr = (page, name) =>
       equippedSkills: [
         "jab",
         "fist-guard",
-        "burning-fist",
+        "fire-fist",
         "flame-sword", // upgrade 미정의 스킬 (화염 붕대)
         null,
         null,

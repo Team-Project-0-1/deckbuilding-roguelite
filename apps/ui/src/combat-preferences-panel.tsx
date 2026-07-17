@@ -50,17 +50,6 @@ export function CombatPreferencesPanel({ value, onChange, open, onOpenChange }: 
           </label>
           <label><input checked={value.screenShake} data-testid="preference-screen-shake" type="checkbox" onChange={(event) => patch("screenShake", event.currentTarget.checked)} /> 화면 흔들림</label>
           <label>
-            <input
-              checked={value.autoExecuteLoadedSkills}
-              data-testid="preference-auto-execute"
-              type="checkbox"
-              onChange={(event) =>
-                patch("autoExecuteLoadedSkills", event.currentTarget.checked)
-              }
-            />
-            {"\uD134 \uC885\uB8CC \uC2DC \uC7A5\uC804 \uC2A4\uD0AC \uC790\uB3D9 \uC2E4\uD589"}
-          </label>
-          <label>
             피해 숫자
             <select data-testid="preference-damage-size" value={value.damageNumberSize} onChange={(event) => patch("damageNumberSize", event.currentTarget.value as CombatPreferences["damageNumberSize"])}>
               <option value="normal">기본</option><option value="large">크게</option>
