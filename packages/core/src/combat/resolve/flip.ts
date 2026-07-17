@@ -1,5 +1,5 @@
 import type { StatusId, ConsumeSkillDef, ContentDb, EffectAtom, FlipSkillDef, TargetRef } from '../../content-types';
-import { effectiveElements, skillCooldown } from '../../content-types';
+import { effectiveElements, isSuccessLadderFlipSkill, skillCooldown } from '../../content-types';
 import type { Element, EquipmentDefId, CoinUid, Face, SkillId, SlotId } from '../../ids';
 import { rngFrom } from '../../rng';
 import { drawCards, drawSpecificCoin, HAND_LIMIT } from '../draw';
@@ -175,12 +175,13 @@ const addTemporaryCoin = (state: CombatState, atom: Extract<EffectAtom, { kind: 
 
     if (atom.zone === 'draw') {
       const draw = [...nextState.zones.draw];
-      draw.splice(rng.int(draw.length + 1), 0, coin);
+      if (atom.position === 'top') draw.unshift(coin);
+      else draw.splice(rng.int(draw.length + 1), 0, coin);
       nextState = {
         ...nextState,
         coins,
         nextUid: nextState.nextUid + 1,
-        rng: { ...nextState.rng, shuffle: rng.snapshot() },
+        rng: atom.position === 'top' ? nextState.rng : { ...nextState.rng, shuffle: rng.snapshot() },
         zones: { ...nextState.zones, draw }
       };
       events.push({ type: 'coinCreated', coin, defId: String(atom.coin), zone: 'draw' });
@@ -819,7 +820,12 @@ const collectEffects = (
 ): EffectAtom[] => {
   const headCount = faces.filter((face) => face === 'heads').length;
   const tailCount = faces.length - headCount;
-  const effects: EffectAtom[] = [...skill.base];
+  if (isSuccessLadderFlipSkill(skill)) {
+    const successCount = skill.successFace === 'heads' ? headCount : tailCount;
+    return [...(skill.successLadder[successCount] ?? [])];
+  }
+  const base = skill.base ?? [];
+  const effects: EffectAtom[] = [...base];
   const addFaceEffects = (line: FlipSkillDef['heads'], count: number) => {
     if (line === undefined || count === 0) return;
     const repeats = line.mode === 'any' ? 1 : count;
@@ -843,8 +849,8 @@ const collectEffects = (
   if (overheatBonus.length > 0) {
     if (overheatBonus.every((atom) => atom.kind === 'damage')) {
       let insertAt = -1;
-      for (let i = 0; i < skill.base.length; i += 1) {
-        if (skill.base[i]!.kind === 'damage') insertAt = i;
+      for (let i = 0; i < base.length; i += 1) {
+        if (base[i]!.kind === 'damage') insertAt = i;
       }
       if (insertAt >= 0) effects.splice(insertAt + 1, 0, ...overheatBonus);
       else effects.push(...overheatBonus);
@@ -868,6 +874,18 @@ const collectEffects = (
   }
   if (damage > 0) combined.push({ kind: 'damage', amount: damage });
   return combined;
+};
+
+const resonanceEffects = (
+  skill: FlipSkillDef,
+  faces: readonly Face[],
+  coinElements: readonly (readonly Element[])[]
+): readonly EffectAtom[] => {
+  if (!isSuccessLadderFlipSkill(skill) || skill.resonance === undefined) return [];
+  const resonates = faces.some(
+    (face, index) => face === skill.successFace && (coinElements[index] ?? []).includes(skill.resonance!.element)
+  );
+  return resonates ? skill.resonance.effects : [];
 };
 
 const isRemiseRepeatAtom = (atom: EffectAtom): boolean =>
@@ -923,9 +941,9 @@ export const resolveFlip = (
   if (skill.requiredCoin !== undefined && placed.some((coin) => String(input.coins[Number(coin)]?.defId) !== String(skill.requiredCoin))) {
     throw new Error('placed coin does not satisfy required coin');
   }
-  const hpCost = skill.base.reduce((total, atom) => total + (atom.kind === 'payHp' ? atom.amount : 0), 0);
+  const hpCost = (skill.base ?? []).reduce((total, atom) => total + (atom.kind === 'payHp' ? atom.amount : 0), 0);
   if (hpCost > 0 && input.player.hp <= hpCost) throw new Error('not enough hp to pay skill cost');
-  for (const atom of skill.base) {
+  for (const atom of skill.base ?? []) {
     if (atom.kind === 'returnDiscardCoin' && !input.zones.discard.some((coin) => String(input.coins[Number(coin)]?.defId) === String(atom.coin))) {
       throw new Error('required coin is not in discard');
     }
@@ -1205,6 +1223,19 @@ export const resolveFlip = (
           };
       }
     }
+    for (const atom of resonanceEffects(effectSkill, resolutionFaces, resolutionElements)) {
+      for (const effectTarget of targetsForSkillEffect(state, atom, skill, resolutionTarget)) {
+        state = applyEffectAtom(state, atom, effectTarget, db, events, chosen, {
+          turnTriggerScope,
+          tailsCount,
+          headsCount,
+          isReuse,
+          sourceSlot: slot,
+          sourceSkill: skill.id
+        });
+        if (state.phase === 'victory' || state.phase === 'defeat') return false;
+      }
+    }
     return true;
   };
 
@@ -1236,7 +1267,7 @@ export const resolveFlip = (
     state = { ...state, rng: { ...state.rng, flip: rng.snapshot() } };
     const repeatSkill: FlipSkillDef = {
       ...skill,
-      base: skill.base.filter(isRemiseRepeatAtom),
+      base: (skill.base ?? []).filter(isRemiseRepeatAtom),
       heads: skill.heads === undefined ? undefined : { ...skill.heads, effects: skill.heads.effects.filter(isRemiseRepeatAtom) },
       tails: skill.tails === undefined ? undefined : { ...skill.tails, effects: skill.tails.effects.filter(isRemiseRepeatAtom) },
       mixed: skill.mixed === undefined ? undefined : { effects: skill.mixed.effects.filter(isRemiseRepeatAtom) },

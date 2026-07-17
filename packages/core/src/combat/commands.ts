@@ -1,5 +1,5 @@
 import type { ContentDb, EffectAtom, FlipSkillDef, SkillDef } from '../content-types';
-import { effectiveElements } from '../content-types';
+import { effectiveElements, flipSkillEffects } from '../content-types';
 import type { CoinDefId, CoinUid, EquipmentDefId, SlotId } from '../ids';
 import { consumeRequirementFor } from './consume-requirement';
 import { MAX_PRESERVED_COINS } from './state';
@@ -75,16 +75,14 @@ export const coinSatisfiesFlipRequirement = (state: CombatState, db: ContentDb, 
 
 // P6 D6 — 소환 선택 스킬 술어 (UI/심이 선택 필요 여부를 중복 구현하지 않도록 공개)
 export const skillRequiresEquipmentChoice = (skill: FlipSkillDef): boolean =>
-  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? [])].some(
+  flipSkillEffects(skill).some(
     (effect) => effect.kind === 'summonEquipment' && effect.equipment === 'chosen'
   );
 
 const skillEffects = (skill: SkillDef): readonly EffectAtom[] =>
   skill.type === 'flip'
     ? [
-        ...skill.base,
-        ...(skill.heads?.effects ?? []),
-        ...(skill.tails?.effects ?? []),
+        ...flipSkillEffects(skill),
         ...(skill.mixed?.effects ?? []),
         ...(skill.elementFaces ?? []).flatMap((bonus) => bonus.effects),
         ...(skill.overheatBonus ?? [])
@@ -105,7 +103,7 @@ export const skillCommandsSummon = (skill: FlipSkillDef): boolean => skillRequir
 
 const allSkillEffects = (skill: SkillDef): readonly EffectAtom[] =>
   skill.type === 'flip'
-    ? [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? []), ...(skill.preservedBonus ?? [])]
+    ? [...flipSkillEffects(skill), ...(skill.preservedBonus ?? [])]
     : [...skill.effects, ...(skill.preservedBonus ?? [])];
 
 const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>

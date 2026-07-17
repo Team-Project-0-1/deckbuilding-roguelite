@@ -96,6 +96,8 @@ export interface SkillDefBase {
   rarity: 'common' | 'advanced' | 'rare';
   tags: readonly ('attack' | 'defense' | 'utility' | 'ultimate')[];
   targetType: 'single-enemy' | 'all-enemies' | 'self' | 'none';
+  /** The skill's authored element. Coin requirements remain a separate rule. */
+  element?: Element;
   // P7/P9 — 스킬별 쿨다운: 0=반복(같은 턴 무제한), 1~4=사용 후 N-1턴 봉인.
   // 미지정 기본값 1(기존 턴당 1회 케이던스). oncePerCombat 중에는 전투당 1회
   // 잠금이 우선하며, 명시 쿨다운은 일회성 제거 강화의 복귀 주기를 문서화할 수 있다.
@@ -124,12 +126,18 @@ export interface FlipSkillDef extends SkillDefBase {
   // 일부 플립형 스킬은 지정 속성 동전만 장전할 수 있다. 소비가 아니므로 면과 proc은 정상 판정한다.
   requiredElement?: Element;
   requiredCoin?: CoinDefId;
+  /** Legacy base effects. Must be empty for success-ladder skills. */
   base: EffectAtom[];
   heads?: { mode: 'any' | 'per'; effects: EffectAtom[] };
   tails?: { mode: 'any' | 'per'; effects: EffectAtom[] };
   mixed?: { effects: EffectAtom[] };
   // P7 D5 — 특정 속성 코인 면 보너스 (일반 면 보너스와 합산, 항상 per 면당)
   elementFaces?: { element: Element; face: Face; effects: EffectAtom[] }[];
+  /** v1.2 flip model: resolve exactly one tier by the number of successful faces. */
+  successFace?: Face;
+  successLadder?: EffectAtom[][];
+  /** Applied once after coin face procs when a matching coin succeeds. */
+  resonance?: { element: Element; effects: EffectAtom[] };
   remise?: {
     onRepeatFinish?: EffectAtom[];
     /** @deprecated P13 Wave 3 stack remise ignores the old reflip model. */
@@ -145,6 +153,24 @@ export interface FlipSkillDef extends SkillDefBase {
     minimumUsed?: number;
   };
 }
+
+export const declaresSuccessLadder = (skill: FlipSkillDef): boolean =>
+  skill.successFace !== undefined || skill.successLadder !== undefined || skill.resonance !== undefined;
+
+export const isSuccessLadderFlipSkill = (
+  skill: FlipSkillDef
+): skill is FlipSkillDef & { successFace: Face; successLadder: EffectAtom[][] } =>
+  skill.successFace !== undefined && skill.successLadder !== undefined;
+
+/** Base/face-authored effects for choice scans. Shared bonuses stay caller-controlled. */
+export const flipSkillEffects = (skill: FlipSkillDef): EffectAtom[] =>
+  declaresSuccessLadder(skill)
+    ? [...(skill.successLadder ?? []).flat(), ...(skill.resonance?.effects ?? [])]
+    : [
+        ...(skill.base ?? []),
+        ...(skill.heads?.effects ?? []),
+        ...(skill.tails?.effects ?? [])
+      ];
 
 // P7 D1 — 쿨다운 미지정 기본값 1 (기존 usedThisTurn=턴당 1회와 동일 케이던스).
 // 전투당 1회 스킬은 usedThisCombat만으로 잠그며 쿨다운 상태를 만들지 않는다.
@@ -185,7 +211,7 @@ export type EffectAtom =
   | { kind: 'enterOverheat' }
   | { kind: 'scheduleOverheat' }
   | { kind: 'applyStatus'; status: StatusId; stacks: number; to: 'target' | 'self' }
-  | { kind: 'addCoin'; coin: CoinDefId; zone: 'draw' | 'discard' | 'hand'; count: number }
+  | { kind: 'addCoin'; coin: CoinDefId; zone: 'draw' | 'discard' | 'hand'; position?: 'top'; count: number }
   | { kind: 'grantElement'; element: Element; scope: 'allBasicInHand' | 'chooseBasicInHand' }
   | { kind: 'addTurnTrigger'; trigger: TurnTriggerDef }
   // P6 D5 — 화상 수치 참조 폭발 (스택 비소비, 격투가 화상 빌드 마무리)
@@ -405,11 +431,16 @@ const validateAtomAmounts = (db: Omit<ContentDb, 'validate'>): string[] => {
     if (skill.type === 'consume') {
       checkAtoms(skill.effects, owner);
     } else {
-      checkAtoms(skill.base, owner);
-      if (skill.heads) checkAtoms(skill.heads.effects, owner);
-      if (skill.tails) checkAtoms(skill.tails.effects, owner);
-      if (skill.mixed) checkAtoms(skill.mixed.effects, owner);
-      for (const bonus of skill.elementFaces ?? []) checkAtoms(bonus.effects, owner);
+      if (declaresSuccessLadder(skill)) {
+        for (const tier of skill.successLadder ?? []) checkAtoms(tier, owner);
+        if (skill.resonance) checkAtoms(skill.resonance.effects, owner);
+      } else {
+        checkAtoms(skill.base ?? [], owner);
+        if (skill.heads) checkAtoms(skill.heads.effects, owner);
+        if (skill.tails) checkAtoms(skill.tails.effects, owner);
+        if (skill.mixed) checkAtoms(skill.mixed.effects, owner);
+        for (const bonus of skill.elementFaces ?? []) checkAtoms(bonus.effects, owner);
+      }
     }
     checkAtoms(skill.overheatBonus ?? [], owner);
     checkAtoms(skill.preservedBonus ?? [], owner);
@@ -458,7 +489,7 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
       continue;
     }
 
-    const hpPaidZeroCost = skill.cost === 0 && skill.base.some((atom) => atom.kind === 'payHp');
+    const hpPaidZeroCost = skill.cost === 0 && (skill.base ?? []).some((atom) => atom.kind === 'payHp');
     if (!Number.isInteger(skill.cost) || skill.cost < 0 || (skill.cost === 0 && !hpPaidZeroCost)) {
       errors.push(`skill ${String(skill.id)}: flip cost must be a positive integer`);
       continue;
@@ -475,6 +506,51 @@ const validateSkillCosts = (skills: readonly SkillDef[]): string[] => {
     }
   }
 
+  return errors;
+};
+
+const validateFlipModels = (skills: readonly SkillDef[]): string[] => {
+  const errors: string[] = [];
+  for (const skill of skills) {
+    if (skill.type !== 'flip') continue;
+    const owner = `skill ${String(skill.id)}`;
+    const ladderDeclared = declaresSuccessLadder(skill);
+    if (!ladderDeclared) {
+      if (skill.base === undefined) errors.push(`${owner}: legacy flip skill must declare base effects`);
+      continue;
+    }
+
+    const legacyFields =
+      skill.base.length > 0 || [skill.heads, skill.tails, skill.mixed, skill.elementFaces].some((value) => value !== undefined);
+    if (legacyFields) errors.push(`${owner}: success-ladder skill cannot mix legacy flip fields`);
+    if (skill.remise !== undefined || (skill.overheatBonus?.length ?? 0) > 0) {
+      errors.push(`${owner}: success-ladder skill cannot mix legacy remise or overheat behavior`);
+    }
+    if (skill.successFace !== 'heads' && skill.successFace !== 'tails') {
+      errors.push(`${owner}: successFace must be heads or tails`);
+    }
+    if (skill.successLadder === undefined) {
+      errors.push(`${owner}: successLadder is required`);
+    } else {
+      if (skill.successLadder.length !== skill.cost + 1) {
+        errors.push(`${owner}: successLadder must contain exactly cost + 1 entries`);
+      }
+      if (skill.cost === 1 && (skill.successLadder[0]?.length ?? 0) > 0) {
+        errors.push(`${owner}: cost-1 zero-success tier must be empty`);
+      }
+    }
+    if (skill.resonance !== undefined) {
+      if (skill.element === undefined || skill.resonance.element !== skill.element) {
+        errors.push(`${owner}: resonance element must match the skill element`);
+      }
+      if (skill.resonance.effects.length === 0) {
+        errors.push(`${owner}: resonance must declare at least one effect`);
+      }
+    }
+    if (skill.upgrade !== undefined) {
+      errors.push(`${owner}: success-ladder upgrades are not supported by legacy upgrade patches`);
+    }
+  }
   return errors;
 };
 
@@ -522,8 +598,11 @@ const validateTurnTriggers = (db: Omit<ContentDb, 'validate'>): string[] => {
     const owner = `skill ${String(skill.id)}`;
     if (skill.type === 'consume') {
       validateTriggerAtoms(skill.effects, owner, false, errors);
+    } else if (declaresSuccessLadder(skill)) {
+      for (const tier of skill.successLadder ?? []) validateTriggerAtoms(tier, owner, false, errors);
+      if (skill.resonance) validateTriggerAtoms(skill.resonance.effects, owner, false, errors);
     } else {
-      validateTriggerAtoms(skill.base, owner, false, errors);
+      validateTriggerAtoms(skill.base ?? [], owner, false, errors);
       if (skill.heads) validateTriggerAtoms(skill.heads.effects, owner, false, errors);
       if (skill.tails) validateTriggerAtoms(skill.tails.effects, owner, false, errors);
       if (skill.mixed) validateTriggerAtoms(skill.mixed.effects, owner, false, errors);
@@ -676,7 +755,7 @@ const validateSkillUpgrades = (skills: readonly SkillDef[]): string[] => {
         errors.push(...validateSkillUpgrades([nested]));
       }
     } else if (patch.kind === 'baseAmount') {
-      const atoms = skill.type === 'flip' ? skill.base : skill.effects;
+      const atoms = skill.type === 'flip' ? (skill.base ?? []) : skill.effects;
       const atom = atoms[patch.index];
       if (atom === undefined || !('amount' in atom) || typeof atom.amount !== 'number') errors.push(`${owner}: baseAmount index ${patch.index} has no amount`);
       if (!Number.isInteger(patch.delta) || patch.delta === 0) errors.push(`${owner}: baseAmount delta must be a nonzero integer`);
@@ -689,7 +768,7 @@ const validateSkillUpgrades = (skills: readonly SkillDef[]): string[] => {
       const atoms =
         patch.section === 'base'
           ? skill.type === 'flip'
-            ? skill.base
+            ? (skill.base ?? [])
             : skill.effects
           : patch.section === 'onRepeatFinish'
             ? skill.type === 'flip'
@@ -729,6 +808,7 @@ export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => 
   ...duplicateIds(Object.values(db.characters), 'character'),
   ...duplicateIds(Object.values(db.events ?? {}), 'event'),
   ...validateCoinProcs(db.coins),
+  ...validateFlipModels(Object.values(db.skills)),
   ...validateSkillCosts(Object.values(db.skills)),
   ...validateCooldowns(Object.values(db.skills)),
   ...validateAtomAmounts(db),

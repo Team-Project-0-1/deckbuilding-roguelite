@@ -1,4 +1,5 @@
 import type { ContentDb, FlipSkillDef } from "../content-types";
+import { flipSkillEffects } from "../content-types";
 import type { CoinUid, Face, SlotId } from "../ids";
 import type { Rng, RngSnapshot } from "../rng";
 import type { CombatEvent } from "./events";
@@ -107,7 +108,7 @@ const isBasicCoinInHand = (
 };
 
 const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
-  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? [])].some(
+  flipSkillEffects(skill).some(
     (effect) => effect.kind === "grantElement" && effect.scope === "chooseBasicInHand",
   );
 

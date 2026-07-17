@@ -1,4 +1,5 @@
 import type { ContentDb, FlipSkillDef } from '../content-types';
+import { flipSkillEffects } from '../content-types';
 import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, PassiveId, SkillId, SlotId } from '../ids';
 import { derive, rngFrom, seedFromString } from '../rng';
 import { coinSatisfiesFlipRequirement, flipSkillRequiresEnemyTarget, skillRequiresSummonChoice } from './commands';
@@ -359,12 +360,12 @@ const validateSingleEnemyTarget = (input: CombatState, target: number | undefine
 };
 
 const hasChooseBasicInHand = (skill: FlipSkillDef): boolean =>
-  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? []), ...(skill.preservedBonus ?? [])].some(
+  [...flipSkillEffects(skill), ...(skill.preservedBonus ?? [])].some(
     (effect) => effect.kind === 'grantElement' && effect.scope === 'chooseBasicInHand'
   );
 
 const hasPreserveChoice = (skill: FlipSkillDef): boolean =>
-  [...skill.base, ...(skill.heads?.effects ?? []), ...(skill.tails?.effects ?? []), ...(skill.preservedBonus ?? [])].some(
+  [...flipSkillEffects(skill), ...(skill.preservedBonus ?? [])].some(
     (effect) => effect.kind === 'preserveChosenCoin'
   );
 
