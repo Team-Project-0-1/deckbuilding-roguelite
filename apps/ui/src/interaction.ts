@@ -77,7 +77,10 @@ export const cardActionView = (input: CardActionViewInput): CardActionView => {
 export const pendingLoadedCoinCount = (state: CombatState): number =>
   Object.values(state.zones.placed).reduce(
     (count, coins) => count + coins.length,
-    0,
+    state.flipReservations.reduce(
+      (count, reservation) => count + reservation.coinUids.length,
+      0,
+    ),
   );
 
 // 보상 순서 자체는 코어가 PendingRewards 플래그로 결정한다. UI는 그 상태를
@@ -255,6 +258,7 @@ export const sameCommand = (left: Command, right: Command): boolean => {
   if (left.type === "useFlipSkill" && right.type === "useFlipSkill")
     return (
       left.slot === right.slot &&
+      left.reservationId === right.reservationId &&
       left.target === right.target &&
       left.chosenSummon === right.chosenSummon &&
       left.chosenEquipment === right.chosenEquipment &&
@@ -285,9 +289,14 @@ export const stepSequence = (
   let current = state;
   const events: CombatEvent[] = [];
   for (const command of commands) {
-    const legal = legalCommands(current, db).some((candidate) =>
-      sameCommand(candidate, command),
-    );
+    const legal =
+      (command.type === "unplaceCoin" &&
+        current.flipReservations.some((reservation) =>
+          reservation.coinUids.includes(command.coin),
+        )) ||
+      legalCommands(current, db).some((candidate) =>
+        sameCommand(candidate, command),
+      );
     if (!legal) return null;
     const result = step(current, command, db);
     if (!result.ok) return null;
@@ -307,8 +316,15 @@ export const dragSwapTargetCoins = (
 ): Set<number> => {
   if (source.kind !== "socket") return new Set();
   const targets = new Set<number>();
-  for (const [slotKey, coins] of Object.entries(state.zones.placed)) {
-    const targetSlot = Number(slotKey) as SlotId;
+  const placedBySlot: readonly (readonly [SlotId, readonly CoinUid[]])[] = [
+    ...Object.entries(state.zones.placed).map(
+      ([slotKey, coins]) => [Number(slotKey) as SlotId, coins] as const,
+    ),
+    ...state.flipReservations.map(
+      (reservation) => [reservation.slot, reservation.coinUids] as const,
+    ),
+  ];
+  for (const [targetSlot, coins] of placedBySlot) {
     for (const targetCoin of coins) {
       if (targetCoin === coin) continue;
       const commands = dropCommands(coin, source, {

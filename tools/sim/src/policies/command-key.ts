@@ -23,7 +23,7 @@ export const commandKey = (command: Command): string => {
     case "unplaceCoin":
       return `2:unplaceCoin:coin=${numericKey(Number(command.coin))}`;
     case "useFlipSkill":
-      return `3:useFlipSkill:slot=${numericKey(Number(command.slot))}:target=${targetKey(command.target)}:chosen=${coinsKey(command.chosen)}:equipment=${String(command.chosenEquipment ?? "none")}:summon=${summonKey(command.chosenSummon)}`;
+      return `3:useFlipSkill:slot=${numericKey(Number(command.slot))}:reservation=${String(command.reservationId ?? "none")}:target=${targetKey(command.target)}:chosen=${coinsKey(command.chosen)}:equipment=${String(command.chosenEquipment ?? "none")}:summon=${summonKey(command.chosenSummon)}`;
     case "useConsumeSkill": {
       const coins = coinsKey(command.coins);
       return `4:useConsumeSkill:slot=${numericKey(Number(command.slot))}:target=${targetKey(command.target)}:coins=${coins}:summon=${summonKey(command.chosenSummon)}`;

@@ -1,5 +1,5 @@
 import type { CombatState, Command, ContentDb } from "@game/core";
-import { legalCommands } from "@game/core";
+import { isRepeatReservationEligible, legalCommands } from "@game/core";
 import { sameCommand } from "./interaction";
 import { fuelRequirement } from "./fuel-selection";
 
@@ -35,7 +35,14 @@ const slotReason = (
 
   if (command.type === "useFlipSkill") {
     if (skill.type !== "flip") return null;
-    if ((state.zones.placed[command.slot]?.length ?? 0) < skill.cost)
+    const reservation =
+      command.reservationId === undefined
+        ? state.flipReservations.find((candidate) => candidate.slot === command.slot)
+        : state.flipReservations.find(
+            (candidate) =>
+              candidate.id === command.reservationId && candidate.slot === command.slot,
+          );
+    if (reservation === undefined)
       return REJECTION_TEXT.coinCost;
     return null;
   }
@@ -70,16 +77,17 @@ export function rejectionReason(
         : db.skills[String(slotState.skillId)];
     if (
       skill?.type === "flip" &&
-      (state.zones.placed[command.slot]?.length ?? 0) >= skill.cost
+      (!isRepeatReservationEligible(skill) &&
+        state.flipReservations.some((reservation) => reservation.slot === command.slot))
     )
       return REJECTION_TEXT.socketFull;
     return REJECTION_TEXT.generic;
   }
 
   if (command.type === "unplaceCoin") {
-    const placed = Object.values(state.zones.placed).some((coins) =>
-      coins.includes(command.coin),
-    );
+    const placed =
+      Object.values(state.zones.placed).some((coins) => coins.includes(command.coin)) ||
+      state.flipReservations.some((reservation) => reservation.coinUids.includes(command.coin));
     return placed ? REJECTION_TEXT.generic : REJECTION_TEXT.coinNotSelectable;
   }
 

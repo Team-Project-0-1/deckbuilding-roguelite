@@ -11,7 +11,6 @@ import {
   choosePassiveReward,
   skillCooldown,
   skillRequiresSummonChoice,
-  deriveUpgradedSkill,
   claimTreasure,
   restHeal,
   restUpgrade,
@@ -35,6 +34,7 @@ import {
   statusStacks,
   statusTurns,
   step,
+  upgradedContentDb,
 } from "@game/core";
 import type { CombatEvent, CombatState, Command, EnemyAction, SkillDef } from "@game/core";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -3080,6 +3080,7 @@ const CombatBoard = ({
   onTelemetryDecision,
 }: CombatBoardProps) => {
   const flipSpeed = preferences.flipSpeed;
+  const combatDb = useMemo(() => upgradedContentDb(run, contentDb), [run]);
   const [state, dispatchState] = useReducer(combatReducer, combat);
   const [selectedCoin, setSelectedCoin] = useState<CoinUid | null>(null);
   const [fuelSelection, setFuelSelection] = useState<FuelSelection | null>(null);
@@ -3102,7 +3103,7 @@ const CombatBoard = ({
   const [choiceExecution, setChoiceExecution] = useState<ChoiceExecutionContext | null>(null);
   const [executionOrder, setExecutionOrder] = useState<ExecutionOrder>([]);
   const [autoTurnEnd, setAutoTurnEnd] = useState<AutoTurnEndState>(() => createIdleAutoTurnEnd());
-  const [executionDragSlot, setExecutionDragSlot] = useState<SlotId | null>(null);
+  const [executionDragReservation, setExecutionDragReservation] = useState<string | null>(null);
   const [lastAttackTarget, setLastAttackTarget] = useState<number | null>(null);
   const [shakeCoin, setShakeCoin] = useState<CoinUid | null>(null);
   const [openPile, setOpenPile] = useState<CoinPileZone | null>(null);
@@ -3132,27 +3133,10 @@ const CombatBoard = ({
   const nextWorkflowId = useRef(1);
   const launchedExecutionTokens = useRef<Set<string>>(new Set());
   const preserveWorkflowRequested = useRef<string | null>(null);
-  const legal = useMemo(() => legalCommands(state, contentDb), [state]);
-  const executionLoads = useMemo(
-    () =>
-      state.slots.map((slotState, index) => {
-        const skill = contentDb.skills[String(slotState.skillId)];
-        const loadedCount = state.zones.placed[slot(index)]?.length ?? 0;
-        return {
-          slot: slot(index),
-          loadedCount,
-          requiredCount: skill?.type === "flip" ? skill.cost : 0,
-          queueable:
-            skill?.type === "flip" &&
-            (loadedCount < skill.cost ||
-              legal.some((command) => command.type === "useFlipSkill" && command.slot === slot(index))),
-        };
-      }),
-    [legal, state.slots, state.zones.placed],
-  );
+  const legal = useMemo(() => legalCommands(state, combatDb), [combatDb, state]);
   const executionSnapshot = useMemo(
-    () => executionQueueSnapshot(executionOrder, executionLoads),
-    [executionLoads, executionOrder],
+    () => executionQueueSnapshot(executionOrder, state.flipReservations),
+    [executionOrder, state.flipReservations],
   );
   const executionBusy =
     autoTurnEnd.phase === "running" ||
@@ -3160,8 +3144,8 @@ const CombatBoard = ({
     autoTurnEnd.phase === "preserving" ||
     autoTurnEnd.phase === "blocked";
   const recommendedLoad = useMemo(
-    () => recommendedLoadProposal(state, contentDb),
-    [state],
+    () => recommendedLoadProposal(state, combatDb),
+    [combatDb, state],
   );
   const turnResourceSummary = useMemo(
     () => summarizeTurnResources(state, executionSnapshot, preserveSelection?.coins ?? []),
@@ -3182,7 +3166,7 @@ const CombatBoard = ({
   };
 
   const showResolutionTicket = (pending: PendingResolution) => {
-    const skill = contentDb.skills[String(pending.skillId)];
+    const skill = combatDb.skills[String(pending.skillId)];
     if (skill === undefined) return;
     const summary = withCombatEventResolutionLines(buildResolutionSummary(skill, pending.events), pending.events);
     clearResolutionTicket();
@@ -3218,8 +3202,8 @@ const CombatBoard = ({
 
   useEffect(() => {
     if (executionBusy) return;
-    setExecutionOrder((current) => reconcileExecutionOrder(current, executionLoads));
-  }, [executionBusy, executionLoads]);
+    setExecutionOrder((current) => reconcileExecutionOrder(current, state.flipReservations));
+  }, [executionBusy, state.flipReservations]);
 
   useEffect(() => {
     const sync = () => {
@@ -3301,6 +3285,9 @@ const CombatBoard = ({
         (candidate.type === "useFlipSkill" || candidate.type === "useConsumeSkill") &&
         candidate.type === command.type &&
         candidate.slot === command.slot &&
+        (candidate.type !== "useFlipSkill" ||
+          command.type !== "useFlipSkill" ||
+          candidate.reservationId === command.reservationId) &&
         (candidate.type !== "useConsumeSkill" ||
           command.type !== "useConsumeSkill" ||
           (candidate.coins.length === command.coins.length &&
@@ -3370,7 +3357,7 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.notPlayerPhase);
       return false;
     }
-    const reason = rejectionReason(state, cmd, contentDb);
+    const reason = rejectionReason(state, cmd, combatDb);
     if (reason !== null) {
       if (showFeedback) showRejection(reason);
       return false;
@@ -3380,7 +3367,7 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
     }
-    const result = step(state, legalCommand, contentDb);
+    const result = step(state, legalCommand, combatDb);
     if (!result.ok) {
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
@@ -3406,7 +3393,7 @@ const CombatBoard = ({
       if (showFeedback) showRejection(REJECTION_TEXT.notPlayerPhase);
       return false;
     }
-    const result = step(state, cmd, contentDb);
+    const result = step(state, cmd, combatDb);
     if (!result.ok) {
       if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
@@ -3422,7 +3409,7 @@ const CombatBoard = ({
 
   const beginOrConfirmPreserve = (source: DecisionSource = "manual"): boolean => {
     if (preserveSelection === null) {
-      const selection = beginPreserveSelection(state, contentDb);
+      const selection = beginPreserveSelection(state, combatDb);
       if (selection === null) return runCommand({ type: "endTurn" }, true, source);
       selectCoin(null);
       setFuelSelection(null);
@@ -3447,7 +3434,7 @@ const CombatBoard = ({
     launchedExecutionTokens.current.clear();
     preserveWorkflowRequested.current = null;
     setPreviewSlot(null);
-    setAutoTurnEnd(beginAutoTurnEnd(workflowId, executionSnapshot.order));
+    setAutoTurnEnd(beginAutoTurnEnd(workflowId, executionSnapshot.loaded));
     return true;
   };
 
@@ -3469,12 +3456,12 @@ const CombatBoard = ({
       else if (showFeedback) showRejection(REJECTION_TEXT.generic);
       return false;
     }
-    const result = stepSequence(state, commands, contentDb);
+    const result = stepSequence(state, commands, combatDb);
     if (result === null) {
       if (showFeedback) {
         const reason =
           commands
-            .map((command) => rejectionReason(state, command, contentDb))
+            .map((command) => rejectionReason(state, command, combatDb))
             .find((candidate): candidate is string => candidate !== null) ?? REJECTION_TEXT.generic;
         showRejection(reason);
       }
@@ -3547,7 +3534,11 @@ const CombatBoard = ({
     setEquipmentChoice(null);
     resumeExecutionAfterChoice(source, executionToken);
     if (cmd.type === "useFlipSkill") {
-      const ghosts = [...(state.zones.placed[cmd.slot] ?? [])];
+      const reservation =
+        cmd.reservationId === undefined
+          ? undefined
+          : state.flipReservations.find((candidate) => candidate.id === cmd.reservationId);
+      const ghosts = [...(reservation?.coinUids ?? state.zones.placed[cmd.slot] ?? [])];
       const committed = runExplicitCommand(cmd, showFeedback, source);
       if (committed && ghosts.length > 0) setResolving({ slot: Number(cmd.slot), coins: ghosts });
       return committed;
@@ -3647,7 +3638,7 @@ const CombatBoard = ({
   };
 
   const routeSkill = (
-    skill: NonNullable<(typeof contentDb.skills)[string]>,
+    skill: NonNullable<(typeof combatDb.skills)[string]>,
     command: TargetingCommand,
     showFeedback: boolean,
     selectedFuel = false,
@@ -3657,7 +3648,7 @@ const CombatBoard = ({
   ): boolean => {
     if (
       command.type === "useFlipSkill" &&
-      requiresEquipmentChoice(state, command, contentDb) &&
+      requiresEquipmentChoice(state, command, combatDb) &&
       !equipmentConfirmed
     )
       return beginEquipmentChoice(command, source, executionToken);
@@ -3676,7 +3667,7 @@ const CombatBoard = ({
       state,
       equipmentChoice,
       equipmentId as EquipmentDefId,
-      contentDb,
+      combatDb,
     );
     if (command === null) {
       showRejection(REJECTION_TEXT.generic);
@@ -3684,21 +3675,21 @@ const CombatBoard = ({
     }
     setEquipmentChoice(null);
     const slotState = state.slots[Number(command.slot)];
-    const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+    const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
     if (skill === undefined) return false;
     return routeSkill(skill, command, true, false, true, context.source, context.token);
   };
 
   const activateConsumeSkill = (
     slotId: SlotId,
-    skill: NonNullable<(typeof contentDb.skills)[string]>,
+    skill: NonNullable<(typeof combatDb.skills)[string]>,
     autoCommand: Extract<Command, { type: "useConsumeSkill" }> | undefined,
     showFeedback = true,
   ) => {
     if (skill.type !== "consume") return;
     // count==1 deliberately keeps the existing App path: use the single
     // legalCommands auto suggestion immediately, without fuel-selection state.
-    if (!requiresFuelSelection(state, slotId, contentDb)) {
+    if (!requiresFuelSelection(state, slotId, combatDb)) {
       if (autoCommand !== undefined) {
         routeSkill(skill, autoCommand, showFeedback);
       } else
@@ -3714,8 +3705,8 @@ const CombatBoard = ({
       return;
     }
     if (fuelSelection?.slot !== slotId) {
-      const coins = autoSuggestFuel(state, slotId, contentDb);
-      const requirement = fuelRequirement(state, slotId, contentDb);
+      const coins = autoSuggestFuel(state, slotId, combatDb);
+      const requirement = fuelRequirement(state, slotId, combatDb);
       if (requirement === null || requirement.available < requirement.min) {
         const reason = rejectionReason(
           state,
@@ -3725,7 +3716,7 @@ const CombatBoard = ({
             coins: [],
             target: skill.targetType === "single-enemy" ? 0 : undefined,
           },
-          contentDb,
+          combatDb,
         );
         if (showFeedback) showRejection(reason ?? REJECTION_TEXT.coinCost);
         return;
@@ -3737,7 +3728,7 @@ const CombatBoard = ({
       setFuelSelection({ slot: slotId, coins });
       return;
     }
-    const command = fuelCommand(fuelSelection, state, contentDb);
+    const command = fuelCommand(fuelSelection, state, combatDb);
     if (command === null) {
       if (showFeedback) showRejection(REJECTION_TEXT.coinCost);
       return;
@@ -3747,19 +3738,19 @@ const CombatBoard = ({
 
   const activateFlipSkill = (
     slotId: SlotId,
-    skill: NonNullable<(typeof contentDb.skills)[string]>,
+    skill: NonNullable<(typeof combatDb.skills)[string]>,
     autoCommand: Extract<Command, { type: "useFlipSkill" }> | undefined,
     showFeedback = true,
     source: DecisionSource = "manual",
     executionToken: string | null = null,
   ): boolean => {
     if (skill.type !== "flip") return false;
-    if (!requiresCoinChoiceSelection(state, slotId, contentDb)) {
+    if (!requiresCoinChoiceSelection(state, slotId, combatDb)) {
       if (autoCommand !== undefined) {
         return routeSkill(skill, autoCommand, showFeedback, false, false, source, executionToken);
       } else {
-        const coins = autoSuggestCoinChoice(state, slotId, contentDb);
-        const command = coinChoiceCommand({ slot: slotId, coins }, state, contentDb);
+        const coins = autoSuggestCoinChoice(state, slotId, combatDb);
+        const command = coinChoiceCommand({ slot: slotId, coins }, state, combatDb);
         if (command !== null) {
           return routeSkill(skill, command, showFeedback, false, false, source, executionToken);
         } else
@@ -3781,12 +3772,12 @@ const CombatBoard = ({
       setPreserveSelection(null);
       setCoinChoice({
         slot: slotId,
-        coins: autoSuggestCoinChoice(state, slotId, contentDb),
+        coins: autoSuggestCoinChoice(state, slotId, combatDb),
       });
       openExecutionChoice("coin", source, executionToken);
       return true;
     }
-    const command = coinChoiceCommand(coinChoice, state, contentDb);
+    const command = coinChoiceCommand(coinChoice, state, combatDb);
     if (command === null) {
       if (showFeedback) showRejection(REJECTION_TEXT.coinCost);
       return false;
@@ -3797,10 +3788,10 @@ const CombatBoard = ({
 
   const onFuelCoinClick = (coin: CoinUid): boolean => {
     if (fuelSelection === null) return false;
-    const next = toggleFuel(fuelSelection, coin, state, contentDb);
+    const next = toggleFuel(fuelSelection, coin, state, combatDb);
     if (next === fuelSelection) {
       const slotState = state.slots[Number(fuelSelection.slot)];
-      const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+      const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
       const reason = rejectionReason(
         state,
         {
@@ -3809,7 +3800,7 @@ const CombatBoard = ({
           coins: [...fuelSelection.coins, coin],
           target: skill?.targetType === "single-enemy" ? 0 : undefined,
         },
-        contentDb,
+        combatDb,
       );
       showRejection(reason ?? REJECTION_TEXT.generic);
       return true;
@@ -3821,7 +3812,7 @@ const CombatBoard = ({
 
   const onCoinChoiceClick = (coin: CoinUid): boolean => {
     if (coinChoice === null) return false;
-    const next = toggleCoinChoice(coinChoice, coin, state, contentDb);
+    const next = toggleCoinChoice(coinChoice, coin, state, combatDb);
     if (next === coinChoice) {
       showRejection(REJECTION_TEXT.generic);
       return true;
@@ -3878,7 +3869,7 @@ const CombatBoard = ({
       const workflowId = autoTurnEnd.workflowId;
       if (workflowId === null || preserveWorkflowRequested.current === workflowId) return;
       preserveWorkflowRequested.current = workflowId;
-      const needsChoice = beginPreserveSelection(state, contentDb) !== null;
+      const needsChoice = beginPreserveSelection(state, combatDb) !== null;
       const accepted = beginOrConfirmPreserve("auto-turn-end");
       if (!accepted) {
         preserveWorkflowRequested.current = null;
@@ -3903,17 +3894,17 @@ const CombatBoard = ({
       return;
     }
 
-    const { slot: activeSlot, token } = autoTurnEnd.active;
+    const { reservationId, slot: activeSlot, token } = autoTurnEnd.active;
     const slotState = state.slots[Number(activeSlot)];
-    const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
-    const placed = state.zones.placed[activeSlot] ?? [];
+    const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
+    const reservation = state.flipReservations.find((candidate) => candidate.id === reservationId);
     if (skill?.type !== "flip") {
       setAutoTurnEnd((current) =>
         blockActiveExecution(current, token, "실행할 플립 스킬을 찾을 수 없습니다."),
       );
       return;
     }
-    if (placed.length < skill.cost) {
+    if (reservation === undefined) {
       if (launchedExecutionTokens.current.has(token))
         setAutoTurnEnd((current) => completeActiveExecution(current, token));
       else
@@ -3927,11 +3918,12 @@ const CombatBoard = ({
     const attempt = {
       type: "useFlipSkill" as const,
       slot: activeSlot,
+      reservationId,
       target: skill.targetType === "single-enemy" ? 0 : undefined,
     };
     const command = targetingCommandFor(attempt);
     if (command === undefined || command.type !== "useFlipSkill") {
-      const reason = rejectionReason(state, attempt, contentDb) ?? "현재 이 스킬을 실행할 수 없습니다.";
+      const reason = rejectionReason(state, attempt, combatDb) ?? "현재 이 스킬을 실행할 수 없습니다.";
       setAutoTurnEnd((current) => blockActiveExecution(current, token, reason));
       return;
     }
@@ -4054,7 +4046,7 @@ const CombatBoard = ({
       delay = 460;
     } else if (event?.type === "enemyPassiveTriggered") {
       const owner = state.enemies[event.enemy];
-      const passiveDef = owner === undefined ? undefined : contentDb.enemies[String(owner.defId)]?.passive;
+      const passiveDef = owner === undefined ? undefined : combatDb.enemies[String(owner.defId)]?.passive;
       if (passiveDef !== undefined) {
         showFloat(`★ ${passiveDef.name}`, "enemy", "status", event.enemy);
         delay = 320;
@@ -4147,8 +4139,8 @@ const CombatBoard = ({
       started: false,
       x: event.clientX,
       y: event.clientY,
-      targets: dragTargetSlots(state, coin, source, contentDb),
-      swapTargets: dragSwapTargetCoins(state, coin, source, contentDb),
+      targets: dragTargetSlots(state, coin, source, combatDb),
+      swapTargets: dragSwapTargetCoins(state, coin, source, combatDb),
       over: null,
       overCoin: null,
       overCard: null,
@@ -4234,7 +4226,7 @@ const CombatBoard = ({
         if (isInteractiveKeyTarget(event.target)) return;
         event.preventDefault();
         const slotState = state.slots[Number(fuelSelection.slot)];
-        const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+        const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
         if (skill !== undefined) activateConsumeSkill(fuelSelection.slot, skill, undefined, true);
       }
     };
@@ -4253,7 +4245,7 @@ const CombatBoard = ({
       if (isInteractiveKeyTarget(event.target)) return;
       event.preventDefault();
       const slotState = state.slots[Number(coinChoice.slot)];
-      const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
+      const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
       if (skill !== undefined) activateFlipSkill(coinChoice.slot, skill, undefined, true);
     };
     document.addEventListener("keydown", onKey);
@@ -4337,10 +4329,13 @@ const CombatBoard = ({
   const dragging = drag !== null && drag.started;
   const isTestEncounter = testEncounterFromUrl() !== null;
   const targetingSkill =
-    targeting === null ? undefined : contentDb.skills[String(state.slots[Number(targeting.command.slot)]?.skillId)];
+    targeting === null ? undefined : combatDb.skills[String(state.slots[Number(targeting.command.slot)]?.skillId)];
   const visibleExecutionOrder = executionBusy ? autoTurnEnd.order : executionSnapshot.order;
+  const executionSlot = (reservationId: string): SlotId | undefined =>
+    autoTurnEnd.reservations[reservationId]?.slot ??
+    state.flipReservations.find((reservation) => reservation.id === reservationId)?.slot;
   const executionPosition = (slotId: SlotId): number =>
-    visibleExecutionOrder.findIndex((candidate) => candidate === slotId);
+    visibleExecutionOrder.findIndex((reservationId) => executionSlot(reservationId) === slotId);
   const autoChoiceOpen = autoTurnEnd.phase === "choosing" || autoTurnEnd.phase === "preserving";
 
   useEffect(() => {
@@ -4436,7 +4431,7 @@ const CombatBoard = ({
             data-testid="equipment-choice"
           >
             <strong>소환할 장비 종류를 선택하세요</strong>
-            {equipmentChoiceOptions(contentDb).map((equipment) => (
+            {equipmentChoiceOptions(combatDb).map((equipment) => (
               <button
                 aria-label={`${equipment.name}: ${equipment.description}`}
                 className="preserve-placed-coin"
@@ -4462,7 +4457,7 @@ const CombatBoard = ({
           side="player"
           unitKey="player"
           sprite={playerSprite(run.character)}
-          name={contentDb.characters[String(run.character)]?.name ?? "영웅"}
+          name={combatDb.characters[String(run.character)]?.name ?? "영웅"}
           hp={state.player.hp}
           maxHp={state.player.maxHp}
           block={state.player.block}
@@ -4470,7 +4465,7 @@ const CombatBoard = ({
           skillSeals={Object.entries(state.player.skillSeals).flatMap(([slotIndex, seal]) => {
             if (seal === undefined || seal.turns <= 0) return [];
             const slotState = state.slots[Number(slotIndex)];
-            const skill = contentDb.skills[String(slotState?.skillId)];
+            const skill = combatDb.skills[String(slotState?.skillId)];
             return [
               {
                 effectMultiplier: seal.effectMultiplier,
@@ -4504,7 +4499,7 @@ const CombatBoard = ({
           vfx={vfx}
         />
         {state.summons.length > 0 ||
-        (contentDb.characters[String(run.character)]?.trait.effects ?? []).some(
+        (combatDb.characters[String(run.character)]?.trait.effects ?? []).some(
           (effect) => effect.kind === "summonEquipment",
         ) ? (
           <div aria-label="소환 장비 슬롯" className="summon-rail" data-testid="summon-rail">
@@ -4514,7 +4509,7 @@ const CombatBoard = ({
               if (summon === undefined) {
                 return <span aria-hidden="true" className="summon-slot empty" key={`empty-${slotIndex}`} />;
               }
-              const def = (contentDb.equipment ?? {})[String(summon.defId)];
+              const def = (combatDb.equipment ?? {})[String(summon.defId)];
               const isWard = def?.action.kind === "ward";
               return (
                 <Keyword
@@ -4550,7 +4545,7 @@ const CombatBoard = ({
         ) : null}
         <div className="enemy-line" aria-label="적 목록" data-enemy-count={state.enemies.length}>
           {state.enemies.map((enemy, index) => {
-            const enemyDef = contentDb.enemies[String(enemy.defId)];
+            const enemyDef = combatDb.enemies[String(enemy.defId)];
             const targetLegal = targeting?.legalTargets.includes(index) === true;
             const targetSelected = targeting?.selected === index;
             const enemyMotion =
@@ -4631,7 +4626,7 @@ const CombatBoard = ({
                     (candidate, candidateIndex) =>
                       candidateIndex !== index &&
                       candidate.hp > 0 &&
-                      contentDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
+                      combatDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
                   );
                   return source === undefined ? undefined : enemyDisplayName(source);
                 })()}
@@ -4640,9 +4635,9 @@ const CombatBoard = ({
                     (candidate, candidateIndex) =>
                       candidateIndex !== index &&
                       candidate.hp > 0 &&
-                      contentDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
+                      combatDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
                   );
-                  const aura = source === undefined ? undefined : contentDb.enemies[String(source.defId)]?.warBanner;
+                  const aura = source === undefined ? undefined : combatDb.enemies[String(source.defId)]?.warBanner;
                   return aura === undefined ? undefined : Math.round(aura.attackAuraPercent * 100);
                 })()}
               />
@@ -4660,29 +4655,42 @@ const CombatBoard = ({
         >
           <strong>행동 실행 순서</strong>
           <ol>
-            {visibleExecutionOrder.map((slotId, index) => {
+            {visibleExecutionOrder.map((reservationId, index) => {
+              const slotId = executionSlot(reservationId);
+              if (slotId === undefined) return null;
               const slotState = state.slots[Number(slotId)];
-              const skill = slotState === undefined ? undefined : contentDb.skills[String(slotState.skillId)];
-              const completed = autoTurnEnd.completed.includes(slotId);
-              const current = autoTurnEnd.active?.slot === slotId;
-              const blocked = current && autoTurnEnd.phase === "blocked";
-              const status = completed ? "완료" : blocked ? "확인 필요" : current ? "실행 중" : "대기";
+              const skill = slotState === undefined ? undefined : combatDb.skills[String(slotState.skillId)];
+              const completed = autoTurnEnd.completed.includes(reservationId);
+              const current = autoTurnEnd.active?.reservationId === reservationId;
+              const blocked = autoTurnEnd.blocked.includes(reservationId);
+              const cancelled = autoTurnEnd.cancelled.includes(reservationId);
+              const status = completed
+                ? "완료"
+                : blocked
+                  ? "확인 필요"
+                  : cancelled
+                    ? "취소"
+                    : current
+                      ? "실행 중"
+                      : "대기";
               return (
                 <li
                   className={`${completed ? "completed" : ""} ${current ? "current" : ""} ${blocked ? "blocked" : ""}`}
-                  data-testid={`execution-order-${Number(slotId)}`}
+                  data-reservation-id={reservationId}
+                  data-slot={Number(slotId)}
+                  data-testid={`execution-order-${reservationId}`}
                   draggable={!executionBusy}
-                  key={Number(slotId)}
-                  onDragStart={() => setExecutionDragSlot(slotId)}
-                  onDragEnd={() => setExecutionDragSlot(null)}
+                  key={reservationId}
+                  onDragStart={() => setExecutionDragReservation(reservationId)}
+                  onDragEnd={() => setExecutionDragReservation(null)}
                   onDragOver={(event) => {
                     if (!executionBusy) event.preventDefault();
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
-                    if (executionBusy || executionDragSlot === null) return;
-                    setExecutionOrder((order) => moveExecutionSlot(order, executionDragSlot, index));
-                    setExecutionDragSlot(null);
+                    if (executionBusy || executionDragReservation === null) return;
+                    setExecutionOrder((order) => moveExecutionSlot(order, executionDragReservation, index));
+                    setExecutionDragReservation(null);
                   }}
                 >
                   <span className="execution-number" aria-hidden="true">{index + 1}</span>
@@ -4693,7 +4701,7 @@ const CombatBoard = ({
                       aria-label={`${skill?.name ?? "스킬"} 실행 순서를 앞으로`}
                       disabled={executionBusy || index === 0}
                       type="button"
-                      onClick={() => setExecutionOrder((order) => moveExecutionSlot(order, slotId, index - 1))}
+                      onClick={() => setExecutionOrder((order) => moveExecutionSlot(order, reservationId, index - 1))}
                     >
                       앞
                     </button>
@@ -4701,7 +4709,7 @@ const CombatBoard = ({
                       aria-label={`${skill?.name ?? "스킬"} 실행 순서를 뒤로`}
                       disabled={executionBusy || index === visibleExecutionOrder.length - 1}
                       type="button"
-                      onClick={() => setExecutionOrder((order) => moveExecutionSlot(order, slotId, index + 1))}
+                      onClick={() => setExecutionOrder((order) => moveExecutionSlot(order, reservationId, index + 1))}
                     >
                       뒤
                     </button>
@@ -4748,15 +4756,20 @@ const CombatBoard = ({
         </div>
         <CombatHistory entries={resolutionHistory} />
         {state.slots.map((slotState, index) => {
-          const baseSkill = contentDb.skills[String(slotState.skillId)];
+          const baseSkill = combatDb.skills[String(slotState.skillId)];
           // P6 D3 — 강화 슬롯은 코어와 같은 파생 정본으로 표시 (수치 이중 표기 방지)
           const upgraded = run.upgradedSlots[index] === true;
-          const skill = baseSkill !== undefined && upgraded ? deriveUpgradedSkill(baseSkill) : baseSkill;
+          const skill = baseSkill;
           const displaySkillName =
             skill === undefined ? "빈 슬롯" : skillDisplayName(skill, state.player.bloodSwordPower);
+          const slotReservations = state.flipReservations.filter(
+            (reservation) => reservation.slot === slot(index),
+          );
+          const reservedCoins = slotReservations.flatMap((reservation) => reservation.coinUids);
+          const firstReservation = slotReservations[0];
           const placed = state.zones.placed[slot(index)] ?? [];
           const queuedPosition = executionPosition(slot(index));
-          const partialQueued = executionSnapshot.partial.some((entry) => entry.slot === slot(index));
+          const partialQueued = placed.length > 0;
           const consumeUse = legal.find(
             (command): command is Extract<Command, { type: "useConsumeSkill" }> =>
               command.type === "useConsumeSkill" && command.slot === slot(index),
@@ -4766,6 +4779,7 @@ const CombatBoard = ({
               ? ({
                   type: "useFlipSkill",
                   slot: slot(index),
+                  reservationId: firstReservation?.id,
                   target: skill.targetType === "single-enemy" ? 0 : undefined,
                 } as const)
               : null;
@@ -4782,23 +4796,26 @@ const CombatBoard = ({
               coin: selectedCoin,
               slot: slot(index),
             }) !== undefined;
+          const canLoadMore = legal.some(
+            (command) => command.type === "placeCoin" && command.slot === slot(index),
+          );
           const canMoveHere = dragging && drag.targets.has(index);
           const hasSwapTarget =
-            dragging && placed.some((coin) => drag.swapTargets.has(Number(coin)));
+            dragging && [...reservedCoins, ...placed].some((coin) => drag.swapTargets.has(Number(coin)));
           const dropTarget = canMoveHere || hasSwapTarget;
           const canPlace = canPlaceSelected || canMoveHere;
           // 프리뷰는 사용 커맨드가 합법일 때만 (§3.5 preview → Preview | null) — 부분 장전·
           // 쿨다운·전투당 1회·전투 종료 등 코어가 해결을 거부하는 모든 상태를 legalCommands가 거른다
           const preview =
-            skill?.type === "flip" && placed.length === skill.cost && use !== undefined
-              ? previewFlip(state, slot(index), contentDb)
+            skill?.type === "flip" && firstReservation !== undefined && use !== undefined
+              ? previewFlip(state, slot(index), combatDb, firstReservation.id)
               : null;
-          const consumeRequirement = skill?.type === "consume" ? fuelRequirement(state, slot(index), contentDb) : null;
+          const consumeRequirement = skill?.type === "consume" ? fuelRequirement(state, slot(index), combatDb) : null;
           const consumeReady =
             skill?.type === "consume" &&
-            (!requiresFuelSelection(state, slot(index), contentDb)
+            (!requiresFuelSelection(state, slot(index), combatDb)
               ? consumeUse !== undefined
-              : fuelSelection?.slot === slot(index) && fuelCommand(fuelSelection, state, contentDb) !== null);
+              : fuelSelection?.slot === slot(index) && fuelCommand(fuelSelection, state, combatDb) !== null);
           const selectingFuel = skill?.type === "consume" && fuelSelection?.slot === slot(index);
           const activeSkillSeal = state.player.skillSeals[index];
           const hardSealed = activeSkillSeal !== undefined && activeSkillSeal.turns > 0 && activeSkillSeal.effectMultiplier === undefined;
@@ -4810,13 +4827,22 @@ const CombatBoard = ({
                 : `효과 ${Math.round(activeSkillSeal.effectMultiplier * 100)}% · ${activeSkillSeal.turns}턴`;
           const lockedOnce = skill?.oncePerCombat === true && slotState.usedThisCombat;
           const isResolving = resolving !== null && resolving.slot === index;
-          const socketCoins = isResolving ? resolving.coins : placed;
+          const socketCoins = isResolving
+            ? [...resolving.coins, ...reservedCoins, ...placed]
+            : [...reservedCoins, ...placed];
+          const socketCount =
+            skill?.type === "flip"
+              ? Math.max(
+                  socketCoins.length,
+                  reservedCoins.length + (canLoadMore || placed.length > 0 ? skill.cost : 0),
+                )
+              : 0;
           const targetingThis =
             targeting?.command.slot === slot(index) ||
             summonTargeting?.slot === slot(index) ||
             equipmentChoice?.slot === slot(index);
           const choosingCoin = coinChoice?.slot === slot(index);
-          const selectedFuelCommand = selectingFuel ? fuelCommand(fuelSelection, state, contentDb) : null;
+          const selectedFuelCommand = selectingFuel ? fuelCommand(fuelSelection, state, combatDb) : null;
           const actionTotal =
             skill?.type === "flip"
               ? skill.cost
@@ -4837,6 +4863,13 @@ const CombatBoard = ({
                   total: actionTotal,
                   usedThisCombat: lockedOnce,
                 });
+          const slotExecutionIds = autoTurnEnd.order.filter(
+            (reservationId) => autoTurnEnd.reservations[reservationId]?.slot === slot(index),
+          );
+          const slotCompletedCount = slotExecutionIds.filter((reservationId) =>
+            autoTurnEnd.completed.includes(reservationId),
+          ).length;
+          const activeThisSlot = autoTurnEnd.active?.slot === slot(index);
           const action =
             skill === undefined
               ? null
@@ -4848,7 +4881,7 @@ const CombatBoard = ({
                   }
                 : choosingCoin
                 ? {
-                    actionable: coinChoiceCommand(coinChoice, state, contentDb) !== null,
+                    actionable: coinChoiceCommand(coinChoice, state, combatDb) !== null,
                     label: coinChoice.coins.length > 0 ? "선택 확정" : "발동 코인 선택",
                     tone: coinChoice.coins.length > 0 ? ("ready" as const) : ("idle" as const),
                   }
@@ -4868,14 +4901,14 @@ const CombatBoard = ({
                     ? {
                         actionable: false,
                         label:
-                          autoTurnEnd.completed.includes(slot(index))
-                            ? "실행 완료"
-                            : autoTurnEnd.active?.slot === slot(index)
-                              ? autoTurnEnd.phase === "blocked"
-                                ? "실행 확인 필요"
-                                : "실행 중"
-                              : `실행 대기 ${queuedPosition + 1}`,
-                        tone: autoTurnEnd.active?.slot === slot(index) ? ("targeting" as const) : ("ready" as const),
+                          activeThisSlot
+                            ? autoTurnEnd.phase === "blocked"
+                              ? "실행 확인 필요"
+                              : `실행 중 · ${slotCompletedCount + 1}/${slotExecutionIds.length}`
+                            : slotExecutionIds.length > 0 && slotCompletedCount === slotExecutionIds.length
+                              ? "실행 완료"
+                              : `실행 대기 · 완료 ${slotCompletedCount}/${slotExecutionIds.length}`,
+                        tone: activeThisSlot ? ("targeting" as const) : ("ready" as const),
                       }
                   : baseAction;
           const cardActionAllowed =
@@ -4917,7 +4950,7 @@ const CombatBoard = ({
           };
           return (
             <article
-              className={`skill-card ${action?.tone === "ready" ? "ready" : ""} ${slotState.cooldownRemaining > 0 ? "spent" : ""} ${slotState.skillId === null ? "empty-slot" : ""} ${lockedOnce ? "combat-locked" : ""} ${hardSealed ? "skill-sealed" : ""} ${placed.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
+              className={`skill-card ${action?.tone === "ready" ? "ready" : ""} ${slotState.cooldownRemaining > 0 ? "spent" : ""} ${slotState.skillId === null ? "empty-slot" : ""} ${lockedOnce ? "combat-locked" : ""} ${hardSealed ? "skill-sealed" : ""} ${socketCoins.length > 0 || isResolving ? "lifted" : ""} ${isResolving ? "resolving" : ""} ${dropTarget && drag?.over === index ? "drop-target" : ""}`}
               data-slot={index}
               key={`${index}-${String(slotState.skillId)}`}
               style={vfx.has(`skill-slot-${index}`) || vfx.has(`cooldown-slot-${index}`) ? feedbackPulse : undefined}
@@ -4958,9 +4991,12 @@ const CombatBoard = ({
             >
               <div className="card-title">
                 {displaySkillName}
-                {queuedPosition >= 0 ? (
-                  <em aria-label={`실행 순서 ${queuedPosition + 1}`} className="execution-card-badge">
-                    {queuedPosition + 1}
+                {slotReservations.length > 0 ? (
+                  <em
+                    aria-label={`예약 ${slotReservations.length}회 · 첫 실행 순서 ${queuedPosition + 1}`}
+                    className="execution-card-badge"
+                  >
+                    예약 {slotReservations.length}회
                   </em>
                 ) : partialQueued ? (
                   <em className="execution-partial-badge">미완료 · 실행 안 됨</em>
@@ -4973,7 +5009,7 @@ const CombatBoard = ({
               </div>
               {skill?.oncePerCombat === true ? <span className="once-badge">전투당 1회</span> : null}
               <div className="sockets" aria-label={`${displaySkillName} 코스트 소켓`}>
-                {Array.from({ length: skill?.type === "flip" ? skill.cost : 0 }, (_unused, socketIndex) => {
+                {Array.from({ length: socketCount }, (_unused, socketIndex) => {
                   const coin = socketCoins[socketIndex];
                   const swapAccept =
                     coin !== undefined && dragging && drag.swapTargets.has(Number(coin));
@@ -5094,7 +5130,7 @@ const CombatBoard = ({
               <RemiseSpendBadge
                 displaySkillName={displaySkillName}
                 isSorcerer={run.character === "sorcerer"}
-                loaded={placed.length}
+                loaded={socketCoins.length}
                 remiseCharges={state.player.remiseCharges}
                 shifted={skill?.oncePerCombat === true}
                 skill={skill}
@@ -5166,7 +5202,7 @@ const CombatBoard = ({
             </article>
           );
         })}
-        {!ended ? <TutorialStrip db={contentDb} fuelSelectionOpen={fuelSelection !== null} state={state} /> : null}
+        {!ended ? <TutorialStrip db={combatDb} fuelSelectionOpen={fuelSelection !== null} state={state} /> : null}
       </section>
 
       {recommendedLoadOpen ? (
@@ -5240,7 +5276,7 @@ const CombatBoard = ({
           </button>
           <span>주머니</span>
           {openPile === "draw" ? (
-            <PilePopover anchorRef={drawPileButtonRef} groups={pileComposition(state, "draw", contentDb)} zone="draw" />
+            <PilePopover anchorRef={drawPileButtonRef} groups={pileComposition(state, "draw", combatDb)} zone="draw" />
           ) : null}
         </div>
         <div className="coin-rail" data-testid="mobile-coin-rail">
@@ -5268,9 +5304,9 @@ const CombatBoard = ({
             const emptyFuelSelection = fuelSelection === null ? null : { slot: fuelSelection.slot, coins: [] };
             const fuelValid =
               fuelSelection !== null &&
-              (fuelSelected || toggleFuel(emptyFuelSelection!, coin, state, contentDb) !== emptyFuelSelection);
+              (fuelSelected || toggleFuel(emptyFuelSelection!, coin, state, combatDb) !== emptyFuelSelection);
             const choiceValid =
-              coinChoice !== null && coinChoiceCandidates(state, coinChoice.slot, contentDb).includes(coin);
+              coinChoice !== null && coinChoiceCandidates(state, coinChoice.slot, combatDb).includes(coin);
             const preserveValid = preserveSelection?.candidates.includes(coin) === true;
             const selectingCoin = fuelSelection !== null || coinChoice !== null || preserveSelection !== null;
             const selectedForMode = fuelSelected || choiceSelected || preserveSelected;
@@ -5363,14 +5399,14 @@ const CombatBoard = ({
           {openPile === "discard" ? (
             <PilePopover
               anchorRef={discardPileButtonRef}
-              groups={pileComposition(state, "discard", contentDb)}
+              groups={pileComposition(state, "discard", combatDb)}
               zone="discard"
             />
           ) : null}
           {openPile === "exhausted" ? (
             <PilePopover
               anchorRef={exhaustedPileButtonRef}
-              groups={pileComposition(state, "exhausted", contentDb)}
+              groups={pileComposition(state, "exhausted", combatDb)}
               zone="exhausted"
             />
           ) : null}

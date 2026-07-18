@@ -377,7 +377,7 @@ describe('turn triggers', () => {
         if (!result.ok) throw new Error(`${seed}:${stepIndex}:${result.error}`);
         state = result.state;
         expectedCoins += result.events.filter((event) => event.type === 'coinCreated').length;
-        expect(zoneCoinCount(state.zones)).toBe(Object.keys(state.coins).length);
+        expect(zoneCoinCount(state.zones, [], state.flipReservations)).toBe(Object.keys(state.coins).length);
         expect(Object.keys(state.coins)).toHaveLength(expectedCoins);
         expect(state.player.hp).toBeGreaterThanOrEqual(0);
         expect(state.player.hp).toBeLessThanOrEqual(state.player.maxHp);

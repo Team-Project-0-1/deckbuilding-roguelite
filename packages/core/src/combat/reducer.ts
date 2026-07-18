@@ -1,5 +1,5 @@
 import type { ContentDb, FlipSkillDef } from '../content-types';
-import { DURATION_STATUS_IDS, effectiveElements, flipSkillEffects } from '../content-types';
+import { DURATION_STATUS_IDS, effectiveElements, flipSkillEffects, isRepeatReservationEligible } from '../content-types';
 import type {
   CharacterId,
   CoinDefId,
@@ -395,6 +395,8 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
       discard: [],
       exhausted: []
     },
+    flipReservations: [],
+    nextFlipReservationId: 1,
     slots: Array.from({ length: MAX_SKILL_SLOTS }, (_, index) => ({
       skillId: skills[index] ?? null,
       cooldownRemaining: 0,
@@ -538,17 +540,29 @@ const placeCoin = (input: CombatState, coin: CoinUid, slotId: SlotId, db: Conten
   if (skill?.type === 'flip' && !coinSatisfiesFlipRequirement(input, db, skill, coin)) {
     return { ok: false, error: 'coin does not satisfy required flip element' };
   }
+  const reservations = input.flipReservations.filter((reservation) => reservation.slot === slotId);
+  if (skill?.type === 'flip' && !isRepeatReservationEligible(skill) && reservations.length > 0) {
+    return { ok: false, error: 'skill already has a reservation' };
+  }
   if (skill?.type === 'flip' && (input.zones.placed[slotId]?.length ?? 0) >= skill.cost) {
     return { ok: false, error: 'slot cost is already full' };
   }
+  const draft = [...(input.zones.placed[slotId] ?? []), coin];
+  const commitsReservation = skill?.type === 'flip' && draft.length === skill.cost;
   const state = {
     ...input,
+    ...(commitsReservation
+      ? {
+          flipReservations: [...input.flipReservations, { id: `flip-${input.nextFlipReservationId}`, slot: slotId, coinUids: draft }],
+          nextFlipReservationId: input.nextFlipReservationId + 1
+        }
+      : {}),
     zones: {
       ...input.zones,
       hand: removeCoin(input.zones.hand, coin),
       placed: {
         ...input.zones.placed,
-        [slotId]: [...(input.zones.placed[slotId] ?? []), coin]
+        [slotId]: commitsReservation ? [] : draft
       }
     }
   };
@@ -569,7 +583,24 @@ const unplaceCoin = (input: CombatState, coin: CoinUid): StepResult => {
       break;
     }
   }
-  if (found === undefined) return { ok: false, error: 'coin is not placed' };
+  if (found === undefined) {
+    const reservation = input.flipReservations.find((candidate) => candidate.coinUids.includes(coin));
+    if (reservation === undefined) return { ok: false, error: 'coin is not placed' };
+    const remaining = removeCoin(reservation.coinUids, coin);
+    return {
+      ok: true,
+      state: {
+        ...input,
+        flipReservations: input.flipReservations.filter((candidate) => candidate.id !== reservation.id),
+        zones: {
+          ...input.zones,
+          placed: { ...input.zones.placed, [reservation.slot]: [...(input.zones.placed[reservation.slot] ?? []), ...remaining] },
+          hand: [...input.zones.hand, coin]
+        }
+      },
+      events: [{ type: 'coinUnplaced', coin, slot: reservation.slot }]
+    };
+  }
   return {
     ok: true,
     state: {
@@ -586,7 +617,7 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
   const usableSkillSlotsAtTurnEnd = input.slots.flatMap((_, index) =>
     isSlotUsableNow(input, db, slot(index)) ? [slot(index)] : []
   );
-  const returned = Object.values(state.zones.placed).flat();
+  const returned = [...Object.values(state.zones.placed).flat(), ...state.flipReservations.flatMap((reservation) => reservation.coinUids)];
   const pendingPlacedReturns = Object.fromEntries(
     Object.entries(state.zones.placed)
       .filter(([, coins]) => coins.length > 0)
@@ -612,7 +643,8 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
         })
       )
     },
-    zones: { ...state.zones, hand: [...state.zones.hand, ...returned], placed }
+    zones: { ...state.zones, hand: [...state.zones.hand, ...returned], placed },
+    flipReservations: []
   };
   const passiveMechanics = new Set(
     state.passives.flatMap((id) => {
@@ -768,11 +800,20 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
       if (isSkillCommandSealed(input, cmd.slot)) return { ok: false, error: 'skill is sealed' };
       const skill = db.skills[String(slotState.skillId)];
       if (skill === undefined || skill.type !== 'flip') return { ok: false, error: 'slot is not a flip skill' };
+      const reservation = cmd.reservationId === undefined
+        ? input.flipReservations.filter((candidate) => candidate.slot === cmd.slot).length === 1
+          ? input.flipReservations.find((candidate) => candidate.slot === cmd.slot)
+          : undefined
+        : input.flipReservations.find((candidate) => candidate.id === cmd.reservationId && candidate.slot === cmd.slot);
+      if (cmd.reservationId !== undefined && reservation === undefined) return { ok: false, error: 'flip reservation does not exist' };
+      if (cmd.reservationId === undefined && input.flipReservations.some((candidate) => candidate.slot === cmd.slot) && reservation === undefined) {
+        return { ok: false, error: 'flip reservation id is required' };
+      }
       if (skill.targetType === 'single-enemy') {
         const targetError = validateSingleEnemyTarget(input, cmd.target);
         if (targetError !== undefined) return targetError;
       }
-      if (flipSkillRequiresEnemyTarget(input, cmd.slot, skill, db)) {
+      if (flipSkillRequiresEnemyTarget(input, cmd.slot, skill, db, reservation?.coinUids)) {
         const targetError = validateSingleEnemyTarget(input, cmd.target);
         if (targetError !== undefined) return targetError;
       }
@@ -787,7 +828,7 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
           desiredCoin: cmd.desiredCoin,
           chosenEquipment: cmd.chosenEquipment,
           chosenSummon: cmd.chosenSummon
-        })
+        }, reservation?.id)
       };
     }
     if (cmd.type === 'useConsumeSkill') {
@@ -817,10 +858,15 @@ export const step = (state: CombatState, cmd: Command, db: ContentDb): StepResul
   }
 };
 
-export const zoneCoinCount = (zones: CombatZones, custody: readonly { coins: readonly CoinUid[] }[] = []): number =>
+export const zoneCoinCount = (
+  zones: CombatZones,
+  custody: readonly { coins: readonly CoinUid[] }[] = [],
+  reservations: readonly { coinUids: readonly CoinUid[] }[] = []
+): number =>
   zones.draw.length +
   zones.hand.length +
   Object.values(zones.placed).reduce((sum, coins) => sum + coins.length, 0) +
   zones.discard.length +
   zones.exhausted.length +
+  reservations.reduce((sum, reservation) => sum + reservation.coinUids.length, 0) +
   custody.reduce((sum, entry) => sum + entry.coins.length, 0);

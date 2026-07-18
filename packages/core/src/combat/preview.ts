@@ -183,6 +183,7 @@ export const previewFlip = (
   state: CombatState,
   slot: SlotId,
   db: ContentDb,
+  reservationId?: string,
 ): PreviewFlipResult => {
   const slotState = state.slots[Number(slot)];
   if (slotState === undefined) throw new Error("slot does not exist");
@@ -190,7 +191,13 @@ export const previewFlip = (
   if (skill === undefined || skill.type !== "flip")
     throw new Error("slot is not a flip skill");
 
-  const placed = state.zones.placed[slot] ?? [];
+  const reservations = state.flipReservations.filter((reservation) => reservation.slot === slot);
+  const reservation = reservationId === undefined
+    ? reservations.length === 1 ? reservations[0] : undefined
+    : reservations.find((candidate) => candidate.id === reservationId);
+  if (reservationId !== undefined && reservation === undefined) throw new Error('flip reservation does not exist');
+  if (reservationId === undefined && reservations.length > 1) throw new Error('flip reservation id is required');
+  const placed = reservation?.coinUids ?? state.zones.placed[slot] ?? [];
   const character = db.characters[String(state.characterId)];
   const canRemiseRepeat =
     character?.trait.mechanic === "remise" &&
@@ -224,6 +231,8 @@ export const previewFlip = (
       firstLivingTarget >= 0 ? firstLivingTarget : undefined,
       db,
       chosen,
+      undefined,
+      reservation?.id,
     );
     return { faces: branch.faces, probability: branch.probability, ...sumBranch(result.events) };
   });

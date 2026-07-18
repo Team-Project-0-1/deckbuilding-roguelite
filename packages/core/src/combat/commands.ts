@@ -1,5 +1,5 @@
 import type { ContentDb, EffectAtom, FlipSkillDef, SkillDef } from '../content-types';
-import { effectiveElements, flipSkillEffects, isSuccessLadderFlipSkill } from '../content-types';
+import { effectiveElements, flipSkillEffects, isRepeatReservationEligible, isSuccessLadderFlipSkill } from '../content-types';
 import type { CoinDefId, CoinUid, EquipmentDefId, SlotId } from '../ids';
 import { consumeRequirementFor } from './consume-requirement';
 import { isSkillCommandSealed, MAX_PRESERVED_COINS } from './state';
@@ -11,6 +11,7 @@ export type Command =
   | {
       type: 'useFlipSkill';
       slot: SlotId;
+      reservationId?: string;
       target?: number;
       chosen?: CoinUid[];
       desiredCoin?: CoinDefId;
@@ -38,9 +39,15 @@ const isHostileProc = (atom: EffectAtom): boolean =>
  * 자기/무대상 플립 스킬에 공격형 속성 코인이 장전되면 적용할 적을 명시해야 한다.
  * 플립 전에는 면을 알 수 없으므로 어느 면이든 적대 proc이 있으면 대상을 요구한다.
  */
-export const flipSkillRequiresEnemyTarget = (state: CombatState, slot: SlotId, skill: FlipSkillDef, db: ContentDb): boolean => {
+export const flipSkillRequiresEnemyTarget = (
+  state: CombatState,
+  slot: SlotId,
+  skill: FlipSkillDef,
+  db: ContentDb,
+  coinUids: readonly import('../ids').CoinUid[] = state.zones.placed[slot] ?? []
+): boolean => {
   if (skill.targetType === 'single-enemy') return false;
-  for (const coinUid of state.zones.placed[slot] ?? []) {
+  for (const coinUid of coinUids) {
     const instance = state.coins[Number(coinUid)];
     if (instance === undefined) continue;
     for (const element of effectiveElements(instance, db)) {
@@ -54,9 +61,15 @@ export const flipSkillRequiresEnemyTarget = (state: CombatState, slot: SlotId, s
   return false;
 };
 
-const targetsForSkill = (state: CombatState, skill: ContentDb['skills'][string], slot: SlotId, db: ContentDb): (number | undefined)[] => {
+const targetsForSkill = (
+  state: CombatState,
+  skill: ContentDb['skills'][string],
+  slot: SlotId,
+  db: ContentDb,
+  coinUids?: readonly import('../ids').CoinUid[]
+): (number | undefined)[] => {
   if (skill.targetType === 'single-enemy') return livingEnemyTargets(state);
-  if (skill.type === 'flip' && flipSkillRequiresEnemyTarget(state, slot, skill, db)) {
+  if (skill.type === 'flip' && flipSkillRequiresEnemyTarget(state, slot, skill, db, coinUids)) {
     return livingEnemyTargets(state);
   }
   return [undefined];
@@ -144,7 +157,11 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
   // 턴 종료 시 장전 동전도 먼저 손으로 돌아온다. 합법 명령 제안과 reducer가
   // 같은 후보 집합을 보도록 해야, 장전된 기존 보존 동전이 있는 상태에서
   // 자동 보존이 용량을 초과하지 않는다.
-  const endTurnHand = [...state.zones.hand, ...Object.values(state.zones.placed).flat()];
+  const endTurnHand = [
+    ...state.zones.hand,
+    ...Object.values(state.zones.placed).flat(),
+    ...state.flipReservations.flatMap((reservation) => reservation.coinUids)
+  ];
   const alreadyPreserved = endTurnHand.filter((coin) => state.coins[Number(coin)]?.preserved === true);
   const autoPreserve = [
     ...alreadyPreserved,
@@ -174,7 +191,8 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
     if (unavailableDiscardCoin) continue;
 
     if (skill.type === 'flip') {
-      if ((state.zones.placed[slot]?.length ?? 0) === skill.cost) {
+      const reservations = state.flipReservations.filter((reservation) => reservation.slot === slot);
+      for (const reservation of reservations) {
         // P6 D6 — 명령 스킬은 소환이 있어야 합법 (없으면 낭비 사용 제안 안 함)
         if (skillRequiresSummonChoice(skill) && state.summons.length === 0) continue;
         const chosen = skillRequiresCoinChoice(skill) ? suggestedChosen(state, db, skill) : undefined;
@@ -183,9 +201,9 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
           desiredCoinOptions(skill)[0];
         const chosenEquipment = skillRequiresEquipmentChoice(skill) ? (Object.keys(db.equipment ?? {}).sort()[0] as EquipmentDefId | undefined) : undefined;
         const summonChoices = skillRequiresSummonChoice(skill) ? state.summons.map((summon) => summon.uid) : [undefined];
-        for (const target of targetsForSkill(state, skill, slot, db)) {
+        for (const target of targetsForSkill(state, skill, slot, db, reservation.coinUids)) {
           for (const chosenSummon of summonChoices) {
-            const command: Command = { type: 'useFlipSkill', slot, target };
+            const command: Command = { type: 'useFlipSkill', slot, reservationId: reservation.id, target };
             if (chosen !== undefined) command.chosen = chosen;
             if (desiredCoin !== undefined) command.desiredCoin = desiredCoin;
             if (chosenEquipment !== undefined) command.chosenEquipment = chosenEquipment;
@@ -194,7 +212,8 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
           }
         }
       }
-      if ((state.zones.placed[slot]?.length ?? 0) < skill.cost) {
+      const limited = !isRepeatReservationEligible(skill);
+      if ((state.zones.placed[slot]?.length ?? 0) < skill.cost && (!limited || reservations.length === 0)) {
         for (const coin of state.zones.hand) {
           if (coinSatisfiesFlipRequirement(state, db, skill, coin)) commands.push({ type: 'placeCoin', coin, slot });
         }
@@ -240,6 +259,9 @@ export const legalCommands = (state: CombatState, db: ContentDb): Command[] => {
   for (const [key, coins] of Object.entries(state.zones.placed)) {
     void key;
     for (const coin of coins) commands.push({ type: 'unplaceCoin', coin });
+  }
+  for (const reservation of state.flipReservations) {
+    for (const coin of reservation.coinUids) commands.push({ type: 'unplaceCoin', coin });
   }
 
   return commands;

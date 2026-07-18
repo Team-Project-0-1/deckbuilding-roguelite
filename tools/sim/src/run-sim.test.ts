@@ -6,6 +6,7 @@ import {
   preferredCoinReward,
   resolveBuildPolicy,
   simulateRun,
+  simulatePolicyRun,
 } from './run-sim';
 
 const coin = (value: string): CoinDefId => value as CoinDefId;
@@ -61,7 +62,7 @@ describe('M5 full-run simulator', () => {
       seed: '42',
       result: 'defeat',
       combatsCompleted: 2,
-      turnsPerCombat: [7, 2], // v1.2 화염 기본기 + EV 인식 정책 이관 후 전환기 결정론 골든
+      turnsPerCombat: [6, 2], // Completed reservations are immediately usable by the simulator policy.
       carriedHp: 0,
       finalBag: [
         'basic',
@@ -110,6 +111,21 @@ describe('build policy resolution regressions', () => {
       // 시드가 조기 패배하면 회귀 검증력이 없다 — 시드를 바꿔야 한다
       expect.fail(`seed SORCERER-BUILD-REG finished only ${summary.combatsCompleted} combats — pick a longer-surviving seed`);
     }
+  });
+});
+
+describe('D22 simulator command budget', () => {
+  it('allows the long turtle Gatekeeper episode to reach its terminal outcome', () => {
+    const simulation = simulatePolicyRun({
+      baseSeed: '1',
+      runSeed: 'm6:3075543026:394851719:1604709081:787312973',
+      episodeId: 'episode-00000024-60dee827',
+      episodeIndex: 24,
+      policyId: 'turtle',
+    });
+
+    expect(simulation.trace.result).toBe('defeat');
+    expect(simulation.trace.combats[0]?.turns).toHaveLength(144);
   });
 });
 

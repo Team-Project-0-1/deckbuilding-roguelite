@@ -337,6 +337,9 @@ const progressFingerprint = (state: CombatState): string =>
     Object.values(state.zones.placed)
       .map((coins) => coins.length)
       .join(","),
+    state.flipReservations
+      .map((reservation) => `${String(reservation.slot)}:${reservation.coinUids.length}`)
+      .join(","),
     state.slots.map((slot) => slot.cooldownRemaining).join(""),
     state.turnTriggers.length,
   ].join("|");

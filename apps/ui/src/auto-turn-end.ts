@@ -1,25 +1,19 @@
-import type { SlotId } from "@game/core";
+import type { FlipReservation, SlotId } from "@game/core";
 
-export type ExecutionOrder = SlotId[];
+/**
+ * Keep the UI boundary structural: core reservations can be passed directly,
+ * while slot remains presentation metadata rather than execution identity.
+ */
+export type ExecutionReservation = Pick<
+  FlipReservation,
+  "id" | "slot" | "coinUids"
+>;
 
-export type ExecutionSlotClassification = "loaded" | "partial" | "not-queued";
-
-export interface ExecutionSlotLoad {
-  slot: SlotId;
-  loadedCount: number;
-  requiredCount: number;
-  queueable: boolean;
-}
-
-export interface ClassifiedExecutionSlot extends ExecutionSlotLoad {
-  classification: ExecutionSlotClassification;
-}
+export type ExecutionOrder = string[];
 
 export interface ExecutionQueueSnapshot {
   order: ExecutionOrder;
-  loaded: ClassifiedExecutionSlot[];
-  partial: ClassifiedExecutionSlot[];
-  notQueued: ClassifiedExecutionSlot[];
+  loaded: ExecutionReservation[];
 }
 
 export type AutoTurnEndPhase =
@@ -38,6 +32,8 @@ export type ExecutionChoice =
   | "enemy-target";
 
 export interface ActiveExecution {
+  reservationId: string;
+  /** Presentation metadata copied from the reservation at activation time. */
   slot: SlotId;
   token: string;
 }
@@ -46,127 +42,104 @@ export interface AutoTurnEndState {
   phase: AutoTurnEndPhase;
   workflowId: string | null;
   order: ExecutionOrder;
-  pending: SlotId[];
-  completed: SlotId[];
+  pending: string[];
+  completed: string[];
+  blocked: string[];
+  cancelled: string[];
+  reservations: Record<string, Pick<ExecutionReservation, "slot">>;
   active: ActiveExecution | null;
   choice: ExecutionChoice | null;
   blockedReason: string | null;
   nextTokenOrdinal: number;
 }
 
-const uniqueSlots = (slots: readonly SlotId[]): SlotId[] => {
-  const seen = new Set<number>();
-  const unique: SlotId[] = [];
-  for (const slot of slots) {
-    const key = Number(slot);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(slot);
-  }
-  return unique;
-};
+const uniqueReservationIds = (ids: readonly string[]): string[] => [
+  ...new Set(ids),
+];
 
-const uniqueLoads = (
-  loads: readonly ExecutionSlotLoad[],
-): ExecutionSlotLoad[] => {
-  const seen = new Set<number>();
-  const unique: ExecutionSlotLoad[] = [];
-  for (const load of loads) {
-    const key = Number(load.slot);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(load);
-  }
-  return unique;
-};
-
-export const classifyExecutionSlot = (
-  load: ExecutionSlotLoad,
-): ExecutionSlotClassification => {
-  if (!load.queueable || load.requiredCount <= 0 || load.loadedCount <= 0)
-    return "not-queued";
-  return load.loadedCount >= load.requiredCount ? "loaded" : "partial";
+const uniqueReservations = (
+  reservations: readonly ExecutionReservation[],
+): ExecutionReservation[] => {
+  const seen = new Set<string>();
+  return reservations.filter((reservation) => {
+    if (seen.has(reservation.id)) return false;
+    seen.add(reservation.id);
+    return true;
+  });
 };
 
 export const reconcileExecutionOrder = (
-  currentOrder: readonly SlotId[],
-  loads: readonly ExecutionSlotLoad[],
+  currentOrder: readonly string[],
+  reservations: readonly ExecutionReservation[],
 ): ExecutionOrder => {
-  const loadedSlots = uniqueLoads(loads)
-    .filter((load) => classifyExecutionSlot(load) === "loaded")
-    .map((load) => load.slot);
-  const loadedKeys = new Set(loadedSlots.map(Number));
-  const retained = uniqueSlots(currentOrder).filter((slot) =>
-    loadedKeys.has(Number(slot)),
+  const reservationIds = uniqueReservations(reservations).map(
+    (reservation) => reservation.id,
   );
-  const retainedKeys = new Set(retained.map(Number));
+  const available = new Set(reservationIds);
+  const retained = uniqueReservationIds(currentOrder).filter((id) =>
+    available.has(id),
+  );
+  const retainedIds = new Set(retained);
   return [
     ...retained,
-    ...loadedSlots.filter((slot) => !retainedKeys.has(Number(slot))),
+    ...reservationIds.filter((id) => !retainedIds.has(id)),
   ];
 };
 
 export const moveExecutionSlot = (
-  currentOrder: readonly SlotId[],
-  target: SlotId,
+  currentOrder: readonly string[],
+  reservationId: string,
   destinationIndex: number,
 ): ExecutionOrder => {
-  const order = uniqueSlots(currentOrder);
-  const sourceIndex = order.findIndex((slot) => slot === target);
+  const order = uniqueReservationIds(currentOrder);
+  const sourceIndex = order.indexOf(reservationId);
   if (sourceIndex < 0) return order;
   const [removed] = order.splice(sourceIndex, 1);
   if (removed === undefined) return order;
-  const boundedIndex = Math.max(0, Math.min(destinationIndex, order.length));
-  order.splice(boundedIndex, 0, removed);
+  order.splice(Math.max(0, Math.min(destinationIndex, order.length)), 0, removed);
   return order;
 };
 
 export const swapExecutionSlots = (
-  currentOrder: readonly SlotId[],
-  left: SlotId,
-  right: SlotId,
+  currentOrder: readonly string[],
+  left: string,
+  right: string,
 ): ExecutionOrder => {
-  const order = uniqueSlots(currentOrder);
-  const leftIndex = order.findIndex((slot) => slot === left);
-  const rightIndex = order.findIndex((slot) => slot === right);
+  const order = uniqueReservationIds(currentOrder);
+  const leftIndex = order.indexOf(left);
+  const rightIndex = order.indexOf(right);
   if (leftIndex < 0 || rightIndex < 0 || leftIndex === rightIndex) return order;
   [order[leftIndex], order[rightIndex]] = [order[rightIndex]!, order[leftIndex]!];
   return order;
 };
 
 export const executionQueueSnapshot = (
-  currentOrder: readonly SlotId[],
-  loads: readonly ExecutionSlotLoad[],
+  currentOrder: readonly string[],
+  reservations: readonly ExecutionReservation[],
 ): ExecutionQueueSnapshot => {
-  const classified = uniqueLoads(loads).map(
-    (load): ClassifiedExecutionSlot => ({
-      ...load,
-      classification: classifyExecutionSlot(load),
-    }),
+  const availableReservations = uniqueReservations(reservations);
+  const order = reconcileExecutionOrder(currentOrder, availableReservations);
+  const byId = new Map(
+    availableReservations.map((reservation) => [reservation.id, reservation]),
   );
-  const order = reconcileExecutionOrder(currentOrder, classified);
-  const bySlot = new Map(classified.map((entry) => [Number(entry.slot), entry]));
   return {
     order,
-    loaded: order.flatMap((slot) => {
-      const entry = bySlot.get(Number(slot));
-      return entry === undefined ? [] : [entry];
+    loaded: order.flatMap((id) => {
+      const reservation = byId.get(id);
+      return reservation === undefined ? [] : [reservation];
     }),
-    partial: classified.filter((entry) => entry.classification === "partial"),
-    notQueued: classified.filter(
-      (entry) => entry.classification === "not-queued",
-    ),
   };
 };
 
-export const createIdleAutoTurnEnd = (
-  order: readonly SlotId[] = [],
-): AutoTurnEndState => ({
+export const createIdleAutoTurnEnd = (): AutoTurnEndState => ({
   phase: "idle",
   workflowId: null,
-  order: uniqueSlots(order),
+  order: [],
   pending: [],
   completed: [],
+  blocked: [],
+  cancelled: [],
+  reservations: {},
   active: null,
   choice: null,
   blockedReason: null,
@@ -175,19 +148,22 @@ export const createIdleAutoTurnEnd = (
 
 export const beginAutoTurnEnd = (
   workflowId: string,
-  order: readonly SlotId[],
+  reservations: readonly ExecutionReservation[],
 ): AutoTurnEndState => {
-  const normalizedOrder = uniqueSlots(order);
+  const queuedReservations = uniqueReservations(reservations);
+  const order = queuedReservations.map((reservation) => reservation.id);
   return {
-    phase: normalizedOrder.length === 0 ? "preserving" : "running",
+    ...createIdleAutoTurnEnd(),
+    phase: order.length === 0 ? "preserving" : "running",
     workflowId,
-    order: normalizedOrder,
-    pending: [...normalizedOrder],
-    completed: [],
-    active: null,
-    choice: null,
-    blockedReason: null,
-    nextTokenOrdinal: 0,
+    order,
+    pending: [...order],
+    reservations: Object.fromEntries(
+      queuedReservations.map((reservation) => [
+        reservation.id,
+        { slot: reservation.slot },
+      ]),
+    ),
   };
 };
 
@@ -195,14 +171,19 @@ export const activateNextExecution = (
   state: AutoTurnEndState,
 ): AutoTurnEndState => {
   if (state.phase !== "running" || state.active !== null) return state;
-  const next = state.pending[0];
-  if (next === undefined) return { ...state, phase: "preserving" };
+  const reservationId = state.pending[0];
+  if (reservationId === undefined) return { ...state, phase: "preserving" };
+  const reservation = state.reservations[reservationId];
+  if (reservation === undefined) {
+    return { ...state, pending: state.pending.slice(1) };
+  }
   const ordinal = state.nextTokenOrdinal;
   return {
     ...state,
     active: {
-      slot: next,
-      token: `${state.workflowId ?? "workflow"}:${ordinal}:${Number(next)}`,
+      reservationId,
+      slot: reservation.slot,
+      token: `${state.workflowId ?? "workflow"}:${ordinal}:${reservationId}`,
     },
     nextTokenOrdinal: ordinal + 1,
   };
@@ -212,15 +193,10 @@ export const pauseForExecutionChoice = (
   state: AutoTurnEndState,
   token: string,
   choice: ExecutionChoice,
-): AutoTurnEndState => {
-  if (
-    state.phase !== "running" ||
-    state.active === null ||
-    state.active.token !== token
-  )
-    return state;
-  return { ...state, phase: "choosing", choice };
-};
+): AutoTurnEndState =>
+  state.phase === "running" && state.active?.token === token
+    ? { ...state, phase: "choosing", choice }
+    : state;
 
 export const resumeExecutionChoice = (
   state: AutoTurnEndState,
@@ -234,18 +210,15 @@ export const completeActiveExecution = (
   state: AutoTurnEndState,
   token: string,
 ): AutoTurnEndState => {
-  if (
-    state.phase !== "running" ||
-    state.active === null ||
-    state.active.token !== token
-  )
-    return state;
-  const pending = state.pending.slice(1);
+  if (state.phase !== "running" || state.active?.token !== token) return state;
+  const { reservationId } = state.active;
+  const pending = state.pending.filter((id) => id !== reservationId);
   return {
     ...state,
     phase: pending.length === 0 ? "preserving" : "running",
     pending,
-    completed: [...state.completed, state.active.slot],
+    completed: uniqueReservationIds([...state.completed, reservationId]),
+    blocked: state.blocked.filter((id) => id !== reservationId),
     active: null,
     choice: null,
   };
@@ -258,13 +231,17 @@ export const blockActiveExecution = (
 ): AutoTurnEndState => {
   if (
     (state.phase !== "running" && state.phase !== "choosing") ||
-    state.active === null ||
-    state.active.token !== token
-  )
+    state.active?.token !== token
+  ) {
     return state;
+  }
   return {
     ...state,
     phase: "blocked",
+    blocked: uniqueReservationIds([
+      ...state.blocked,
+      state.active.reservationId,
+    ]),
     choice: null,
     blockedReason: reason,
   };
@@ -272,15 +249,34 @@ export const blockActiveExecution = (
 
 export const retryBlockedExecution = (
   state: AutoTurnEndState,
-): AutoTurnEndState =>
-  state.phase === "blocked"
-    ? {
-        ...state,
-        phase: "running",
-        active: null,
-        blockedReason: null,
-      }
-    : state;
+): AutoTurnEndState => {
+  if (state.phase !== "blocked" || state.active === null) return state;
+  const { reservationId } = state.active;
+  return {
+    ...state,
+    phase: "running",
+    active: null,
+    blocked: state.blocked.filter((id) => id !== reservationId),
+    blockedReason: null,
+  };
+};
+
+const clearRemainingReservations = (
+  state: AutoTurnEndState,
+  phase: Extract<AutoTurnEndPhase, "cancelled" | "preserving">,
+): AutoTurnEndState => {
+  const remaining = state.pending.filter((id) => !state.completed.includes(id));
+  return {
+    ...state,
+    phase,
+    pending: [],
+    blocked: [],
+    cancelled: uniqueReservationIds([...state.cancelled, ...remaining]),
+    active: null,
+    choice: null,
+    blockedReason: null,
+  };
+};
 
 export const cancelAutoTurnEnd = (
   state: AutoTurnEndState,
@@ -289,29 +285,19 @@ export const cancelAutoTurnEnd = (
     state.phase === "idle" ||
     state.phase === "cancelled" ||
     state.phase === "finished"
-  )
+  ) {
     return state;
-  return {
-    ...state,
-    phase: "cancelled",
-    active: null,
-    choice: null,
-    blockedReason: null,
-  };
+  }
+  return clearRemainingReservations(state, "cancelled");
 };
 
+/** Used by abort and victory paths: no pending reservation survives the transition. */
 export const abandonPendingExecutions = (
   state: AutoTurnEndState,
-): AutoTurnEndState => {
-  if (state.phase !== "blocked" && state.phase !== "running") return state;
-  return {
-    ...state,
-    phase: "preserving",
-    active: null,
-    choice: null,
-    blockedReason: null,
-  };
-};
+): AutoTurnEndState =>
+  state.phase === "blocked" || state.phase === "running"
+    ? clearRemainingReservations(state, "preserving")
+    : state;
 
 export const finishAutoTurnEnd = (
   state: AutoTurnEndState,

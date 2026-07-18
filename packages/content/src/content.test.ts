@@ -64,15 +64,15 @@ const withHandDefs = (state: CombatState, defs: readonly string[]): CombatState 
 };
 
 describe('P9 latest design sync', () => {
-  it('ships the confirmed neutral basics as one-success ladders with exact upgrades and no legacy fields', () => {
+  it('ships the confirmed neutral basics with failure floors, exact upgrades, and no legacy fields', () => {
     expect(skills.slash).toMatchObject({
       name: '공격',
       type: 'flip',
       cooldown: 0,
       cost: 1,
       successFace: 'heads',
-      successLadder: [[], [{ kind: 'damage', amount: 4 }]],
-      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 2 } }
+      successLadder: [[{ kind: 'damage', amount: 2 }], [{ kind: 'damage', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     expect(skills.guard).toMatchObject({
       name: '방어',
@@ -80,16 +80,16 @@ describe('P9 latest design sync', () => {
       cooldown: 0,
       cost: 1,
       successFace: 'tails',
-      successLadder: [[], [{ kind: 'block', amount: 4 }]],
-      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 2 } }
+      successLadder: [[{ kind: 'block', amount: 2 }], [{ kind: 'block', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     for (const basic of [skills.slash, skills.guard]) {
       expect(Object.hasOwn(basic, 'base')).toBe(false);
       expect(Object.hasOwn(basic, 'heads')).toBe(false);
       expect(Object.hasOwn(basic, 'tails')).toBe(false);
     }
-    expect((deriveUpgradedSkill(skills.slash) as FlipSkillDef).successLadder).toEqual([[], [{ kind: 'damage', amount: 6 }]]);
-    expect((deriveUpgradedSkill(skills.guard) as FlipSkillDef).successLadder).toEqual([[], [{ kind: 'block', amount: 6 }]]);
+    expect((deriveUpgradedSkill(skills.slash) as FlipSkillDef).successLadder).toEqual([[{ kind: 'damage', amount: 2 }], [{ kind: 'damage', amount: 5 }]]);
+    expect((deriveUpgradedSkill(skills.guard) as FlipSkillDef).successLadder).toEqual([[{ kind: 'block', amount: 2 }], [{ kind: 'block', amount: 5 }]]);
   });
 
   it('keeps end turn legal when an element-heavy hand cannot fund neutral ladder basics', () => {
@@ -591,7 +591,7 @@ describe('P11 Cold Rogue design sync', () => {
     expect(used.state.zones.discard).toContain(kept);
   });
 
-  it('keeps a previously preserved placed coin within the end-turn capacity', () => {
+  it('keeps a previously preserved reserved coin within the end-turn capacity', () => {
     let state = coldCombat('p11-preserved-placed', ['slash']);
     const kept = state.zones.hand[0]!;
     state = {
@@ -601,13 +601,21 @@ describe('P11 Cold Rogue design sync', () => {
     };
     const placed = step(state, { type: 'placeCoin', coin: kept, slot: slotId(0) }, contentDb);
     if (!placed.ok) throw new Error(placed.error);
+    expect(placed.state.flipReservations).toContainEqual(expect.objectContaining({ coinUids: [kept] }));
     const command = legalCommands(placed.state, contentDb).find((candidate) => candidate.type === 'endTurn');
     expect(command).toMatchObject({ type: 'endTurn' });
     if (command?.type !== 'endTurn') throw new Error('missing end-turn command');
     expect(command.preserve).toContain(kept);
     expect(command.preserve).toHaveLength(3);
     const ended = step(placed.state, command, contentDb);
-    expect(ended.ok).toBe(true);
+    expect(ended).toMatchObject({ ok: true });
+    if (!ended.ok) throw new Error(ended.error);
+    expect(ended.state.zones.hand).toContain(kept);
+    expect(ended.state.coins[Number(kept)]?.preserved).toBe(true);
+    const preserved = ended.events.find((event) => event.type === 'coinsPreserved');
+    expect(preserved).toMatchObject({ type: 'coinsPreserved', coins: expect.arrayContaining([kept]) });
+    if (preserved?.type !== 'coinsPreserved') throw new Error('missing preservation event');
+    expect(preserved.coins).toHaveLength(3);
   });
 
   it('draws only the desired available type and no-ops when unavailable', () => {
@@ -1774,7 +1782,7 @@ describe('M5 shipped content', () => {
   // P7 D4 — mana 양면: 앞 방어 1 / 뒤 방어 2, 스킬 대상과 무관하게 항상 플레이어
   it('mana procs grant player block on both faces in attack, defense, and self-target contexts', () => {
     const cases = [
-      // v1.2 guard는 앞면 실패(마나 proc 1만), 뒷면 성공 방어 4 + 마나 proc 2 = 6.
+      // D22 guard는 앞면 실패 방어 2 + 마나 proc 1, 뒷면 성공 방어 4 + 마나 proc 2 = 6.
       {
         skill: 'slash',
         face: 'heads',
@@ -1786,7 +1794,7 @@ describe('M5 shipped content', () => {
         skill: 'guard',
         face: 'heads',
         procBlock: 1,
-        expectedBlock: 1,
+        expectedBlock: 3,
         target: undefined
       },
       {
@@ -2030,25 +2038,27 @@ describe('P9 shipped content goldens (1.3.0-p9)', () => {
     });
   });
 
-  it('ships every v1.2 one-coin basic as a zero-floor success ladder', () => {
+  it('ships every v1.2 one-coin basic with the D22 failure floor', () => {
     expect(contentDb.skills.slash).toMatchObject({
       cooldown: 0,
       cost: 1,
       successFace: 'heads',
-      successLadder: [[], [{ kind: 'damage', amount: 4 }]]
+      successLadder: [[{ kind: 'damage', amount: 2 }], [{ kind: 'damage', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     expect(contentDb.skills.guard).toMatchObject({
       cooldown: 0,
       cost: 1,
       successFace: 'tails',
-      successLadder: [[], [{ kind: 'block', amount: 4 }]]
+      successLadder: [[{ kind: 'block', amount: 2 }], [{ kind: 'block', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     expect(contentDb.skills.jab).toMatchObject({
       cooldown: 0,
       cost: 1,
       successFace: 'heads',
-      successLadder: [[], [{ kind: 'damage', amount: 4 }]],
-      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 2 } }
+      successLadder: [[{ kind: 'damage', amount: 2 }], [{ kind: 'damage', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     expect(contentDb.skills.jab).not.toHaveProperty('base');
     expect(contentDb.skills.jab).not.toHaveProperty('heads');
@@ -2056,16 +2066,16 @@ describe('P9 shipped content goldens (1.3.0-p9)', () => {
       cooldown: 0,
       cost: 1,
       successFace: 'tails',
-      successLadder: [[], [{ kind: 'block', amount: 4 }]],
-      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 2 } }
+      successLadder: [[{ kind: 'block', amount: 2 }], [{ kind: 'block', amount: 4 }]],
+      upgrade: { patch: { kind: 'ladderAmount', tier: 1, index: 0, delta: 1 } }
     });
     expect(contentDb.skills['fist-guard']).not.toHaveProperty('base');
     expect(contentDb.skills['fist-guard']).not.toHaveProperty('tails');
     expect((deriveUpgradedSkill(contentDb.skills.jab!) as FlipSkillDef).successLadder?.[1]).toEqual([
-      { kind: 'damage', amount: 6 }
+      { kind: 'damage', amount: 5 }
     ]);
     expect((deriveUpgradedSkill(contentDb.skills['fist-guard']!) as FlipSkillDef).successLadder?.[1]).toEqual([
-      { kind: 'block', amount: 6 }
+      { kind: 'block', amount: 5 }
     ]);
   });
 

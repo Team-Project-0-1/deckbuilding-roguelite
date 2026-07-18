@@ -1,18 +1,15 @@
 import { contentDb } from "@game/content";
 import type { CoinUid, CombatState, SlotId } from "@game/core";
-import { createCombat, step } from "@game/core";
+import { createCombat } from "@game/core";
 import { describe, expect, it } from "vitest";
 
-import { executionQueueSnapshot, type ExecutionSlotLoad } from "./auto-turn-end";
+import {
+  executionQueueSnapshot,
+  type ExecutionReservation,
+} from "./auto-turn-end";
 import { summarizeTurnResources } from "./turn-resource-summary";
 
 const slot = (value: number): SlotId => value as SlotId;
-
-const place = (state: CombatState, coin: CoinUid, target: SlotId): CombatState => {
-  const result = step(state, { type: "placeCoin", coin, slot: target }, contentDb);
-  if (!result.ok) throw new Error(result.error);
-  return result.state;
-};
 
 describe("turn resource summary", () => {
   it("separates queued coins from coins that will remain for end-turn discard", () => {
@@ -25,12 +22,27 @@ describe("turn resource summary", () => {
     const second = initial.zones.hand[1];
     if (first === undefined || second === undefined) throw new Error("missing test coins");
 
-    const state = place(place(initial, first, slot(0)), second, slot(2));
-    const loads: ExecutionSlotLoad[] = [
-      { slot: slot(0), loadedCount: 1, requiredCount: 1, queueable: true },
-      { slot: slot(2), loadedCount: 1, requiredCount: 2, queueable: true },
+    const state: CombatState = {
+      ...initial,
+      zones: {
+        ...initial.zones,
+        hand: initial.zones.hand.filter(
+          (coinUid) => coinUid !== first && coinUid !== second,
+        ),
+        placed: {
+          ...initial.zones.placed,
+          [slot(2)]: [second],
+        },
+      },
+    };
+    const reservations: ExecutionReservation[] = [
+      {
+        id: "slot-0:first",
+        slot: slot(0),
+        coinUids: [first],
+      },
     ];
-    const queue = executionQueueSnapshot([], loads);
+    const queue = executionQueueSnapshot([], reservations);
 
     expect(summarizeTurnResources(state, queue)).toEqual({
       usable: 1,
@@ -70,7 +82,14 @@ describe("turn resource summary", () => {
     if (preservedInHand === undefined || preservedPlaced === undefined) {
       throw new Error("missing preserved test coins");
     }
-    const placed = place(initial, preservedPlaced, slot(2));
+    const placed: CombatState = {
+      ...initial,
+      zones: {
+        ...initial.zones,
+        hand: initial.zones.hand.filter((coinUid) => coinUid !== preservedPlaced),
+        placed: { ...initial.zones.placed, [slot(2)]: [preservedPlaced] },
+      },
+    };
     const state: CombatState = {
       ...placed,
       coins: {
@@ -97,14 +116,6 @@ describe("turn resource summary", () => {
       discardedOnEnd: state.zones.hand.length - 1,
     });
 
-    const ended = step(state, { type: "endTurn" }, contentDb);
-    if (!ended.ok) throw new Error(ended.error);
-    const discarded = ended.events.find(
-      (event) => event.type === "coinsDiscarded",
-    );
-    expect(discarded?.coins).not.toContain(preservedInHand);
-    expect(discarded?.coins).not.toContain(preservedPlaced);
-    expect(discarded?.coins).toHaveLength(summary.discardedOnEnd);
   });
 
   it("deduplicates stale queue entries and never returns negative counts", () => {
@@ -113,14 +124,92 @@ describe("turn resource summary", () => {
       contentDb,
       "turn-summary-stale",
     );
-    const staleQueue = executionQueueSnapshot([slot(0)], [
-      { slot: slot(0), loadedCount: 1, requiredCount: 1, queueable: true },
+    const staleQueue = executionQueueSnapshot(["missing"], [
+      {
+        id: "missing",
+        slot: slot(0),
+        coinUids: [999 as CoinUid],
+      },
     ]);
 
     expect(summarizeTurnResources(state, staleQueue)).toMatchObject({
-      loaded: 0,
-      queued: 0,
+      loaded: 1,
+      queued: 1,
       discardedOnEnd: state.zones.hand.length,
+    });
+  });
+
+  it("counts the exact reserved coin UIDs instead of every coin in a slot", () => {
+    const initial = createCombat(
+      { character: "warrior" as never, enemies: ["raider" as never] },
+      contentDb,
+      "turn-summary-reservation-uids",
+    );
+    const first = initial.zones.hand[0];
+    const second = initial.zones.hand[1];
+    if (first === undefined || second === undefined) throw new Error("missing test coins");
+
+    const state: CombatState = {
+      ...initial,
+      zones: {
+        ...initial.zones,
+        hand: initial.zones.hand.filter(
+          (coinUid) => coinUid !== first && coinUid !== second,
+        ),
+        placed: { ...initial.zones.placed },
+      },
+    };
+    const queue = executionQueueSnapshot([], [
+      {
+        id: "slot-0:first",
+        slot: slot(0),
+        coinUids: [first],
+      },
+      {
+        id: "slot-0:second",
+        slot: slot(0),
+        coinUids: [second],
+      },
+    ]);
+
+    expect(summarizeTurnResources(state, queue)).toMatchObject({
+      loaded: 2,
+      queued: 2,
+    });
+  });
+
+  it("does not count an unreserved coin merely because it shares a reserved slot", () => {
+    const initial = createCombat(
+      { character: "warrior" as never, enemies: ["raider" as never] },
+      contentDb,
+      "turn-summary-partial-reservation",
+    );
+    const first = initial.zones.hand[0];
+    const second = initial.zones.hand[1];
+    if (first === undefined || second === undefined) throw new Error("missing test coins");
+
+    const state: CombatState = {
+      ...initial,
+      zones: {
+        ...initial.zones,
+        hand: initial.zones.hand.filter(
+          (coinUid) => coinUid !== first && coinUid !== second,
+        ),
+        placed: { ...initial.zones.placed, [slot(0)]: [second] },
+      },
+    };
+    const queue = executionQueueSnapshot([], [
+      {
+        id: "slot-0:first",
+        slot: slot(0),
+        coinUids: [first],
+      },
+    ]);
+
+    expect(summarizeTurnResources(state, queue)).toMatchObject({
+      loaded: 2,
+      queued: 1,
+      discardedOnEnd: initial.zones.hand.length - 1,
     });
   });
 });

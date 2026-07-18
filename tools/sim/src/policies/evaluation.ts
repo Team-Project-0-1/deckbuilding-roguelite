@@ -1,6 +1,7 @@
 import {
   legalCommands,
   previewFlip,
+  step,
   type Command,
   type CombatState,
   type ConsumeSkillDef,
@@ -53,6 +54,10 @@ const availableResourceCount = (state: CombatState): number =>
   Object.values(state.zones.placed).reduce(
     (total, coins) => total + coins.length,
     0,
+  ) +
+  state.flipReservations.reduce(
+    (total, reservation) => total + reservation.coinUids.length,
+    0,
   );
 
 const unusedResourcesAfter = (
@@ -98,6 +103,7 @@ const flipOutcome = (
     { ...previewState, rngImpl: undefined },
     command.slot,
     db,
+    command.reservationId,
   );
   const baseLoss = incomingHpLoss(state);
   const expectedSelfDamage = preview.branches.reduce(
@@ -109,7 +115,10 @@ const flipOutcome = (
       total + Math.min(baseLoss, branch.block) * branch.probability,
     0,
   );
-  const committed = state.zones.placed[command.slot]?.length ?? 0;
+  const committed =
+    state.flipReservations.find(
+      (reservation) => reservation.id === command.reservationId,
+    )?.coinUids.length ?? state.zones.placed[command.slot]?.length ?? 0;
 
   return {
     expectedDamage: preview.expected.damage,
@@ -268,20 +277,22 @@ const hasLegalCommandKey = (
 const applyPlannedPlacement = (
   state: CombatState,
   command: Extract<Command, { type: "placeCoin" }>,
-): CombatState => ({
-  ...state,
-  zones: {
-    ...state.zones,
-    hand: state.zones.hand.filter((coin) => coin !== command.coin),
-    placed: {
-      ...state.zones.placed,
-      [command.slot]: [
-        ...(state.zones.placed[command.slot] ?? []),
-        command.coin,
-      ],
-    },
-  },
-});
+  db: ContentDb,
+): CombatState | undefined => {
+  const result = step(state, command, db);
+  return result.ok ? result.state : undefined;
+};
+
+const newlyCreatedReservation = (
+  before: CombatState,
+  after: CombatState,
+  slot: Extract<Command, { type: "placeCoin" }>["slot"],
+) => {
+  const existingIds = new Set(before.flipReservations.map((reservation) => reservation.id));
+  return after.flipReservations.find(
+    (reservation) => reservation.slot === slot && !existingIds.has(reservation.id),
+  );
+};
 
 const combinations = <T>(values: readonly T[], count: number): T[][] => {
   if (count === 0) return [[]];
@@ -318,10 +329,24 @@ const placementOutcomes = (
   const skill =
     slotState === undefined ? undefined : db.skills[String(slotState.skillId)];
   if (skill === undefined || skill.type !== "flip") return [];
+  if (
+    state.flipReservations.some(
+      (reservation) => reservation.slot === command.slot,
+    )
+  ) {
+    return [];
+  }
 
-  const afterFirst = applyPlannedPlacement(state, command);
+  const afterFirst = applyPlannedPlacement(state, command, db);
+  if (afterFirst === undefined) return [];
+  const initialReservationIds = new Set(
+    state.flipReservations.map((reservation) => reservation.id),
+  );
+  const firstReservation = newlyCreatedReservation(state, afterFirst, command.slot);
   const remaining =
-    skill.cost - (afterFirst.zones.placed[command.slot]?.length ?? 0);
+    skill.cost -
+    (firstReservation?.coinUids.length ??
+      (afterFirst.zones.placed[command.slot]?.length ?? 0));
   if (remaining < 0) return [];
 
   const legalPlacements = stableCommandOrder(
@@ -341,12 +366,20 @@ const placementOutcomes = (
         valid = false;
         break;
       }
-      planned = applyPlannedPlacement(planned, placement);
+      const next = applyPlannedPlacement(planned, placement, db);
+      if (next === undefined) {
+        valid = false;
+        break;
+      }
+      planned = next;
     }
     if (!valid) continue;
     const use = legalCommands(planned, db).find(
       (candidate): candidate is Extract<Command, { type: "useFlipSkill" }> =>
-        candidate.type === "useFlipSkill" && candidate.slot === command.slot,
+        candidate.type === "useFlipSkill" &&
+        candidate.slot === command.slot &&
+        candidate.reservationId !== undefined &&
+        !initialReservationIds.has(candidate.reservationId),
     );
     if (use === undefined) continue;
     outcomes.push(flipOutcome(planned, use, db));
@@ -415,6 +448,31 @@ export const chooseEvaluatedCommand = (
     if (compare(outcome, selectedOutcome) > 0) {
       selected = command;
       selectedOutcome = outcome;
+    }
+  }
+  if (selected.type === "placeCoin") {
+    const loaded = commands.filter(
+      (command): command is Extract<Command, { type: "useFlipSkill" }> =>
+        command.type === "useFlipSkill",
+    );
+    const firstLoaded = loaded[0];
+    if (firstLoaded !== undefined) {
+      let selectedLoaded = firstLoaded;
+      let selectedLoadedOutcome = bestOutcome(
+        outcomesForCommand(state, firstLoaded, db, legalCommandKeys),
+        compare,
+      );
+      for (const command of loaded.slice(1)) {
+        const outcome = bestOutcome(
+          outcomesForCommand(state, command, db, legalCommandKeys),
+          compare,
+        );
+        if (compare(outcome, selectedLoadedOutcome) > 0) {
+          selectedLoaded = command;
+          selectedLoadedOutcome = outcome;
+        }
+      }
+      return selectedLoaded;
     }
   }
   return selected;

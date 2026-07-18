@@ -159,7 +159,7 @@ describe('furnace chooseBasicInHand', () => {
     const first = legalCommands(state, testDb()).filter((command) => command.type === 'useFlipSkill');
     const second = legalCommands(state, testDb()).filter((command) => command.type === 'useFlipSkill');
 
-    expect(first).toEqual([{ type: 'useFlipSkill', slot: slot(0), target: 0, chosen: [expected] }]);
+    expect(first).toEqual([{ type: 'useFlipSkill', slot: slot(0), reservationId: state.flipReservations[0]!.id, target: 0, chosen: [expected] }]);
     expect(second).toEqual(first);
   });
 

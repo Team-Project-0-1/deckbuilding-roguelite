@@ -19,6 +19,7 @@ import {
   pendingLoadedCoinCount,
   pileComposition,
   rewardViewStage,
+  sameCommand,
   stepSequence,
 } from "./interaction";
 
@@ -124,6 +125,19 @@ describe("cardActionView — 소비형 카드 하단 행동 바", () => {
   });
 });
 
+describe("sameCommand", () => {
+  it("distinguishes queued flip actions by reservation identity", () => {
+    const shared = { type: "useFlipSkill" as const, slot: slot(0), target: 0 };
+
+    expect(
+      sameCommand(
+        { ...shared, reservationId: "reservation-1" },
+        { ...shared, reservationId: "reservation-2" },
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("D9 immutable enchant pile metadata", () => {
   it("groups identical permanent coins separately when their immutable enchants differ", () => {
     const base = boot();
@@ -186,6 +200,8 @@ describe("pendingLoadedCoinCount — 미발동 장전 턴 종료 가드", () => 
   it("손패가 아니라 placed 영역의 장전 코인만 센다", () => {
     const first = placeFirst(boot(), 0).state;
     const second = placeFirst(first, 1).state;
+    expect(first.flipReservations).toHaveLength(1);
+    expect(first.zones.placed[slot(0)]).toEqual([]);
     expect(pendingLoadedCoinCount(second)).toBe(2);
   });
 
@@ -554,12 +570,20 @@ describe("dropCommands / stepSequence — 드롭의 커맨드 변환과 전량 �
 
   it("소켓 → 트레이 = 회수, 소켓 → 다른 슬롯 = 회수+장전 이동", () => {
     const { state, coin } = placeFirst(boot(), 0);
+    const later = placeFirst(state, 1);
+    const laterReservation = later.state.flipReservations.find((reservation) =>
+      reservation.coinUids.includes(later.coin),
+    );
+    if (laterReservation === undefined) throw new Error("missing later reservation");
     const toTray = dropCommands(
       coin,
       { kind: "socket", slot: slot(0) },
       { kind: "tray" },
     );
     expect(toTray).toEqual([{ type: "unplaceCoin", coin }]);
+    const trayRun = stepSequence(later.state, toTray ?? [], contentDb);
+    expect(trayRun?.state.zones.hand).toContain(coin);
+    expect(trayRun?.state.flipReservations).toEqual([laterReservation]);
 
     const move = dropCommands(
       coin,
@@ -570,10 +594,13 @@ describe("dropCommands / stepSequence — 드롭의 커맨드 변환과 전량 �
       { type: "unplaceCoin", coin },
       { type: "placeCoin", coin, slot: slot(1) },
     ]);
-    const run = stepSequence(state, move ?? [], contentDb);
+    const run = stepSequence(later.state, move ?? [], contentDb);
     expect(run).not.toBeNull();
     expect(run?.state.zones.placed[slot(0)]).toEqual([]);
-    expect(run?.state.zones.placed[slot(1)]).toEqual([coin]);
+    expect(run?.state.flipReservations).toEqual([
+      laterReservation,
+      expect.objectContaining({ slot: slot(1), coinUids: [coin] }),
+    ]);
   });
 
   it("열 중 하나라도 불법이면 전체 취소 (null)", () => {
@@ -590,7 +617,20 @@ describe("dropCommands / stepSequence — 드롭의 커맨드 변환과 전량 �
 
   it("서로 다른 카드에 장전된 동전을 드래그해 맞바꾼다", () => {
     const first = placeFirst(boot(), 0);
-    const second = placeFirst(first.state, 1);
+    const later = placeFirst(first.state, 1);
+    const stateWithExtraHandCoin = {
+      ...later.state,
+      zones: {
+        ...later.state.zones,
+        hand: [...later.state.zones.hand, later.state.zones.draw[0]!],
+        draw: later.state.zones.draw.slice(1),
+      },
+    };
+    const second = placeFirst(stateWithExtraHandCoin, 1);
+    const laterReservation = later.state.flipReservations.find((reservation) =>
+      reservation.coinUids.includes(later.coin),
+    );
+    if (laterReservation === undefined) throw new Error("missing later reservation");
     const commands = dropCommands(
       first.coin,
       { kind: "socket", slot: slot(0) },
@@ -604,8 +644,11 @@ describe("dropCommands / stepSequence — 드롭의 커맨드 변환과 전량 �
       { type: "placeCoin", coin: first.coin, slot: slot(1) },
     ]);
     const run = stepSequence(second.state, commands ?? [], contentDb);
-    expect(run?.state.zones.placed[slot(0)]).toEqual([second.coin]);
-    expect(run?.state.zones.placed[slot(1)]).toEqual([first.coin]);
+    expect(run?.state.flipReservations).toEqual([
+      laterReservation,
+      expect.objectContaining({ slot: slot(0), coinUids: [second.coin] }),
+      expect.objectContaining({ slot: slot(1), coinUids: [first.coin] }),
+    ]);
   });
 
   it("같은 카드의 두 장전 소켓도 순서를 맞바꾼다", () => {
@@ -618,9 +661,11 @@ describe("dropCommands / stepSequence — 드롭의 커맨드 변환과 전량 �
     );
     const run = stepSequence(second.state, commands ?? [], contentDb);
 
-    expect(run?.state.zones.placed[slot(2)]).toEqual([
-      second.coin,
-      first.coin,
+    expect(run?.state.flipReservations).toEqual([
+      expect.objectContaining({
+        slot: slot(2),
+        coinUids: [second.coin, first.coin],
+      }),
     ]);
   });
 

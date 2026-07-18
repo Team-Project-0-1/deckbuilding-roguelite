@@ -27,6 +27,10 @@ describe("turn-end preserve selection", () => {
     );
     if (!placed.ok) throw new Error(placed.error);
     state = placed.state;
+    expect(state.zones.placed[slot(0)]).toEqual([]);
+    expect(state.flipReservations).toEqual([
+      expect.objectContaining({ coinUids: [placedCoin] }),
+    ]);
     const selection = beginPreserveSelection(state, contentDb);
     expect(selection?.candidates).toEqual([
       ...state.zones.hand,

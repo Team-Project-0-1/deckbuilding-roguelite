@@ -236,7 +236,7 @@ describe('multi-enemy combat harness', () => {
     const loaded = placeFirstCoin(enemy0Dead, 2, db);
     const missing = step(loaded, { type: 'useFlipSkill', slot: slot(2) }, db);
     expect(missing).toEqual({ ok: false, error: 'target enemy is not alive' });
-    expect(loaded.zones.placed[slot(2)]).toHaveLength(1);
+    expect(loaded.flipReservations[0]?.coinUids).toHaveLength(1);
 
     const focused = step(loaded, { type: 'useFlipSkill', slot: slot(2), target: 1 }, db);
     expect(focused.ok).toBe(true);
@@ -352,7 +352,7 @@ describe('multi-enemy combat harness', () => {
       (command): command is Extract<Command, { type: 'useFlipSkill' }> => command.type === 'useFlipSkill' && command.slot === slot(0)
     );
 
-    expect(offered).toEqual([
+    expect(offered.map(({ type, slot: commandSlot, target }) => ({ type, slot: commandSlot, target }))).toEqual([
       { type: 'useFlipSkill', slot: slot(0), target: 0 },
       { type: 'useFlipSkill', slot: slot(0), target: 1 }
     ]);

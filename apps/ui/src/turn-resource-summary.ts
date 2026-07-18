@@ -26,15 +26,12 @@ export const summarizeTurnResources = (
   preserve: readonly CoinUid[] = [],
 ): TurnResourceSummary => {
   const hand = uniqueCoins(state.zones.hand);
-  const placed = uniqueCoins(Object.values(state.zones.placed).flat());
-  const queuedSlots = new Set(queue.loaded.map((entry) => Number(entry.slot)));
-  const queued = uniqueCoins(
-    Object.entries(state.zones.placed).flatMap(([rawSlot, coins]) =>
-      queuedSlots.has(Number(rawSlot)) ? coins : [],
-    ),
-  );
+  /** Draft coins remain in placed; committed reservations have left that zone. */
+  const placedDrafts = uniqueCoins(Object.values(state.zones.placed).flat());
+  const queued = uniqueCoins(queue.loaded.flatMap((reservation) => reservation.coinUids));
   const queuedCoins = new Set(queued);
-  const endTurnCandidates = uniqueCoins([...hand, ...placed]);
+  const loaded = uniqueCoins([...placedDrafts, ...queued]);
+  const endTurnCandidates = uniqueCoins([...hand, ...placedDrafts, ...queued]);
   const preservedCoins = new Set([
     ...preserve,
     ...endTurnCandidates.filter(
@@ -47,7 +44,7 @@ export const summarizeTurnResources = (
 
   return {
     usable: hand.length,
-    loaded: placed.length,
+    loaded: loaded.length,
     queued: queued.length,
     discardedOnEnd: Math.max(0, discardedOnEnd),
   };

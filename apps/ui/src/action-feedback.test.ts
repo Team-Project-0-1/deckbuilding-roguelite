@@ -119,12 +119,26 @@ describe("rejectionReason", () => {
     ).toBe(REJECTION_TEXT.emptySlot);
   });
 
-  it("classifies a full socket when placing another coin", () => {
+  it("allows another reservation on a repeat skill", () => {
     const { state } = placeFirst(boot(), 0);
     expect(
       rejectionReason(
         state,
         { type: "placeCoin", coin: firstHandCoin(state), slot: slot(0) },
+        contentDb,
+      ),
+    ).toBeNull();
+  });
+
+  it("classifies a limited skill as full after its first reservation", () => {
+    const first = placeFirst(boot(), 2);
+    const second = placeFirst(first.state, 2);
+    const remainingCoin = second.state.zones.hand[0];
+    if (remainingCoin === undefined) throw new Error("missing remaining hand coin");
+    expect(
+      rejectionReason(
+        second.state,
+        { type: "placeCoin", coin: remainingCoin, slot: slot(2) },
         contentDb,
       ),
     ).toBe(REJECTION_TEXT.socketFull);

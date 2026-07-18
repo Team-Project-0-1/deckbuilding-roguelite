@@ -1,4 +1,5 @@
 import { contentDb } from "@game/content";
+import { deriveUpgradedSkill } from "@game/core";
 import { describe, expect, it } from "vitest";
 
 import { skillDisplayName, skillEffectRows, skillSummaryText } from "./card-effects";
@@ -23,17 +24,29 @@ describe("skillEffectRows", () => {
     ]);
   });
 
-  it("builds Drive-style success tier rows for slash", () => {
+  it("builds D22 failure-floor and success rows for slash", () => {
     expect(skillEffectRows(skill("slash"))).toMatchObject([
-      { kind: "tier", badge: "0개", segments: [{ text: "효과 없음" }] },
+      { kind: "tier", badge: "0개", segments: [{ text: "피해 2" }] },
       { kind: "tier", badge: "1개", segments: [{ text: "피해 4" }] },
     ]);
   });
 
-  it("builds Drive-style success tier rows for guard", () => {
+  it("builds D22 failure-floor and success rows for guard", () => {
     expect(skillEffectRows(skill("guard"))).toMatchObject([
-      { kind: "tier", badge: "0개", segments: [{ text: "효과 없음" }] },
+      { kind: "tier", badge: "0개", segments: [{ text: "방어 2" }] },
       { kind: "tier", badge: "1개", segments: [{ text: "방어 4" }] },
+    ]);
+  });
+
+  it.each([
+    ["slash", "피해"],
+    ["guard", "방어"],
+    ["jab", "피해"],
+    ["fist-guard", "방어"],
+  ])("renders upgraded %s basic rows as 2/5", (id, label) => {
+    expect(skillEffectRows(deriveUpgradedSkill(skill(id)))).toMatchObject([
+      { kind: "tier", badge: "0개", segments: [{ text: `${label} 2` }] },
+      { kind: "tier", badge: "1개", segments: [{ text: `${label} 5` }] },
     ]);
   });
 

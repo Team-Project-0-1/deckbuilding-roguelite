@@ -256,6 +256,60 @@ describe("M6 strategy policies", () => {
     );
   });
 
+  it("evaluates a completed flip reservation through its legal reservation command", () => {
+    const db = withSkills(strategySkills);
+    let state = stateWithSkills(db, [skill("policy-balanced")]);
+    const placement = legalCommands(state, db).find(
+      (command) => command.type === "placeCoin" && Number(command.slot) === 0,
+    );
+    if (placement === undefined) throw new Error("balanced placement missing");
+    const placed = step(state, placement, db);
+    if (!placed.ok) throw new Error(placed.error);
+    state = placed.state;
+
+    const command = createAggroPolicy({ runSeed: "M6-RESERVATION" }).choose(
+      state,
+      db,
+    );
+    expect(command).toMatchObject({
+      type: "useFlipSkill",
+      slot: 0,
+      reservationId: "flip-1",
+    });
+    expect(legalCommands(state, db).map(commandKey)).toContain(commandKey(command));
+  });
+
+  it("uses a loaded repeat reservation before placing an equally scored replacement", () => {
+    const policy = createTurtlePolicy({ runSeed: "M6-RESERVATION-PRIORITY" });
+    const state = createCombat(
+      {
+        character: "warrior" as never,
+        enemies: [enemy("gatekeeper")],
+        bag: [
+          coin("basic"), coin("basic"), coin("basic"), coin("basic"),
+          coin("basic"), coin("basic"), coin("basic"), coin("basic"),
+          coin("fire"), coin("fire"),
+        ],
+        equippedSkills: [skill("jab"), skill("fist-guard"), skill("fire-fist"), skill("direct-hit")],
+      },
+      contentDb,
+      "M6-RESERVATION-PRIORITY",
+    );
+    const first = policy.choose(state, contentDb);
+    expect(first).toMatchObject({ type: "placeCoin", slot: 1 });
+    if (first.type !== "placeCoin") throw new Error("guard placement missing");
+    const placed = step(state, first, contentDb);
+    if (!placed.ok) throw new Error(placed.error);
+
+    expect(
+      policy.choose(placed.state, contentDb),
+    ).toMatchObject({
+      type: "useFlipSkill",
+      slot: 1,
+      reservationId: "flip-1",
+    });
+  });
+
   it("scores guaranteed consume effects and resolves equal values by canonical command key", () => {
     const consume = (id: string): SkillDef => ({
       id: skill(id),

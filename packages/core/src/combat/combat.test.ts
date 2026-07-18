@@ -784,7 +784,7 @@ describe('combat fuzz smoke', () => {
         expect(state.player.hp).toBeLessThanOrEqual(state.player.maxHp);
         expect(state.player.block).toBeGreaterThanOrEqual(0);
         expect(Object.keys(state.coins).length).toBeGreaterThanOrEqual(10);
-        expect(zoneCoinCount(state.zones)).toBe(Object.keys(state.coins).length);
+        expect(zoneCoinCount(state.zones, [], state.flipReservations)).toBe(Object.keys(state.coins).length);
       }
     }
   });

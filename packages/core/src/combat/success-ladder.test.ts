@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ContentDb, FlipSkillDef, SkillDef } from '../content-types';
-import { validateContentDb } from '../content-types';
-import type { CharacterId, CoinDefId, EnemyDefId, Face, SkillId, SlotId } from '../ids';
+import { isRepeatReservationEligible, validateContentDb } from '../content-types';
+import type { CharacterId, CoinDefId, CoinEnchantId, EnemyDefId, Face, PermanentCoinUid, SkillId, SlotId } from '../ids';
 import type { Rng, RngSnapshot } from '../rng';
 import { createCombat, step } from './reducer';
 import { previewFlip } from './preview';
@@ -25,17 +25,19 @@ const ladderSkill = (value: string, definition: Record<string, unknown>): FlipSk
   }) as unknown as FlipSkillDef;
 
 const basicAttack = ladderSkill('basic-attack', {
+  cooldown: 0,
   cost: 1,
   successFace: 'heads',
-  successLadder: [[], [{ kind: 'damage', amount: 4 }]]
+  successLadder: [[{ kind: 'damage', amount: 2 }], [{ kind: 'damage', amount: 4 }]]
 });
 
 const basicBlock = ladderSkill('basic-block', {
+  cooldown: 0,
   cost: 1,
   tags: ['defense'],
   targetType: 'self',
   successFace: 'tails',
-  successLadder: [[], [{ kind: 'block', amount: 4 }]]
+  successLadder: [[{ kind: 'block', amount: 2 }], [{ kind: 'block', amount: 4 }]]
 });
 
 const flameFist = ladderSkill('flame-fist', {
@@ -168,16 +170,42 @@ const loadAndUse = (input: CombatState, skillSlot: number, count: number, db: Co
 };
 
 describe('success-ladder flip resolution', () => {
-  it('resolves the 1-cost basic Attack only on heads', () => {
+  it('resolves the 1-cost basic Attack failure floor and success tier', () => {
     const db = testDb();
-    expect(loadAndUse(combat(db, ['tails']), 0, 1, db).state.enemies[0]?.hp).toBe(100);
+    expect(loadAndUse(combat(db, ['tails']), 0, 1, db).state.enemies[0]?.hp).toBe(98);
     expect(loadAndUse(combat(db, ['heads']), 0, 1, db).state.enemies[0]?.hp).toBe(96);
   });
 
-  it('resolves the 1-cost basic Block only on tails', () => {
+  it('resolves the 1-cost basic Block failure floor and success tier', () => {
     const db = testDb();
-    expect(loadAndUse(combat(db, ['heads']), 1, 1, db).state.player.block).toBe(0);
+    expect(loadAndUse(combat(db, ['heads']), 1, 1, db).state.player.block).toBe(2);
     expect(loadAndUse(combat(db, ['tails']), 1, 1, db).state.player.block).toBe(4);
+  });
+
+  it('applies a cost-1 tier-zero effect without firing a success-only sharpness event', () => {
+    const db = testDb();
+    const input = combat(db, ['tails']);
+    const coin = input.zones.hand[0]!;
+    const result = loadAndUse(
+      {
+        ...input,
+        coins: {
+          ...input.coins,
+          [Number(coin)]: {
+            ...input.coins[Number(coin)]!,
+            permanent: true,
+            permanentUid: 1 as PermanentCoinUid,
+            enchant: id<CoinEnchantId>('sharpness')
+          }
+        }
+      },
+      0,
+      1,
+      db
+    );
+
+    expect(result.state.enemies[0]?.hp).toBe(98);
+    expect(result.events.some((event) => event.type === 'enchantTriggered' && event.effect === 'damage')).toBe(false);
   });
 
   it('uses Flame Fist exact success tiers and applies fire resonance once', () => {
@@ -280,10 +308,29 @@ describe('success-ladder validation', () => {
     expect(errorsFor({ cost: 1, successLadder: [[], []] })).toContainEqual(expect.stringContaining('successFace'));
   });
 
-  it('requires a cost-1 zero-success tier to be empty', () => {
+  it('allows a cost-1 zero-success tier to contain effects', () => {
     expect(
       errorsFor({ cost: 1, successFace: 'heads', successLadder: [[{ kind: 'damage', amount: 1 }], [{ kind: 'damage', amount: 4 }]] })
-    ).toContainEqual(expect.stringContaining('zero-success'));
+    ).toEqual([]);
+  });
+
+  it('identifies only unrestricted zero-cooldown flip skills as repeat-reservation eligible', () => {
+    expect(isRepeatReservationEligible(basicAttack)).toBe(true);
+    expect(isRepeatReservationEligible({ ...basicAttack, cooldown: 1 })).toBe(false);
+    expect(isRepeatReservationEligible({ ...basicAttack, oncePerCombat: true })).toBe(false);
+    expect(isRepeatReservationEligible({ ...basicAttack, nonRepeatable: true })).toBe(false);
+    expect(
+      isRepeatReservationEligible({
+        id: id<SkillId>('consume'),
+        name: 'consume',
+        type: 'consume',
+        rarity: 'common',
+        tags: ['attack'],
+        targetType: 'single-enemy',
+        consume: { element: 'fire', count: 1 },
+        effects: []
+      })
+    ).toBe(false);
   });
 
   it('requires resonance to match the skill element', () => {

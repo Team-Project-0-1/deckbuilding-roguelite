@@ -50,7 +50,7 @@ const eventText = (event: CombatEvent): string => {
 };
 
 const assertInvariants = (state: CombatState, expectedCoins: number): string | undefined => {
-  if (zoneCoinCount(state.zones) !== Object.keys(state.coins).length) return 'zone coin count mismatch';
+  if (zoneCoinCount(state.zones, state.custody, state.flipReservations) !== Object.keys(state.coins).length) return 'zone coin count mismatch';
   // 총량 원장: 전 영역 합 = 초기 코인 수 + coinCreated 누적 (§8.1 불변식 1)
   if (Object.keys(state.coins).length !== expectedCoins) return 'coin ledger mismatch';
   if (state.player.hp > state.player.maxHp || state.player.hp < 0) return 'player hp out of bounds';

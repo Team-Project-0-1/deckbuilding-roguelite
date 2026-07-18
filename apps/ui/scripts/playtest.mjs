@@ -2377,7 +2377,7 @@ if (false) {
   check(
     "S15 공격 v1.2 성공 단계 행",
     slash.includes("0개") &&
-      slash.includes("효과 없음") &&
+      slash.includes("피해 2") &&
       slash.includes("1개") &&
       slash.includes("피해 4"),
     slash.replace(/\n/g, " / "),
@@ -2385,7 +2385,7 @@ if (false) {
   check(
     "S15 방어 v1.2 성공 단계 행",
     guard.includes("0개") &&
-      guard.includes("효과 없음") &&
+      guard.includes("방어 2") &&
       guard.includes("1개") &&
       guard.includes("방어 4"),
     guard.replace(/\n/g, " / "),
@@ -2490,13 +2490,13 @@ if (false) {
     /앞|뒤/.test((await ticket.locator("small").textContent()) ?? ""),
   );
   check(
-    "S16 전투 기록 성공·실패 합계 라인",
-    damage === 0 ? totalText.includes("효과 없음") : totalText.includes("피해 4"),
+    "S16 전투 기록 기본기 단계 결과 라인",
+    damage > 0 && totalText.includes(`피해 ${damage}`),
     totalText,
   );
   check(
     "S16 기록 피해 = 적 HP 감소량",
-    damage === 0 ? totalText.includes("효과 없음") : totalText.includes(`피해 ${damage}`),
+    damage > 0 && totalText.includes(`피해 ${damage}`),
     `${totalText} / hp ${beforeHp}→${afterHp}`,
   );
 
@@ -5970,6 +5970,131 @@ if (onlyScope === null || onlyScope === "d18") {
     await page.waitForTimeout(1000);
     check("D18 Aurel fight reaches victory", (await page.locator('[data-testid="reward-overlay"], [data-testid="run-result"], .result-overlay').count()) > 0);
     check("D18 victory path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
+  }
+}
+
+// ---------- D22: repeat reservations keep planning and execution independent ----------
+if (onlyScope === null || onlyScope === "d22") {
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      url: urlWith({
+        seed: "D22-REPEAT-RESERVATIONS",
+        encounter: "duo-raiders",
+        skills: "slash,guard",
+      }),
+    });
+    const slash = page.locator(".skill-card").first();
+    const reserveSlash = async () => {
+      await page.locator(".hand-tray .coin").first().click();
+      const sockets = slash.locator(".socket");
+      await sockets.nth((await sockets.count()) - 1).click();
+    };
+
+    await reserveSlash();
+    await reserveSlash();
+    const reservationRows = page.locator('[data-testid="execution-rail"] li');
+    const reservationIds = await reservationRows.evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute("data-reservation-id")),
+    );
+    check("D22 repeat basic reserves twice from one card", (await handCount(page)) === 1);
+    check(
+      "D22 repeat basic shows a two-reservation card badge",
+      /예약\s*2회/.test(await slash.locator(".execution-card-badge").innerText()),
+    );
+    check(
+      "D22 repeat basic creates two distinct execution entries",
+      reservationIds.length === 2 && new Set(reservationIds).size === 2,
+      reservationIds.join(","),
+    );
+
+    await page.evaluate(() => {
+      const evidence = { targetClicks: [], currentReservationIds: [] };
+      const scanCurrent = () => {
+        for (const row of document.querySelectorAll('[data-testid="execution-rail"] li.current')) {
+          const id = row.getAttribute("data-reservation-id");
+          if (id !== null && !evidence.currentReservationIds.includes(id))
+            evidence.currentReservationIds.push(id);
+        }
+      };
+      document.addEventListener(
+        "click",
+        (event) => {
+          const target = event.target instanceof Element ? event.target.closest(".unit.enemy.targetable") : null;
+          if (target === null) return;
+          evidence.targetClicks.push(
+            [...document.querySelectorAll(".unit.enemy")].indexOf(target),
+          );
+        },
+        true,
+      );
+      new MutationObserver(scanCurrent).observe(document.body, {
+        attributes: true,
+        attributeFilter: ["class"],
+        childList: true,
+        subtree: true,
+      });
+      window.__d22ExecutionEvidence = evidence;
+      scanCurrent();
+    });
+    await page.locator(".end-turn").click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".unit.enemy.targetable").length === 2,
+      undefined,
+      { timeout: 15000 },
+    );
+    await page.locator(".unit.enemy.targetable").nth(0).click();
+    await page.waitForFunction(
+      () =>
+        window.__d22ExecutionEvidence?.currentReservationIds.length === 2 &&
+        document.querySelectorAll(".unit.enemy.targetable").length === 2,
+      undefined,
+      { timeout: 15000 },
+    );
+    await page.locator(".unit.enemy.targetable").nth(1).click();
+    await page.waitForFunction(
+      () => window.__d22ExecutionEvidence?.targetClicks.length === 2,
+      undefined,
+      { timeout: 15000 },
+    );
+    const executionEvidence = await page.evaluate(() => window.__d22ExecutionEvidence);
+    const targetClicks = executionEvidence.targetClicks;
+    check(
+      "D22 repeat reservations choose separate duo-raider targets",
+      Array.isArray(targetClicks) && targetClicks.slice(0, 2).join(",") === "0,1",
+      String(targetClicks),
+    );
+    check(
+      "D22 repeat reservations complete as independent queued actions",
+      executionEvidence.currentReservationIds.length === 2 &&
+        new Set(executionEvidence.currentReservationIds).size === 2 &&
+        executionEvidence.currentReservationIds.every((id) => reservationIds.includes(id)),
+      executionEvidence.currentReservationIds.join(","),
+    );
+    check("D22 repeat reservation path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
+  }
+
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      url: urlWith({
+        seed: "D22-COOLDOWN-LOCK",
+        character: "frost-knight",
+        encounter: "duo-raiders",
+        skills: "frost-mark,slash",
+      }),
+    });
+    const cooldownSkill = page.locator(".skill-card").first();
+    await page.locator(".hand-tray .coin").first().click();
+    await cooldownSkill.locator(".socket").first().click();
+    check(
+      "D22 cooldown skill locks after its first reservation",
+      (await cooldownSkill.locator(".socket").count()) === 1 &&
+        (await cooldownSkill.locator(".socket.accept").count()) === 0,
+    );
+    check("D22 cooldown reservation path has no browser errors", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 }

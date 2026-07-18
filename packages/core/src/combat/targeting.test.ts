@@ -128,7 +128,9 @@ const placeFirstCoin = (state: CombatState, slotIndex: number, db: ContentDb): C
 };
 
 const useFlipTargets = (state: CombatState, slotIndex: number, db: ContentDb): Command[] =>
-  legalCommands(state, db).filter((command) => command.type === 'useFlipSkill' && command.slot === slot(slotIndex));
+  legalCommands(state, db)
+    .filter((command): command is Extract<Command, { type: 'useFlipSkill' }> => command.type === 'useFlipSkill' && command.slot === slot(slotIndex))
+    .map(({ type, slot: commandSlot, target }) => ({ type, slot: commandSlot, target }));
 
 const useConsumeTargets = (state: CombatState, slotIndex: number, db: ContentDb): Command[] =>
   legalCommands(state, db).filter((command) => command.type === 'useConsumeSkill' && command.slot === slot(slotIndex));
@@ -226,7 +228,7 @@ describe('multi-target legal commands', () => {
         expect(result.ok).toBe(true);
         if (!result.ok) break;
         state = result.state;
-        expect(zoneCoinCount(state.zones)).toBe(Object.keys(state.coins).length);
+        expect(zoneCoinCount(state.zones, [], state.flipReservations)).toBe(Object.keys(state.coins).length);
         expect(state.player.hp).toBeGreaterThanOrEqual(0);
         expect(state.player.hp).toBeLessThanOrEqual(state.player.maxHp);
         for (const enemy of state.enemies) {

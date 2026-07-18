@@ -478,6 +478,9 @@ const progressFingerprint = (state: CombatState): string =>
     Object.values(state.zones.placed)
       .map((coins) => coins.length)
       .join(","),
+    state.flipReservations
+      .map((reservation) => `${String(reservation.slot)}:${reservation.coinUids.length}`)
+      .join(","),
     state.slots.map((slot) => slot.cooldownRemaining).join(""),
     state.turnTriggers.length,
   ].join("|");
@@ -900,7 +903,7 @@ export const simulatePolicyRun = (
     variant.id,
     options.buildPolicyId,
   );
-  const maxCommands = options.maxCommandsPerCombat ?? 500;
+  const maxCommands = options.maxCommandsPerCombat ?? 1000;
   if (!Number.isSafeInteger(options.episodeIndex) || options.episodeIndex < 0) {
     throw new RangeError("episodeIndex must be a non-negative safe integer");
   }

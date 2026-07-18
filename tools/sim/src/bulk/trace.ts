@@ -57,6 +57,8 @@ const zoneCoins = (state: CombatState): CoinUid[] => [
   ...Object.values(state.zones.placed).flat(),
   ...state.zones.discard,
   ...state.zones.exhausted,
+  ...state.flipReservations.flatMap((reservation) => reservation.coinUids),
+  ...state.custody.flatMap((entry) => entry.coins),
 ];
 
 export const combatInvariantViolations = (
@@ -66,7 +68,7 @@ export const combatInvariantViolations = (
   const violations: string[] = [];
   const ledgerSize = Object.keys(state.coins).length;
   const zoned = zoneCoins(state);
-  if (zoneCoinCount(state.zones) !== ledgerSize) {
+  if (zoneCoinCount(state.zones, state.custody, state.flipReservations) !== ledgerSize) {
     violations.push("zone coin count mismatch");
   }
   if (ledgerSize !== expectedCoins) violations.push("coin ledger mismatch");
@@ -225,6 +227,7 @@ const opportunitySnapshot = (
     handCoinUids: state.zones.hand.map(Number).sort((left, right) => left - right),
     placedCoinUids: Object.values(state.zones.placed)
       .flat()
+      .concat(state.flipReservations.flatMap((reservation) => reservation.coinUids))
       .map(Number)
       .sort((left, right) => left - right),
     consumeOpportunity: commands.some(
@@ -250,7 +253,9 @@ const decisionSkillTrace = (
   const resolution = command.type === "useFlipSkill" ? "flip" : "consume";
   const coinCount =
     command.type === "useFlipSkill"
-      ? (before.zones.placed[command.slot]?.length ?? 0)
+      ? (before.flipReservations.find(
+          (reservation) => reservation.id === command.reservationId,
+        )?.coinUids.length ?? before.zones.placed[command.slot]?.length ?? 0)
       : command.coins.length;
   const directDamage = events.reduce(
     (total, event) =>
@@ -305,7 +310,12 @@ const finalizeTurn = (turn: MutableTurnTrace): M6TurnTrace => ({
 });
 
 const unusedCoinCount = (state: CombatState): number =>
-  state.zones.hand.length + Object.values(state.zones.placed).flat().length;
+  state.zones.hand.length +
+  Object.values(state.zones.placed).flat().length +
+  state.flipReservations.reduce(
+    (total, reservation) => total + reservation.coinUids.length,
+    0,
+  );
 
 export const playPolicyCombat = (
   initial: CombatState,
