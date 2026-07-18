@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
+import { capturePlaytestDiagnostics } from "./playtest-diagnostics.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SEED = "BRAVE-EMBER-42";
 const baseUrl =
@@ -12,6 +14,10 @@ const baseUrl =
 const URL = `${baseUrl}?seed=${SEED}`;
 
 const failures = [];
+const consoleErrors = [];
+const pageErrors = [];
+let diagnosticPage;
+let runFailure;
 const check = (name, condition, detail = "") => {
   const mark = condition ? "ok" : "FAIL";
   console.log(`[${mark}] ${name}${detail === "" ? "" : ` — ${detail}`}`);
@@ -19,21 +25,8 @@ const check = (name, condition, detail = "") => {
     failures.push(`${name}${detail === "" ? "" : ` — ${detail}`}`);
 };
 
-const server =
-  process.env.FEEDBACK_CHECK_BASE_URL === undefined
-    ? await (
-        await import("vite")
-      ).preview({
-        root,
-        preview: { host: "127.0.0.1", port: 4180, strictPort: true },
-      })
-    : null;
-
-const browser = await chromium.launch(
-  process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
-    ? {}
-    : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
-);
+let server;
+let browser;
 
 const boot = async (url = URL, compressTimers = true, legacyAutoExecution = false) => {
   const context = await browser.newContext({
@@ -41,6 +34,7 @@ const boot = async (url = URL, compressTimers = true, legacyAutoExecution = fals
     deviceScaleFactor: 1,
   });
   const page = await context.newPage();
+  diagnosticPage = page;
   if (compressTimers)
     await page.addInitScript(() => {
       const nativeTimeout = window.setTimeout.bind(window);
@@ -54,15 +48,22 @@ const boot = async (url = URL, compressTimers = true, legacyAutoExecution = fals
     });
   await page.emulateMedia({ reducedMotion: "reduce" });
   const errors = [];
-  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("pageerror", (error) => {
+    const message = `pageerror: ${error.message}`;
+    errors.push(message);
+    pageErrors.push(message);
+  });
   page.on("console", (message) => {
     const source = message.location().url;
     if (
       message.type() === "error" &&
       !source.endsWith("/favicon.ico") &&
       !message.text().includes("ERR_NO_BUFFER_SPACE")
-    )
-      errors.push("console: " + message.text());
+    ) {
+      const text = "console: " + message.text();
+      errors.push(text);
+      consoleErrors.push(text);
+    }
   });
   if (legacyAutoExecution)
     await page.addInitScript(() => {
@@ -121,6 +122,20 @@ const chipText = async (page) =>
   page.locator(".rejection-chip").last().innerText({ timeout: 2000 });
 
 try {
+  server =
+    process.env.FEEDBACK_CHECK_BASE_URL === undefined
+      ? await (
+          await import("vite")
+        ).preview({
+          root,
+          preview: { host: "127.0.0.1", port: 4180, strictPort: true },
+        })
+      : null;
+  browser = await chromium.launch(
+    process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
+      ? {}
+      : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
+  );
   {
     const { page, errors } = await boot();
     const beforeConfirm = {
@@ -359,22 +374,20 @@ try {
     const { page, errors } = await boot(url);
     await placeInto(page, 0, 0);
     await placeInto(page, 0, 1);
-    await page.locator(".end-turn").click();
-    await page.waitForFunction(
-      () => document.querySelector("main")?.getAttribute("data-auto-turn-end-phase") === "blocked",
-    );
     check(
-      "불법 큐 스킬을 건너뛰지 않고 복구 UI 표시",
-      (await page.locator(".execution-blocked").count()) === 1 &&
-        (await card(page, 0).locator(".socket.loaded").count()) === 2,
+      "현재 불법인 완전 장전 스킬은 실행 순서에서 제외",
+      (await page.getByTestId("execution-rail").count()) === 0 &&
+        (await page.locator(".end-turn").innerText()) === "행동 확정",
     );
-    await page.getByRole("button", { name: "남은 스킬 건너뛰고 종료" }).click();
+    await page.locator(".end-turn").click();
     await waitReady(page);
     check(
-      "blocked 건너뛰기 선택은 보존/턴 종료로 진행",
-      (await card(page, 0).locator(".socket.loaded").count()) === 0,
+      "현재 불법 스킬 제외 뒤 일반 턴 종료",
+      (await card(page, 0).locator(".socket.loaded").count()) === 0 &&
+        (await page.locator("main").getAttribute("data-auto-turn-end-phase")) === "idle" &&
+        (await page.locator(".execution-blocked").count()) === 0,
     );
-    check("blocked 복구 에러 0", errors.length === 0, errors.join(" | "));
+    check("현재 불법 스킬 제외 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
 
@@ -547,15 +560,30 @@ try {
     check("보존 취소 에러 0", errors.length === 0, errors.join(" | "));
     await page.context().close();
   }
+  if (failures.length > 0) {
+    throw new Error(`feedback-check FAIL (${failures.length})\n${failures.join("\n")}`);
+  }
+} catch (error) {
+  runFailure = error;
+  await capturePlaytestDiagnostics({
+    baseUrl,
+    browser,
+    consoleErrors,
+    failure: error,
+    page: diagnosticPage,
+    pageErrors,
+    scriptName: "feedback-check",
+  });
+  console.error(error);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
+  await browser?.close();
   await server?.httpServer.close();
 }
 
 if (failures.length > 0) {
   console.error(`\nFAIL ${failures.length}`);
   for (const failure of failures) console.error(`- ${failure}`);
-  process.exit(1);
 }
 
-console.log("\nfeedback-check passed");
+if (!runFailure) console.log("\nfeedback-check passed");

@@ -1,9 +1,15 @@
 import { chromium } from "playwright";
 import { preview } from "vite";
 
+import { capturePlaytestDiagnostics } from "./playtest-diagnostics.mjs";
+
 const root = new URL("..", import.meta.url).pathname.replace(/^\/(.:)/, "$1");
 const baseUrl = "http://127.0.0.1:4182/deckbuilding-roguelite/";
 const failures = [];
+const consoleErrors = [];
+const pageErrors = [];
+let diagnosticPage;
+let runFailure;
 
 const check = (name, condition, detail = "") => {
   console.log(
@@ -12,26 +18,36 @@ const check = (name, condition, detail = "") => {
   if (!condition) failures.push(`${name}${detail ? ` — ${detail}` : ""}`);
 };
 
-const server = await preview({
-  root,
-  preview: { host: "127.0.0.1", port: 4182, strictPort: true },
-});
-const browser = await chromium.launch(
-  process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
-    ? {}
-    : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
-);
-
+let server;
+let browser;
 try {
+  server = await preview({
+    root,
+    preview: { host: "127.0.0.1", port: 4182, strictPort: true },
+  });
+  browser = await chromium.launch(
+    process.env.PLAYWRIGHT_EXECUTABLE_PATH === undefined
+      ? {}
+      : { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH },
+  );
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
   });
   const page = await context.newPage();
+  diagnosticPage = page;
   const errors = [];
   const badResponses = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
+  page.on("pageerror", (error) => {
+    const message = String(error);
+    errors.push(message);
+    pageErrors.push(message);
+  });
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (message.type() === "error") {
+      const text = message.text();
+      errors.push(text);
+      consoleErrors.push(text);
+    }
   });
   page.on("response", (response) => {
     if (response.status() >= 400)
@@ -128,11 +144,16 @@ try {
     await page.keyboard.press("Escape");
   }
 
-  await page.locator(".hand-tray .coin").first().click();
+  const basicCoin = page.locator(
+    ".hand-tray .coin:not(.fire):not(.mana):not(.frost):not(.lightning):not(.blood):not(.granted-fire)",
+  );
+  if ((await basicCoin.count()) > 0) await basicCoin.first().click();
+  else await page.locator(".hand-tray .coin").first().click();
   await page.locator(".skill-card").first().locator(".socket").first().click();
   check(
     "loading a coin does not pin the skill preview",
-    (await page.locator(".preview-tip").count()) === 0,
+    (await page.locator(".skill-card").first().locator(".socket.loaded").count()) === 1 &&
+      (await page.locator(".preview-tip").count()) === 0,
   );
   await page.mouse.move(0, 0);
   await page.locator(".skill-card").first().hover();
@@ -249,6 +270,11 @@ try {
     viewport: { width: 390, height: 844 },
   });
   const mobilePage = await mobile.newPage();
+  diagnosticPage = mobilePage;
+  mobilePage.on("pageerror", (error) => pageErrors.push(String(error)));
+  mobilePage.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
   await mobilePage.goto(`${baseUrl}?select=1`, { waitUntil: "networkidle" });
   await mobilePage.waitForSelector('[data-testid="character-select"]');
   check(
@@ -269,14 +295,30 @@ try {
       ),
   );
   await mobile.close();
+  if (failures.length > 0) {
+    throw new Error(
+      `run navigation check FAIL (${failures.length})\n${failures
+        .map((failure) => ` - ${failure}`)
+        .join("\n")}`,
+    );
+  }
+} catch (error) {
+  runFailure = error;
+  await capturePlaytestDiagnostics({
+    baseUrl,
+    browser,
+    consoleErrors,
+    failure: error,
+    page: diagnosticPage,
+    pageErrors,
+    scriptName: "run-navigation-check",
+  });
+  console.error(error);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
-  await new Promise((resolve) => server.httpServer.close(resolve));
+  await browser?.close();
+  if (server)
+    await new Promise((resolve) => server.httpServer.close(resolve));
 }
 
-if (failures.length > 0) {
-  console.error(`run navigation check FAIL (${failures.length})`);
-  for (const failure of failures) console.error(` - ${failure}`);
-  process.exit(1);
-}
-console.log("run navigation check PASS");
+if (!runFailure) console.log("run navigation check PASS");
