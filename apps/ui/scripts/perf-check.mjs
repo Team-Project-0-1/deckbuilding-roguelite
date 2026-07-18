@@ -72,7 +72,12 @@ const measureBoot = async () => {
   return { tti, commandRoundtrip, ...vitals };
 };
 
-await measureBoot(); // warm-up — JIT/캐시 워밍, 결과 폐기
+// Two discarded boots warm both the module/JIT path and the post-navigation
+// interaction path. A short quiet window keeps a preceding release suite's
+// browser teardown/GC from being attributed to the first measured boot.
+await measureBoot();
+await measureBoot();
+await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 500));
 const runs = [];
 for (let index = 0; index < 3; index += 1) runs.push(await measureBoot());
 
@@ -99,7 +104,8 @@ const report = {
   schemaVersion: "perf-report-v4",
   blocking: { lcp: true, cls: true, longTask: true },
   reportOnly: ["tti", "commandRoundtrip"],
-  mitigation: "warm-up 1회 폐기 + 측정 3회 median(LCP)/worst(CLS·롱태스크)",
+  mitigation:
+    "discarded boots 2 + quiet window 500ms + measured boots 3; median LCP, worst CLS, every long task blocking",
   budgets: {
     distBytes: DIST_BUDGET_BYTES,
     ttiMs: 3000,

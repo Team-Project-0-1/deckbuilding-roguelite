@@ -18,7 +18,7 @@ const BUDGETS = {
   // help/history/preferences surfaces, and their responsive/accessibility CSS.
   // Keep the measured addition bounded instead of disabling the gate.
   total: 3213312,
-  js: 589824, // 576 KiB - 2026-07-18 D14: restore >=10 KiB after Batch D measured 577,194 B
+  js: 602112, // 588 KiB - 2026-07-18 D17: preserve >=10 KiB after Valdemar measured 591,365 B
   css: 90112, // 88 KiB - 2026-07-18 D14: restore >=2 KiB after Batch D measured 86,689 B
   maxFile: 716800, // 700 KiB
 };
