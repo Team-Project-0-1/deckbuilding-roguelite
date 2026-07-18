@@ -2,8 +2,8 @@ import type { CombatEvent, CombatState, Command } from "@game/core";
 
 // v2 (P4.3): 런 그래프 경로 사실(path) 추가 — 갈림길 선택·상점 행동이 없으면
 // 리플레이가 비전투 노드를 통과할 수 없다. v1은 그래프 이전 세대라 거부한다.
-// v3 (P6): rest/treasure/패시브 경로 사실 가산 — v2 로그는 레거시 그래프 한정 재생
-export const HUMAN_RUN_SCHEMA_VERSION = 3 as const;
+// v4 (D17): enemy furnace snapshots detect temperature-only combat divergence.
+export const HUMAN_RUN_SCHEMA_VERSION = 4 as const;
 export const UI_BUILD_IDENTIFIER = "m6-ui-local-telemetry";
 
 type RunResult = "in-progress" | "victory" | "defeat";
@@ -56,6 +56,8 @@ export interface HumanDecisionFact {
     playerAfter: number;
     enemiesBefore: number[];
     enemiesAfter: number[];
+    enemyFurnaceBefore: number[];
+    enemyFurnaceAfter: number[];
   };
 }
 
@@ -315,6 +317,8 @@ export const recordHumanDecision = (
       playerAfter: input.after.player.hp,
       enemiesBefore: hpList(input.before),
       enemiesAfter: hpList(input.after),
+      enemyFurnaceBefore: input.before.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
+      enemyFurnaceAfter: input.after.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
     },
   };
 
@@ -724,6 +728,8 @@ const sanitizeDecision = (value: unknown, label: string): HumanDecisionFact => {
       playerAfter: nonNegativeInteger(hp, "playerAfter", `${label}.hp`),
       enemiesBefore: numberArray(hp.enemiesBefore, `${label}.hp.enemiesBefore`),
       enemiesAfter: numberArray(hp.enemiesAfter, `${label}.hp.enemiesAfter`),
+      enemyFurnaceBefore: numberArray(hp.enemyFurnaceBefore, `${label}.hp.enemyFurnaceBefore`),
+      enemyFurnaceAfter: numberArray(hp.enemyFurnaceAfter, `${label}.hp.enemyFurnaceAfter`),
     },
   };
 };

@@ -32,7 +32,7 @@ describe("enemy telegraph UI", () => {
   it("renders windup countdown, forecast, cancel threshold, vulnerability and bound heal target", () => {
     const mend = {
       id: "silver-mend",
-      cancelOn: { damageThreshold: 10 },
+      cancelOn: { kind: "skillDamage" as const, threshold: 10 },
       vulnerableWhileWindup: 1.5,
       actions: [{ kind: "healAlly" as const, amount: 12, target: "lowestHpAlly" as const, cleanse: 2 }],
     };
@@ -116,7 +116,7 @@ describe("enemy telegraph UI", () => {
       }),
     );
 
-    expect(html).toContain("광란 1");
+    expect(html).toContain("페이즈 1");
     expect(html).toContain("취약 ×1.25");
     expect(html).toContain("속성 코인 4/4");
     expect(html).toContain("발동");

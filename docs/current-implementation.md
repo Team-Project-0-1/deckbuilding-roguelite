@@ -218,7 +218,7 @@ Drive v1.2의 화염 격투가 범위에는 과열이 없으므로 신규 보상
 
 ## 7.0.2 적 의도 원자 (P13 배치 A)
 
-- `windup {turns, cancelOn.damageThreshold}`: 예고형 준비 — 시작 시 카운트다운·수치·취소 임계 공개, 준비 중 `vulnerableWhileWindup` 배수로 받는 피해 증가, 준비 시작 후 누적 HP 피해가 임계에 닿으면 취소.
+- `windup {turns, cancelOn}`: 예고형 준비 — 취소 조건은 `{ kind: 'skillDamage', threshold }` 또는 자원 조건 `{ kind: 'enemyResourceAtMost', resource: 'furnaceTemperature', value }`로 구분한다. 시작 시 카운트다운·수치·취소 임계를 공개하고, 준비 중 `vulnerableWhileWindup` 배수로 받는 피해가 증가한다. 스킬 피해 누적이 `threshold`에 닿거나 자원 조건이 충족되면 취소한다.
 - `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction, damageTakenMultiplier}`(1회 전환·비가역), `growOnUnblockedDamage(+healOnGrow/maxStacks/minHpDamageFraction/loseOnFullBlock)`(실피해 비율·상한·완전 방어 감소를 데이터로 지정), `healAlly(lowestHpAlly, cleanse)`(공개 시 대상 바인딩, 대상 사망 시 치유·정화 모두 실패), `growthBranch(atLeast)`(스택 임계 도달 시 같은 패턴 칸의 예고 의도로 교체).
 - 배치 A 정련값: 붉은기병은 돌진 피해가 50%보다 많이 HP에 들어갈 때만 기세 +1(최대 3), 기세당 이후 돌진 +15%. 광전사는 광란 페이즈 전체에서 받는 피해 ×1.25. 치유사는 바인딩 대상 회복 12 후 상태 2개를 정화. 흡혈귀 시종은 만찬 최대 5, 4 이상이면 성배의 입맞춤 대신 1턴 예고 후 `7×3` 진홍의 향연을 사용한다.
 - 전부 의도 수준 원자이며 `enemyTurnStart` 패시브의 자기 대상 한정 검증 벽은 유지된다. 이벤트: `enemyWindupStarted/Ticked/Cancelled`, `enemyPhaseChanged`, `enemyGrew`, `enemyCleansed`, `enemyHealFailed`.
@@ -248,6 +248,15 @@ Drive v1.2의 화염 격투가 범위에는 과열이 없으므로 신규 보상
 - 사용 가능한 스킬이 하나뿐이면 봉인 대신 다음 플레이어 턴 1회 동안 해당 스킬 고유 피해·방어·회복·상태이상 스택에 ×0.75(내림)를 적용한다. 코인 고유 피해·속성 효과는 감소시키지 않는다. 이미 같은 M-10의 봉인이 남아 있을 때 재시전하면 봉인을 갱신하지 않고 피해 6만 준다.
 - 이벤트 `coinSeizureTelegraphed`, `coinsSeized/Returned`, `skillSealed`, `skillSealFallbackReduced`, `placedCoinsReturned`, `skillSealRepeatStruck`가 예고·발동·방어 정리의 원인을 남긴다. UI는 압수 더미와 소유 적, 봉인/감소 종류와 남은 플레이어 턴을 텍스트·배지로 표시한다.
 - M-09/M-10은 2·3막 조우 풀에만 편입되며 라이브 조우는 최대 3적이다. 수치와 실제 체감은 `balance-provisional` / `experience-unverified`다.
+
+## 7.0.6 D17 재의 공작 발데마르와 source-UID 가드
+
+- M-19 `재의 공작 발데마르`(HP 180)는 3막 10번째 방문의 보스로 `ember-archmage`를 대체한다. 잿불 마도왕 정의는 저장·테스트 호환을 위해 DB에 남으며, 최종 보스 보상과 막 전환 보상은 바꾸지 않는다.
+- 용광로는 0에서 시작해 최대 6이다. 보스 행동마다 +1, 플레이어 화상 HP 피해마다 한 번 +1, 화상 제거마다 한 번 -2이며, 각 페이즈의 실제 HP 피해 한계 도달은 온도 -1이다(P1 27, P2 19, P3 10). 한계는 전투 시작/페이즈 진입에 고정한 HP의 15%를 올림해 계산한다. 1페이즈는 피해 10 뒤 실제 HP 피해가 있었을 때만 화상 1을 거는 `burning-slash`와 1턴 예고 화상 2 `ember-brand`를 사용한다.
+- 용광로가 최대일 때 일반 의도 순환 대신 `coronation`을 1턴 예고하고, 이후 피해 24·화상 3·용광로를 3으로 설정해 해결한다. 용광로가 5 이하이면 해결 대신 취소되어 온도 3으로 설정되며, 3페이즈에서는 성장 2도 제거한다. HP 70% 미만 진입은 플레이어 화상 1 제거·온도 2·최대 두 `ash-vassal` 소환, HP 35% 미만 진입은 온도 2와 최대 5중첩의 행동당 공격 +8% `final ember`를 적용한다.
+- `ash-vassal`(HP 24)은 피해 6과 피해 4+화상 1을 순환한다. 소환 때 발데마르의 실제 source UID를 고정해 그 source에서 온 피해에만 가드 하나당 15%를 제공하며 최대 두 가드(총 30%)만 합산한다.
+- 가드 합성 순서: 공유 대상 피해 수정 단계에서 살아 있는 가드 중 저장된 `sourceEnemyUid`가 대상 적 UID와 같은 것만 선언한 감소율을 기여한다. `maxSources`까지만 합산한 뒤 기존 수정 피해에 `max(0, 1 - 합산 감소율)`을 곱해 내림하고, 그 다음 기존 방어/보호 재지정 분할을 적용한다. 따라서 두 15% 가드는 70% 피해가 되며, 가드가 사망하면 즉시 기여가 사라진다. UID 결속은 슬롯 이동·변환 뒤에도 유지된다.
+- 수치와 체감은 `balance-provisional` / `experience-unverified`이며, 소환 가신은 일반 그래프 조우 풀에 독립적으로 들어가지 않는다.
 
 ## 7.1 P10 캐릭터 전투 상태
 

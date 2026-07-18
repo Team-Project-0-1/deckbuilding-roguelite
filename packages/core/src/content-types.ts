@@ -276,6 +276,7 @@ export type EffectAtom =
   | { kind: 'enterOverheat' }
   | { kind: 'scheduleOverheat' }
   | { kind: 'applyStatus'; status: StatusId; stacks: number; to: 'target' | 'self' }
+  | { kind: 'removeStatus'; status: StatusId; stacks: number; to: 'target' | 'self' }
   | { kind: 'addCoin'; coin: CoinDefId; zone: 'draw' | 'discard' | 'hand'; position?: 'top'; count: number }
   | { kind: 'grantElement'; element: Element; scope: 'allBasicInHand' | 'chooseBasicInHand' }
   | { kind: 'addTurnTrigger'; trigger: TurnTriggerDef }
@@ -372,7 +373,11 @@ export type EnemyAction =
   | { kind: 'healAlly'; amount: number; target: 'lowestHpAlly'; cleanse?: number }
   | { kind: 'summonEnemies'; enemy: EnemyDefId; maxCount: number }
   | { kind: 'tickHatch' }
-  | { kind: 'accelerateHatching'; amount: number };
+  | { kind: 'accelerateHatching'; amount: number }
+  | { kind: 'setEnemyResource'; resource: 'furnaceTemperature'; value: number; reason: EnemyFurnaceReason }
+  | { kind: 'adjustEnemyResource'; resource: 'furnaceTemperature'; amount: number; reason: EnemyFurnaceReason }
+  | { kind: 'removePlayerStatus'; status: StatusId; stacks: number }
+  | { kind: 'reduceGrowthStacks'; amount: number };
 
 export interface EnemyHatchDef {
   into: EnemyDefId;
@@ -402,11 +407,44 @@ export interface EnemyWarBannerDef {
   march: { attackPercent: number; turns: number; shieldMaxHpFraction: number };
 }
 
+/** Optional bounded boss resource.  It is intentionally owned by the enemy, not an enemy ID. */
+export interface EnemyFurnaceDef {
+  initialTemperature: number;
+  maxTemperature: number;
+  actionResolvedGain?: number;
+  playerBurnDamageGain?: number;
+  playerBurnClearLoss?: number;
+  playerDamageThreshold?: { phaseEntryHpFraction: number; loss: number };
+  /** Overrides ordinary intent rotation while this bounded resource is at its cap. */
+  atMaxIntent?: EnemyIntent;
+}
+
+export type EnemyFurnaceReason =
+  | 'enemyActionResolved'
+  | 'playerBurnDamaged'
+  | 'playerBurnCleared'
+  | 'playerDamageThreshold'
+  | 'phaseEntered'
+  | 'coronationCancelled'
+  | 'coronationResolved';
+
+export interface EnemyVassalGuardDef {
+  /** Only summons from this definition can bind the guard to their source UID. */
+  source: EnemyDefId;
+  damageReductionPercent: number;
+  maxSources: number;
+}
+
+export type EnemyCancelPredicate =
+  | { kind: 'skillDamage'; threshold: number }
+  | { kind: 'enemyResourceAtMost'; resource: 'furnaceTemperature'; value: number };
+
 export interface EnemyIntent {
   id: string;
   actions: EnemyAction[];
   windup?: { turns: number; revealAtStart: true };
-  cancelOn?: { damageThreshold: number };
+  cancelOn?: EnemyCancelPredicate | readonly EnemyCancelPredicate[];
+  onCancelActions?: EnemyAction[];
   vulnerableWhileWindup?: number;
   growthBranch?: { atLeast: number; intent: EnemyIntent };
   groupMarch?: true;
@@ -417,6 +455,11 @@ export interface EnemyPhase {
   hpBelowFraction: number;
   intents: EnemyIntent[];
   damageTakenMultiplier?: number;
+  /** Opts this phase into cancelling/skipping the previous intent before it can act. */
+  transitionBeforeAction?: true;
+  onEnterActions?: EnemyAction[];
+  /** Bounded stacks applied once after each resolved intent in this phase. */
+  growthOnActionResolved?: { amount: number; maxStacks: number };
 }
 
 // 몬스터 패시브 — 설계 가이드 §3 패시브 원칙 준용: 자동 조건 발동 최대 1개.
@@ -502,6 +545,8 @@ export interface EnemyDef {
   petrify?: EnemyPetrifyDef;
   warBanner?: EnemyWarBannerDef;
   hatch?: EnemyHatchDef;
+  furnace?: EnemyFurnaceDef;
+  vassalGuard?: EnemyVassalGuardDef;
 }
 
 export type EventRisk = 'combat' | 'hp' | 'gold' | 'coin';
@@ -850,8 +895,19 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>, coins: Record<s
       }
       if (intent.windup.revealAtStart !== true) errors.push(`${owner}: windup revealAtStart must be true`);
     }
-    if (intent.cancelOn !== undefined && (!Number.isInteger(intent.cancelOn.damageThreshold) || intent.cancelOn.damageThreshold <= 0)) {
-      errors.push(`${owner}: cancelOn damageThreshold must be a positive integer`);
+    for (const predicate of intent.cancelOn === undefined ? [] : Array.isArray(intent.cancelOn) ? intent.cancelOn : [intent.cancelOn]) {
+      if (predicate.kind === 'skillDamage') {
+        if (!Number.isInteger(predicate.threshold) || predicate.threshold <= 0) errors.push(`${owner}: cancelOn skillDamage threshold must be a positive integer`);
+      } else if (predicate.resource === 'furnaceTemperature') {
+        if (!Number.isInteger(predicate.value) || predicate.value < 0) errors.push(`${owner}: cancelOn furnace temperature must be a non-negative integer`);
+      } else {
+        errors.push(`${owner}: cancelOn must use a discriminated predicate`);
+      }
+    }
+    for (const action of intent.onCancelActions ?? []) {
+      if (action.kind !== 'setEnemyResource' && action.kind !== 'adjustEnemyResource' && action.kind !== 'reduceGrowthStacks') {
+        errors.push(`${owner}: onCancelActions only support enemy resource mutation or growth reduction`);
+      }
     }
     if (
       intent.vulnerableWhileWindup !== undefined &&
@@ -913,6 +969,16 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>, coins: Record<s
         }
       } else if (action.kind === 'accelerateHatching' && (!Number.isInteger(action.amount) || action.amount <= 0)) {
         errors.push(`${owner}: accelerate hatching amount must be a positive integer`);
+      } else if (action.kind === 'setEnemyResource') {
+        if (!Number.isInteger(action.value) || action.value < 0) errors.push(`${owner}: set enemy resource value must be a non-negative integer`);
+        if (action.reason.trim().length === 0) errors.push(`${owner}: set enemy resource reason must not be empty`);
+      } else if (action.kind === 'adjustEnemyResource') {
+        if (!Number.isInteger(action.amount) || action.amount === 0) errors.push(`${owner}: adjust enemy resource amount must be a non-zero integer`);
+        if (action.reason.trim().length === 0) errors.push(`${owner}: adjust enemy resource reason must not be empty`);
+      } else if (action.kind === 'removePlayerStatus' && (!Number.isInteger(action.stacks) || action.stacks <= 0)) {
+        errors.push(`${owner}: remove player status stacks must be a positive integer`);
+      } else if (action.kind === 'reduceGrowthStacks' && (!Number.isInteger(action.amount) || action.amount <= 0)) {
+        errors.push(`${owner}: reduce growth stacks amount must be a positive integer`);
       } else if (action.kind === 'sealTriggeredSkill' && (!Number.isInteger(action.turns) || action.turns <= 0)) {
         errors.push(`${owner}: sealTriggeredSkill turns must be a positive integer`);
       } else if (action.kind === 'royalTax' && (!Number.isInteger(action.degradedDamage) || action.degradedDamage <= 0)) {
@@ -964,6 +1030,30 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>, coins: Record<s
         errors.push(`${owner}: hatch delay fraction must be between 0 and 1`);
       }
     }
+    if (enemy.furnace !== undefined) {
+      const furnace = enemy.furnace;
+      if (furnace.maxTemperature !== 6) errors.push(`${owner}: furnace maxTemperature must be exactly 6`);
+      if (!Number.isInteger(furnace.initialTemperature) || furnace.initialTemperature < 0 || furnace.initialTemperature > furnace.maxTemperature) {
+        errors.push(`${owner}: furnace initialTemperature must be from 0 through maxTemperature`);
+      }
+      for (const [label, value] of [['actionResolvedGain', furnace.actionResolvedGain], ['playerBurnDamageGain', furnace.playerBurnDamageGain], ['playerBurnClearLoss', furnace.playerBurnClearLoss]] as const) {
+        if (value !== undefined && (!Number.isInteger(value) || value <= 0)) errors.push(`${owner}: furnace ${label} must be a positive integer`);
+      }
+      const threshold = furnace.playerDamageThreshold;
+      if (threshold !== undefined && (!Number.isFinite(threshold.phaseEntryHpFraction) || threshold.phaseEntryHpFraction <= 0 || threshold.phaseEntryHpFraction > 1 || !Number.isInteger(threshold.loss) || threshold.loss <= 0)) {
+        errors.push(`${owner}: furnace player damage threshold must have fraction in (0, 1] and positive integer loss`);
+      }
+      if (furnace.atMaxIntent !== undefined) {
+        validateIntent(furnace.atMaxIntent, `${owner}: furnace atMaxIntent ${furnace.atMaxIntent.id}`);
+        if (furnace.atMaxIntent.windup === undefined) errors.push(`${owner}: furnace atMaxIntent must wind up`);
+      }
+    }
+    if (enemy.vassalGuard !== undefined) {
+      const guard = enemy.vassalGuard;
+      if (enemies[String(guard.source)] === undefined) errors.push(`${owner}: vassal guard source must exist`);
+      if (!Number.isFinite(guard.damageReductionPercent) || guard.damageReductionPercent <= 0 || guard.damageReductionPercent >= 1) errors.push(`${owner}: vassal guard reduction must be in (0, 1)`);
+      if (!Number.isInteger(guard.maxSources) || guard.maxSources < 1 || guard.maxSources > 2) errors.push(`${owner}: vassal guard maxSources must be an integer from 1 to 2`);
+    }
     if (enemy.repeatSkillPressure !== undefined) {
       const pressure = enemy.repeatSkillPressure;
       if (!Number.isInteger(pressure.threshold) || pressure.threshold <= 0) errors.push(`${owner}: repeat pressure threshold must be a positive integer`);
@@ -995,6 +1085,22 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>, coins: Record<s
         errors.push(`${owner}: hpBelowFraction must be greater than 0 and less than 1`);
       }
       if (phase.intents.length === 0) errors.push(`${owner}: must declare at least one intent`);
+      if (phase.transitionBeforeAction !== undefined && phase.transitionBeforeAction !== true) {
+        errors.push(`${owner}: transitionBeforeAction must be true when declared`);
+      }
+      if (phase.growthOnActionResolved !== undefined) {
+        const growth = phase.growthOnActionResolved;
+        if (!Number.isInteger(growth.amount) || growth.amount <= 0 || !Number.isInteger(growth.maxStacks) || growth.maxStacks < growth.amount) {
+          errors.push(`${owner}: growthOnActionResolved requires positive integer amount and maxStacks at least amount`);
+        }
+      }
+      for (const action of phase.onEnterActions ?? []) {
+        // Reuse the intent action validator without implying a phase has a turn intent.
+        validateIntent({ id: `${owner}-on-enter`, actions: [action] }, owner);
+        if (action.kind !== 'setEnemyResource' && action.kind !== 'adjustEnemyResource' && action.kind !== 'removePlayerStatus' && action.kind !== 'summonEnemies') {
+          errors.push(`${owner}: onEnterActions only support resource mutation, player status removal, or summons`);
+        }
+      }
       if (
         phase.damageTakenMultiplier !== undefined &&
         (!Number.isFinite(phase.damageTakenMultiplier) || phase.damageTakenMultiplier <= 1 || phase.damageTakenMultiplier > 2)

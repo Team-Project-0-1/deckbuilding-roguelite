@@ -37,6 +37,9 @@ import type {
 const hpList = (state: CombatState): number[] =>
   state.enemies.map((enemy) => enemy.hp);
 
+const furnaceList = (state: CombatState): number[] =>
+  state.enemies.map((enemy) => enemy.furnaceTemperature ?? 0);
+
 describe("explicit telemetry command replay", () => {
   it("reconstructs every optional reducer choice and accepts legacy omissions", () => {
     expect(
@@ -146,6 +149,8 @@ const decisionFact = (
     playerAfter: after.player.hp,
     enemiesBefore: hpList(before),
     enemiesAfter: hpList(after),
+    enemyFurnaceBefore: furnaceList(before),
+    enemyFurnaceAfter: furnaceList(after),
   },
 });
 
@@ -228,7 +233,7 @@ const makeTrace = (seed: string): HumanRunTraceLike => {
     contentDb,
   );
   const trace: HumanRunTraceLike = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     source: "human",
     runSeed: seed,
     contentVersion: CONTENT_VERSION,
@@ -351,7 +356,7 @@ describe("human log report", () => {
     expect(replay.verification).toEqual({ ok: true, mismatches: [] });
   });
 
-  it("keeps optional explicit choices while reading older schema-v3 logs", () => {
+  it("keeps optional explicit choices while reading furnace-aware schema-v4 logs", () => {
     const dir = mkdtempSync(join(tmpdir(), "human-log-explicit-"));
     const trace = makeTrace("human-fixture-explicit");
     const decision = trace.combats[0]?.decisions[0];
@@ -391,16 +396,21 @@ describe("human log report", () => {
     const trace = makeTrace("human-fixture-2");
     const tamperedHp = structuredClone(trace);
     tamperedHp.combats[0]!.decisions[0]!.hp.playerAfter += 1;
+    const tamperedFurnace = structuredClone(trace);
+    const furnaceAfter = tamperedFurnace.combats[0]!.decisions[0]!.hp.enemyFurnaceAfter;
+    if (furnaceAfter === undefined) throw new Error("missing furnace facts");
+    furnaceAfter[0] = (furnaceAfter[0] ?? 0) + 1;
     const drift = structuredClone(trace);
     drift.contentVersion = "old-content";
     writeTrace(dir, "a-valid.json", trace);
     writeTrace(dir, "b-tampered.json", tamperedHp);
-    writeTrace(dir, "c-drift.json", drift);
+    writeTrace(dir, "c-furnace-tampered.json", tamperedFurnace);
+    writeTrace(dir, "d-drift.json", drift);
 
     const read = readHumanLogDirectory(dir);
     expect(read.rejected).toEqual([
       {
-        filename: "c-drift.json",
+        filename: "d-drift.json",
         reason: `content drift: trace contentVersion old-content does not match ${CONTENT_VERSION}`,
       },
     ]);
@@ -409,6 +419,11 @@ describe("human log report", () => {
     const replay = replayHumanRun(tampered!.trace);
     expect(replay.verification.ok).toBe(false);
     expect(replay.verification.mismatches.join("\n")).toContain("hp.playerAfter mismatch");
+    const furnaceTampered = read.files.find((file) => file.filename === "c-furnace-tampered.json");
+    expect(furnaceTampered).toBeDefined();
+    expect(replayHumanRun(furnaceTampered!.trace).verification.mismatches.join("\n")).toContain(
+      "hp.enemyFurnaceAfter mismatch",
+    );
   });
 
   it("renders deterministic markdown", () => {

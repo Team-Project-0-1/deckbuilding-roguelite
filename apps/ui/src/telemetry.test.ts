@@ -172,7 +172,7 @@ describe("human telemetry capture", () => {
     const initial = bootCombat();
     expect(trace).toMatchObject({
       // P6: UI 텔레메트리 스키마 v3 (rest/treasure/passive-reward 경로 사실 가산)
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "human",
       runSeed: "telemetry-seed",
       contentVersion: "test-content",
@@ -216,6 +216,8 @@ describe("human telemetry capture", () => {
         playerAfter: initial.player.hp,
         enemiesBefore: initial.enemies.map((enemy) => enemy.hp),
         enemiesAfter: initial.enemies.map((enemy) => enemy.hp),
+        enemyFurnaceBefore: initial.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
+        enemyFurnaceAfter: initial.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
       },
     });
   });
@@ -266,6 +268,45 @@ describe("human telemetry capture", () => {
       playerAfter: result.state.player.hp,
       enemiesBefore: combat.enemies.map((enemy) => enemy.hp),
       enemiesAfter: result.state.enemies.map((enemy) => enemy.hp),
+      enemyFurnaceBefore: combat.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
+      enemyFurnaceAfter: result.state.enemies.map((enemy) => enemy.furnaceTemperature ?? 0),
+    });
+  });
+
+  it("captures furnace changes even when every enemy HP value is unchanged", () => {
+    const combat = bootCombat();
+    const before = {
+      ...combat,
+      enemies: combat.enemies.map((enemy) => ({ ...enemy, furnaceTemperature: 6 })),
+    } as CombatState;
+    const after = {
+      ...before,
+      enemies: before.enemies.map((enemy) => ({ ...enemy, furnaceTemperature: 3 })),
+    } as CombatState;
+    const started = beginHumanCombat(
+      createHumanRunTrace({
+        runSeed: "telemetry-furnace",
+        contentVersion: "test-content",
+        maxHp: before.player.maxHp,
+        startedAt: fixedStart,
+      }),
+      { combatIndex: 0, attempt: 0, combat: before },
+    );
+
+    const trace = recordHumanDecision(started, {
+      combatIndex: 0,
+      attempt: 0,
+      before,
+      commands: [],
+      after,
+      events: [],
+    });
+
+    expect(trace.combats[0]?.decisions[0]?.hp).toMatchObject({
+      enemiesBefore: before.enemies.map((enemy) => enemy.hp),
+      enemiesAfter: after.enemies.map((enemy) => enemy.hp),
+      enemyFurnaceBefore: [6],
+      enemyFurnaceAfter: [3],
     });
   });
 });

@@ -185,6 +185,21 @@ export interface EnemyState extends UnitState {
   repeatSkillPressure?: RepeatSkillPressureState;
   royalTaxPending?: RoyalTaxPendingState;
   royalTaxDefaultStreak?: number;
+  furnaceTemperature?: number;
+  furnaceMaxTemperature?: number;
+  furnaceActionResolvedGain?: number;
+  furnacePlayerBurnDamageGain?: number;
+  furnacePlayerBurnClearLoss?: number;
+  furnacePlayerDamageThreshold?: { phaseEntryHpFraction: number; loss: number };
+  /** HP cap frozen at combat start and every entered phase for furnace burst thresholds. */
+  furnacePhaseEntryHp?: number;
+  furnaceActionResolvedTurn?: number;
+  furnacePlayerBurnDamageTurn?: number;
+  furnacePlayerBurnClearTurn?: number;
+  furnacePlayerDamageThresholdTurn?: number;
+  furnacePlayerDamageTurn?: number;
+  furnacePlayerDamageThisTurn?: number;
+  vassalGuard?: { sourceEnemyUid: number; damageReductionPercent: number; maxSources: number };
 }
 
 // P7 D1/D2 — usedThisTurn(턴당 1회) 폐지 → cooldownRemaining(0=가용, 턴 시작 감소).

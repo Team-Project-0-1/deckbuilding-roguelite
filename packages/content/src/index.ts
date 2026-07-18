@@ -1975,7 +1975,7 @@ export const enemies = {
       {
         id: 'red-charge',
         windup: { turns: 1, revealAtStart: true },
-        cancelOn: { damageThreshold: 12 },
+        cancelOn: { kind: 'skillDamage', threshold: 12 },
         vulnerableWhileWindup: 1.5,
         actions: [
           { kind: 'attack', damage: 22, damagePerGrowthPercent: 0.15 },
@@ -2253,7 +2253,7 @@ export const enemies = {
       executionIntent: {
         id: 'zeal-execution',
         windup: { turns: 1, revealAtStart: true },
-        cancelOn: { damageThreshold: 15 },
+        cancelOn: { kind: 'skillDamage', threshold: 15 },
         actions: [{ kind: 'attack', damage: 18 }, { kind: 'sealTriggeredSkill', turns: 1 }, { kind: 'resetRepeatSkillPressure' }]
       }
     },
@@ -2330,6 +2330,108 @@ export const enemies = {
     name: '늪지 부화체',
     maxHp: 18,
     intents: [{ id: 'marsh-bite', actions: [{ kind: 'attack', damage: 5 }] }]
+  },
+  'ash-duke-valdemar': {
+    id: enemy('ash-duke-valdemar'),
+    name: '재의 공작 발데마르',
+    maxHp: 180,
+    furnace: {
+      initialTemperature: 0,
+      maxTemperature: 6,
+      actionResolvedGain: 1,
+      playerBurnDamageGain: 1,
+      playerBurnClearLoss: 2,
+      playerDamageThreshold: { phaseEntryHpFraction: 0.15, loss: 1 },
+      atMaxIntent: {
+        id: 'coronation',
+        windup: { turns: 1, revealAtStart: true },
+        cancelOn: { kind: 'enemyResourceAtMost', resource: 'furnaceTemperature', value: 5 },
+        onCancelActions: [
+          { kind: 'setEnemyResource', resource: 'furnaceTemperature', value: 3, reason: 'coronationCancelled' },
+          { kind: 'reduceGrowthStacks', amount: 2 }
+        ],
+        actions: [
+          { kind: 'attack', damage: 24, damagePerGrowthPercent: 0.08 },
+          { kind: 'applyStatus', status: 'burn', stacks: 3 },
+          { kind: 'setEnemyResource', resource: 'furnaceTemperature', value: 3, reason: 'coronationResolved' }
+        ]
+      }
+    },
+    intents: [
+      {
+        id: 'burning-slash',
+        actions: [
+          { kind: 'attack', damage: 10 },
+          { kind: 'applyStatus', status: 'burn', stacks: 1, requiresLastAttackHpDamage: true }
+        ]
+      },
+      {
+        id: 'ember-brand',
+        windup: { turns: 1, revealAtStart: true },
+        actions: [{ kind: 'applyStatus', status: 'burn', stacks: 2 }]
+      }
+    ],
+    phases: [
+      {
+        hpBelowFraction: 0.7,
+        transitionBeforeAction: true,
+        onEnterActions: [
+          { kind: 'removePlayerStatus', status: 'burn', stacks: 1 },
+          { kind: 'setEnemyResource', resource: 'furnaceTemperature', value: 2, reason: 'phaseEntered' },
+          { kind: 'summonEnemies', enemy: enemy('ash-vassal'), maxCount: 2 }
+        ],
+        intents: [
+          {
+            id: 'burning-slash',
+            actions: [
+              { kind: 'attack', damage: 10 },
+              { kind: 'applyStatus', status: 'burn', stacks: 1, requiresLastAttackHpDamage: true }
+            ]
+          },
+          {
+            id: 'ember-brand',
+            windup: { turns: 1, revealAtStart: true },
+            actions: [{ kind: 'applyStatus', status: 'burn', stacks: 2 }]
+          }
+        ]
+      },
+      {
+        hpBelowFraction: 0.35,
+        transitionBeforeAction: true,
+        onEnterActions: [{ kind: 'setEnemyResource', resource: 'furnaceTemperature', value: 2, reason: 'phaseEntered' }],
+        growthOnActionResolved: { amount: 1, maxStacks: 5 },
+        intents: [
+          {
+            id: 'burning-slash',
+            actions: [
+              { kind: 'attack', damage: 10, damagePerGrowthPercent: 0.08 },
+              { kind: 'applyStatus', status: 'burn', stacks: 1, requiresLastAttackHpDamage: true }
+            ]
+          },
+          {
+            id: 'ember-brand',
+            windup: { turns: 1, revealAtStart: true },
+            actions: [{ kind: 'applyStatus', status: 'burn', stacks: 2 }]
+          }
+        ]
+      }
+    ]
+  },
+  'ash-vassal': {
+    id: enemy('ash-vassal'),
+    name: '재의 가신',
+    maxHp: 24,
+    vassalGuard: { source: enemy('ash-duke-valdemar'), damageReductionPercent: 0.15, maxSources: 2 },
+    intents: [
+      { id: 'ash-swipe', actions: [{ kind: 'attack', damage: 6 }] },
+      {
+        id: 'cinder-rake',
+        actions: [
+          { kind: 'attack', damage: 4 },
+          { kind: 'applyStatus', status: 'burn', stacks: 1 }
+        ]
+      }
+    ]
   },
   'ember-archmage': {
     id: enemy('ember-archmage'),

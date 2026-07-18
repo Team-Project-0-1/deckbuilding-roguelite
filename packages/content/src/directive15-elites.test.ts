@@ -20,7 +20,7 @@ describe('Directive 15 elite content contract', () => {
         executionIntent: {
           id: 'zeal-execution',
           windup: { turns: 1, revealAtStart: true },
-          cancelOn: { damageThreshold: 15 },
+          cancelOn: { kind: 'skillDamage', threshold: 15 },
           actions: [{ kind: 'attack', damage: 18 }, { kind: 'sealTriggeredSkill', turns: 1 }, { kind: 'resetRepeatSkillPressure' }]
         }
       },

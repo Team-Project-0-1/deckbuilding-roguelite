@@ -424,7 +424,7 @@ describe('P9 latest design sync', () => {
         {
           id: 'red-charge',
           windup: { turns: 1, revealAtStart: true },
-          cancelOn: { damageThreshold: 12 },
+          cancelOn: { kind: 'skillDamage', threshold: 12 },
           vulnerableWhileWindup: 1.5,
           actions: [
             { kind: 'attack', damage: 22, damagePerGrowthPercent: 0.15 },

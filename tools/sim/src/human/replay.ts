@@ -109,6 +109,9 @@ export const commandFromHumanTelemetry = (command: TelemetryCommand): Command =>
 const hpList = (state: CombatState): number[] =>
   state.enemies.map((enemy) => enemy.hp);
 
+const furnaceList = (state: CombatState): number[] =>
+  state.enemies.map((enemy) => enemy.furnaceTemperature ?? 0);
+
 const sameNumberArray = (
   left: readonly number[],
   right: readonly number[],
@@ -209,6 +212,28 @@ const verifyDecisionFacts = (
       `${path}.hp.enemiesAfter`,
       decision.hp.enemiesAfter,
       hpList(after),
+    );
+  }
+  if (
+    decision.hp.enemyFurnaceBefore !== undefined &&
+    !sameNumberArray(decision.hp.enemyFurnaceBefore, furnaceList(before))
+  ) {
+    pushMismatch(
+      mismatches,
+      `${path}.hp.enemyFurnaceBefore`,
+      decision.hp.enemyFurnaceBefore,
+      furnaceList(before),
+    );
+  }
+  if (
+    decision.hp.enemyFurnaceAfter !== undefined &&
+    !sameNumberArray(decision.hp.enemyFurnaceAfter, furnaceList(after))
+  ) {
+    pushMismatch(
+      mismatches,
+      `${path}.hp.enemyFurnaceAfter`,
+      decision.hp.enemyFurnaceAfter,
+      furnaceList(after),
     );
   }
   pushMismatch(mismatches, `${path}.skills`, decision.skills, eventSkills(events));

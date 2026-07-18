@@ -10,6 +10,7 @@ export interface EnemyStateOptions {
   slot: number;
   summonSick?: boolean;
   statuses?: EnemyState['statuses'];
+  vassalGuardSourceEnemyUid?: number;
 }
 
 /** Builds every runtime enemy from a definition so entrants and transforms share the same invariants. */
@@ -41,6 +42,22 @@ export const createEnemyState = (defId: EnemyDefId, db: ContentDb, options: Enem
       petrifyCancelIntentId: def.petrify.cancelWindupIntentId
     }),
     ...(def.warBanner === undefined ? {} : { warBannerAuraPercent: def.warBanner.attackAuraPercent }),
-    ...(def.roundGrowth === undefined ? {} : { roundGrowth: def.roundGrowth, growthStacks: 0, damageTakenThisRound: 0 })
+    ...(def.roundGrowth === undefined ? {} : { roundGrowth: def.roundGrowth, growthStacks: 0, damageTakenThisRound: 0 }),
+    ...(def.furnace === undefined ? {} : {
+      furnaceTemperature: def.furnace.initialTemperature,
+      furnaceMaxTemperature: def.furnace.maxTemperature,
+      furnacePhaseEntryHp: maxHp,
+      furnaceActionResolvedGain: def.furnace.actionResolvedGain,
+      furnacePlayerBurnDamageGain: def.furnace.playerBurnDamageGain,
+      furnacePlayerBurnClearLoss: def.furnace.playerBurnClearLoss,
+      furnacePlayerDamageThreshold: def.furnace.playerDamageThreshold
+    }),
+    ...(def.vassalGuard === undefined || options.vassalGuardSourceEnemyUid === undefined ? {} : {
+      vassalGuard: {
+        sourceEnemyUid: options.vassalGuardSourceEnemyUid,
+        damageReductionPercent: def.vassalGuard.damageReductionPercent,
+        maxSources: def.vassalGuard.maxSources
+      }
+    })
   };
 };

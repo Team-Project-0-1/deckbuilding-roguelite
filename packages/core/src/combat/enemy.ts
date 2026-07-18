@@ -1,11 +1,12 @@
 import { DURATION_STATUS_IDS } from '../content-types';
-import type { ContentDb, EnemyIntent, StatusId } from '../content-types';
+import type { ContentDb, EnemyAction, EnemyIntent, StatusId } from '../content-types';
 import type { Element, SlotId } from '../ids';
 import { isSlotUsableNow } from './commands';
 import { openRoyalTax, resetRepeatSkillPressure, resetRoyalTaxDefaults, sealTriggeredSkill } from './directive15';
 import { rngFrom } from '../rng';
 import type { CombatEvent } from './events';
 import { createEnemyState, MAX_ENEMY_SLOTS } from './enemy-state';
+import { applyFurnaceActionResolved, cancelWindupIfNeeded, setFurnaceTemperature } from './furnace';
 import { applyBlock, applyDamage, applyEffectAtom, checkCombatEnd } from './resolve/flip';
 import { aggregateSkillSeal, assertCombatCoinZoneInvariant, skillSealOwners, statusStacks, statusTurns } from './state';
 import type { CombatState } from './state';
@@ -16,6 +17,14 @@ export const nextIntent = (state: CombatState, enemyIndex: number, db: ContentDb
   const def = db.enemies[String(enemy.defId)];
   if (def === undefined || def.intents.length === 0) throw new Error('enemy has no intents');
   const intents = enemy.phaseIndex === undefined ? def.intents : (def.phases?.[enemy.phaseIndex]?.intents ?? def.intents);
+  const atMaxIntent = def.furnace?.atMaxIntent;
+  if (
+    atMaxIntent !== undefined &&
+    enemy.furnaceTemperature === enemy.furnaceMaxTemperature &&
+    enemy.cancelledWindupIntentId !== atMaxIntent.id
+  ) {
+    return { intent: atMaxIntent, index: enemy.intentIndex };
+  }
   const repeat = def.repeatSkillPressure;
   if ((enemy.repeatSkillPressure?.zeal ?? 0) >= (repeat?.threshold ?? Number.POSITIVE_INFINITY)) {
     return { intent: repeat!.executionIntent, index: enemy.intentIndex };
@@ -74,12 +83,14 @@ const transformHatch = (state: CombatState, enemyIndex: number, db: ContentDb, e
     enemyUid: enemyUid(current, enemyIndex),
     slot: current.slot,
     summonSick: true,
-    statuses: current.statuses
+    statuses: current.statuses,
+    vassalGuardSourceEnemyUid: current.vassalGuard?.sourceEnemyUid
   });
   events.push({ type: 'enemyHatched', sourceEnemyUid: enemyUid(current, enemyIndex), into: String(into) });
   return withEnemy(state, enemyIndex, () => ({
     ...transformed,
-    protectionLink: current.protectionLink === undefined ? undefined : { ...current.protectionLink }
+    protectionLink: current.protectionLink === undefined ? undefined : { ...current.protectionLink },
+    vassalGuard: current.vassalGuard === undefined ? undefined : { ...current.vassalGuard }
   }));
 };
 
@@ -105,11 +116,13 @@ const summonEnemies = (state: CombatState, sourceIndex: number, enemy: string, m
     const slot = Array.from({ length: MAX_ENEMY_SLOTS }, (_, index) => index).find((candidate) => !occupied.has(candidate));
     if (slot === undefined) break;
     const uid = Math.max(0, ...next.enemies.map((candidate, index) => enemyUid(candidate, index))) + 1;
+    const entrantDef = db.enemies[enemy];
     const entrant = createEnemyState(enemy as typeof source.defId, db, {
       enemyScale: next.enemyScale,
       enemyUid: uid,
       slot,
-      summonSick: true
+      summonSick: true,
+      vassalGuardSourceEnemyUid: entrantDef?.vassalGuard?.source === source.defId ? enemyUid(source, sourceIndex) : undefined
     });
     const replacementIndex = next.enemies.findIndex((candidate, index) => candidate.hp <= 0 && (candidate.slot ?? index) === slot);
     next = {
@@ -318,11 +331,18 @@ const maybeStartWindup = (state: CombatState, enemyIndex: number, db: ContentDb,
     return { state, started: false };
   }
   const boundHealAlly = bindHealAlly(state, enemyIndex, enemy.intent);
+  const cancelPredicates = enemy.intent.cancelOn === undefined
+    ? []
+    : 'kind' in enemy.intent.cancelOn
+      ? [enemy.intent.cancelOn]
+      : enemy.intent.cancelOn;
+  const skillDamageThresholds = cancelPredicates.flatMap((predicate) => predicate.kind === 'skillDamage' ? [predicate.threshold] : []);
+  const cancelThreshold = skillDamageThresholds.length === 0 ? undefined : Math.min(...skillDamageThresholds);
   const windup = {
     intent: enemy.intent,
     turnsLeft: enemy.intent.windup.turns,
     startHp: enemy.hp,
-    ...(enemy.intent.cancelOn === undefined ? {} : { cancelThreshold: enemy.intent.cancelOn.damageThreshold }),
+    ...(cancelThreshold === undefined ? {} : { cancelThreshold }),
     ...(boundHealAlly === undefined ? {} : { boundHealAlly })
   };
   events.push({
@@ -330,7 +350,7 @@ const maybeStartWindup = (state: CombatState, enemyIndex: number, db: ContentDb,
     enemy: enemyIndex,
     intent: enemy.intent,
     turnsLeft: windup.turnsLeft,
-    ...(windup.cancelThreshold === undefined ? {} : { cancelThreshold: windup.cancelThreshold })
+    ...(cancelThreshold === undefined ? {} : { cancelThreshold })
   });
   for (const action of enemy.intent.actions) {
     if (action.kind === 'summonEnemies') {
@@ -341,21 +361,64 @@ const maybeStartWindup = (state: CombatState, enemyIndex: number, db: ContentDb,
   return { state: beginCoinSeizureTelegraph(started, enemyIndex, db, events), started: true };
 };
 
+const nextPhaseIndexFor = (state: CombatState, enemyIndex: number, db: ContentDb): number => {
+  const enemy = state.enemies[enemyIndex];
+  const def = enemy === undefined ? undefined : db.enemies[String(enemy.defId)];
+  if (enemy === undefined || def?.phases === undefined) return -1;
+  return def.phases.findIndex((phase, index) => index > (enemy.phaseIndex ?? -1) && enemy.hp / enemy.maxHp < phase.hpBelowFraction);
+};
+
 const maybeChangePhase = (state: CombatState, enemyIndex: number, db: ContentDb, events: CombatEvent[]): CombatState => {
   const enemy = state.enemies[enemyIndex];
   const def = enemy === undefined ? undefined : db.enemies[String(enemy.defId)];
-  if (enemy === undefined || def?.phases === undefined || enemy.phaseIndex !== undefined) return state;
-  const phaseIndex = def.phases.findIndex((phase) => enemy.hp / enemy.maxHp < phase.hpBelowFraction);
+  if (enemy === undefined || def?.phases === undefined) return state;
+  const phaseIndex = nextPhaseIndexFor(state, enemyIndex, db);
   if (phaseIndex < 0) return state;
   const phase = def.phases[phaseIndex];
   if (phase === undefined) return state;
+  let next = enemy.windup === undefined ? state : cancelWindupIfNeeded(state, enemyIndex, events, true);
   events.push({ type: 'enemyPhaseChanged', enemy: enemyIndex });
-  return withEnemy(state, enemyIndex, (candidate) => ({
+  next = withEnemy(next, enemyIndex, (candidate) => ({
     ...candidate,
     phaseIndex,
     intentIndex: -1,
-    damageTakenMultiplier: phase.damageTakenMultiplier
+    damageTakenMultiplier: phase.damageTakenMultiplier,
+    ...(candidate.furnaceTemperature === undefined ? {} : { furnacePhaseEntryHp: Math.ceil(candidate.maxHp * phase.hpBelowFraction) })
   }));
+  for (const action of phase.onEnterActions ?? []) {
+    if (action.kind === 'setEnemyResource') {
+      next = setFurnaceTemperature(next, enemyIndex, action.value, action.reason, events);
+    } else if (action.kind === 'adjustEnemyResource') {
+      next = setFurnaceTemperature(next, enemyIndex, (next.enemies[enemyIndex]?.furnaceTemperature ?? 0) + action.amount, action.reason, events);
+    } else if (action.kind === 'removePlayerStatus') {
+      const current = next.player.statuses[action.status];
+      if (current === undefined) continue;
+      const statuses = { ...next.player.statuses };
+      if (current.kind === 'stack') {
+        const stacks = Math.max(0, current.stacks - action.stacks);
+        if (stacks === 0) delete statuses[action.status]; else statuses[action.status] = { kind: 'stack', stacks };
+      } else {
+        const turns = Math.max(0, current.turns - action.stacks);
+        if (turns === 0) delete statuses[action.status]; else statuses[action.status] = { kind: 'duration', turns };
+      }
+      next = { ...next, player: { ...next.player, statuses } };
+    } else if (action.kind === 'summonEnemies') {
+      next = summonEnemies(next, enemyIndex, String(action.enemy), action.maxCount, db, events);
+    } else {
+      throw new Error(`phase entry action ${action.kind} is not supported`);
+    }
+  }
+  return next;
+};
+
+const applyPhaseGrowthOnActionResolved = (state: CombatState, enemyIndex: number, db: ContentDb, events: CombatEvent[]): CombatState => {
+  const enemy = state.enemies[enemyIndex];
+  const growth = enemy?.phaseIndex === undefined ? undefined : db.enemies[String(enemy.defId)]?.phases?.[enemy.phaseIndex]?.growthOnActionResolved;
+  if (enemy === undefined || growth === undefined) return state;
+  const stacks = Math.min(growth.maxStacks, (enemy.growthStacks ?? 0) + growth.amount);
+  if (stacks === enemy.growthStacks) return state;
+  events.push({ type: 'enemyGrew', enemy: enemyIndex, stacks });
+  return withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, growthStacks: stacks }));
 };
 
 const tickEnemyDurations = (input: CombatState, enemyIndex: number, events: CombatEvent[], preserveShock = false): CombatState => {
@@ -421,9 +484,18 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
     })
   };
 
+  const transitionedBeforeAction = new Set<number>();
   for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex += 1) {
     const enemy = state.enemies[enemyIndex];
     if (enemy === undefined || enemy.hp <= 0 || enemy.summonSick === true) continue;
+    const nextPhaseIndex = nextPhaseIndexFor(state, enemyIndex, db);
+    const nextPhase = nextPhaseIndex < 0 ? undefined : db.enemies[String(enemy.defId)]?.phases?.[nextPhaseIndex];
+    if (nextPhase?.transitionBeforeAction === true) {
+      state = maybeChangePhase(state, enemyIndex, db, events);
+      transitionedBeforeAction.add(enemyIndex);
+      state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
+      continue;
+    }
     if (enemy.roundGrowth !== undefined && (enemy.growthStacks ?? 0) > 0) {
       const requested = Math.round(
         enemy.maxHp * enemy.roundGrowth.healMaxHpFractionPerStack * (enemy.growthStacks ?? 0)
@@ -477,16 +549,9 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
       continue;
     }
     if (windupEnemy?.windup !== undefined) {
-      const damageTaken = Math.max(0, windupEnemy.windup.startHp - windupEnemy.hp);
-      if (windupEnemy.windup.cancelThreshold !== undefined && damageTaken >= windupEnemy.windup.cancelThreshold) {
-        events.push({ type: 'enemyWindupCancelled', enemy: enemyIndex, intent: windupEnemy.windup.intent });
-        state = withEnemy(state, enemyIndex, (candidate) => ({
-          ...candidate,
-          windup: undefined,
-          boundHealAlly: undefined,
-          cancelledWindupIntentId: windupEnemy.windup?.intent.id
-        }));
-        state = resetRepeatSkillPressure(state, enemyIndex, events);
+      const beforeCancellation = state;
+      state = cancelWindupIfNeeded(state, enemyIndex, events);
+      if (state !== beforeCancellation) {
         state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
         continue;
       }
@@ -518,6 +583,10 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
       state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, petrifyActive: true, petrifyRawDamage: 0 }));
     }
     if (resolvedIntent?.groupMarch === true) state = applyGroupMarch(state, enemyIndex, db, events);
+    // Furnace writes authored on an intent are end-of-intent pins.  The
+    // automatic action-resolved gain is applied first, so a reset can
+    // deterministically suppress an immediate re-arm without enemy ID logic.
+    const deferredFurnaceActions: Extract<EnemyAction, { kind: 'setEnemyResource' | 'adjustEnemyResource' }>[] = [];
     let lastAttackHpDamage = 0;
     let lastAttackBlockedAmount = 0;
     let lastAttackBlocked = false;
@@ -713,6 +782,24 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           };
           events.push({ type: 'enemyCleansed', enemy: target, statuses: cleansed });
         }
+      } else if (action.kind === 'setEnemyResource') {
+        deferredFurnaceActions.push(action);
+      } else if (action.kind === 'adjustEnemyResource') {
+        deferredFurnaceActions.push(action);
+      } else if (action.kind === 'removePlayerStatus') {
+        const current = state.player.statuses[action.status];
+        if (current === undefined) continue;
+        const statuses = { ...state.player.statuses };
+        if (current.kind === 'stack') {
+          const stacks = Math.max(0, current.stacks - action.stacks);
+          if (stacks === 0) delete statuses[action.status]; else statuses[action.status] = { kind: 'stack', stacks };
+        } else {
+          const turns = Math.max(0, current.turns - action.stacks);
+          if (turns === 0) delete statuses[action.status]; else statuses[action.status] = { kind: 'duration', turns };
+        }
+        state = { ...state, player: { ...state.player, statuses } };
+      } else if (action.kind === 'reduceGrowthStacks') {
+        state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, growthStacks: Math.max(0, (candidate.growthStacks ?? 0) - action.amount) }));
       } else {
         // 미래 행동 타입이 조용히 buff로 흘러들지 않도록 컴파일 타임 exhaustiveness 고정
         const exhausted: never = action;
@@ -731,6 +818,17 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         ? { petrifyActive: false, petrifyRawDamage: 0 }
         : {})
     }));
+    state = applyPhaseGrowthOnActionResolved(state, enemyIndex, db, events);
+    state = applyFurnaceActionResolved(state, enemyIndex, db, events);
+    for (const action of deferredFurnaceActions) {
+      state = setFurnaceTemperature(
+        state,
+        enemyIndex,
+        action.kind === 'setEnemyResource' ? action.value : (state.enemies[enemyIndex]?.furnaceTemperature ?? 0) + action.amount,
+        action.reason,
+        events
+      );
+    }
     state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
   }
 
@@ -823,8 +921,8 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
   for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex += 1) {
     const enemy = state.enemies[enemyIndex];
     if (enemy === undefined || enemy.hp <= 0 || enemy.windup !== undefined) continue;
+    if (!transitionedBeforeAction.has(enemyIndex)) state = maybeChangePhase(state, enemyIndex, db, events);
     state = clearStaleRepeatPressure(state, enemyIndex, db, events);
-    state = maybeChangePhase(state, enemyIndex, db, events);
     const next = nextIntent(state, enemyIndex, db);
     const boundHealAlly = bindHealAlly(state, enemyIndex, next.intent);
     events.push({ type: 'intentRevealed', enemy: enemyIndex, intent: next.intent });

@@ -3,12 +3,13 @@ import { effectiveElements, isStackStatus, isSuccessLadderFlipSkill, skillCooldo
 import type { Element, EquipmentDefId, CoinUid, Face, SkillId, SlotId } from '../../ids';
 import { rngFrom } from '../../rng';
 import { drawCards, drawSpecificCoin, HAND_LIMIT } from '../draw';
-import { recordDirective15SkillResolution, resetRepeatSkillPressure } from '../directive15';
+import { recordDirective15SkillResolution } from '../directive15';
 import type { CombatEvent, DamageSource } from '../events';
 import { assertCoinEnchantEligibility, firstUseEchoCoins, rollEnchantedFace } from '../enchant';
 import { activeSkillSeal, assertCombatCoinZoneInvariant, isSkillCommandSealed, MAX_PRESERVED_COINS, recordRecentSkillUse, statusStacks, statusTurns } from '../state';
 import type { CombatState, StatusState, TurnTriggerInstance } from '../state';
 import { actSummon, addSummon, defaultEquipmentId, tickSummonDuration } from '../summons';
+import { applyFurnacePlayerBurnClear, applyFurnacePlayerBurnDamage, applyFurnacePlayerDamageThreshold, cancelWindupIfNeeded, skillDamageCancelMatches } from '../furnace';
 
 export interface ResolveResult {
   state: CombatState;
@@ -44,6 +45,8 @@ export const scaleSkillAuthoredEffect = (atom: EffectAtom, multiplier: number | 
     case 'damageIfReused':
       return { ...atom, amount: scale(atom.amount) };
     case 'applyStatus':
+      return { ...atom, stacks: scale(atom.stacks) };
+    case 'removeStatus':
       return { ...atom, stacks: scale(atom.stacks) };
     case 'damageByConsumed':
       return {
@@ -167,6 +170,13 @@ export const checkCombatEnd = (state: CombatState, events: CombatEvent[]): Comba
 
 const statusCarrier = (state: CombatState, target: TargetRef) => (target.type === 'player' ? state.player : state.enemies[target.index]);
 
+const vassalGuardMultiplier = (state: CombatState, enemyIndex: number): number => {
+  const sourceEnemyUid = state.enemies[enemyIndex]?.enemyUid;
+  const guards = state.enemies.filter((candidate) => candidate.hp > 0 && candidate.vassalGuard?.sourceEnemyUid === sourceEnemyUid).map((candidate) => candidate.vassalGuard!);
+  const maxSources = guards.length === 0 ? 0 : Math.min(...guards.map((guard) => guard.maxSources));
+  return Math.max(0, 1 - guards.slice(0, maxSources).reduce((total, guard) => total + guard.damageReductionPercent, 0));
+};
+
 const modifiedDamage = (state: CombatState, target: TargetRef, amount: number, attacker?: TargetRef): number => {
   if (attacker === undefined) return amount;
   const attackerStatuses = statusCarrier(state, attacker)?.statuses;
@@ -188,14 +198,22 @@ const modifiedDamage = (state: CombatState, target: TargetRef, amount: number, a
   const brokenProtectionMultiplier = petrifyTarget?.protectionLink !== undefined && petrifyTarget.protectionLink.active === false
     ? petrifyTarget.protectionLink.brokenDamageTakenMultiplier
     : 1;
-  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier * phaseMultiplier * growthMultiplier * crackedMultiplier * brokenProtectionMultiplier);
+  const guardMultiplier = target.type === 'enemy' ? vassalGuardMultiplier(state, target.index) : 1;
+  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier * phaseMultiplier * growthMultiplier * crackedMultiplier * brokenProtectionMultiplier * guardMultiplier);
 };
 
 const statusDamageAmount = (state: CombatState, target: TargetRef, amount: number): number => {
   if (target.type !== 'enemy') return amount;
   const enemy = state.enemies[target.index];
-  if (enemy?.roundGrowth === undefined) return amount;
-  return Math.floor(amount * Math.max(0, 1 - (enemy.growthStacks ?? 0) * enemy.roundGrowth.damageReductionPerStack));
+  if (enemy === undefined) return amount;
+  const growthMultiplier = enemy.roundGrowth === undefined
+    ? 1
+    : Math.max(0, 1 - (enemy.growthStacks ?? 0) * enemy.roundGrowth.damageReductionPerStack);
+  return Math.floor(
+    amount *
+    growthMultiplier *
+    vassalGuardMultiplier(state, target.index)
+  );
 };
 
 export const applyDamage = (
@@ -238,7 +256,10 @@ export const applyDamage = (
         state.player.precisionDefenseSatisfied || (source === 'enemy' && state.player.precisionDefenseArmed && blocked > 0 && state.player.block - blocked <= 2)
     };
     events.push({ type: 'damageDealt', target, amount: hpDamage, blocked, source });
-    return checkCombatEnd({ ...state, player }, events);
+    const damaged = checkCombatEnd({ ...state, player }, events);
+    return source === 'burn' && hpDamage > 0 && damaged.phase !== 'defeat'
+      ? applyFurnacePlayerBurnDamage(damaged, events)
+      : damaged;
   }
 
   const enemy = state.enemies[target.index];
@@ -276,10 +297,7 @@ const applyEnemyDamage = (
   const hpDamage = finalAmount - blocked;
   const nextHp = Math.max(0, enemy.hp - hpDamage);
   const countsTowardRoundGrowth = attacker?.type === 'player' || source === 'burn' || source === 'poison';
-  const shouldCancelWindup =
-    source === 'skill' &&
-    enemy.windup?.cancelThreshold !== undefined &&
-    Math.max(0, enemy.windup.startHp - nextHp) >= enemy.windup.cancelThreshold;
+  const shouldCancelWindup = source === 'skill' && skillDamageCancelMatches(enemy, nextHp);
   const hatchDelay =
     enemy.hatch !== undefined &&
     !enemy.hatch.delayed &&
@@ -295,8 +313,6 @@ const applyEnemyDamage = (
           hp: nextHp,
           damageTakenThisRound:
             (candidate.damageTakenThisRound ?? 0) + (countsTowardRoundGrowth ? hpDamage : 0),
-          windup: shouldCancelWindup ? undefined : candidate.windup,
-          cancelledWindupIntentId: shouldCancelWindup ? enemy.windup?.intent.id : candidate.cancelledWindupIntentId,
           hatch: hatchDelay && candidate.hatch !== undefined
             ? { ...candidate.hatch, delayed: true, turnsRemaining: candidate.hatch.turnsRemaining + 1 }
             : candidate.hatch
@@ -305,11 +321,9 @@ const applyEnemyDamage = (
   );
   events.push({ type: 'damageDealt', target: { type: 'enemy', index: enemyIndex }, amount: hpDamage, blocked, source });
   if (hatchDelay) events.push({ type: 'enemyHatchDelayed', sourceEnemyUid: enemy.enemyUid ?? enemyIndex + 1 });
-  if (shouldCancelWindup && enemy.windup !== undefined) {
-    events.push({ type: 'enemyWindupCancelled', enemy: enemyIndex, intent: enemy.windup.intent });
-  }
   let result: CombatState = { ...state, enemies };
-  if (shouldCancelWindup) result = resetRepeatSkillPressure(result, enemyIndex, events);
+  if (shouldCancelWindup) result = cancelWindupIfNeeded(result, enemyIndex, events, true);
+  if (source === 'skill' && attacker?.type === 'player' && hpDamage > 0) result = applyFurnacePlayerDamageThreshold(result, enemyIndex, hpDamage, events);
   if (trackPetrify && enemy.petrifyActive === true && enemy.petrifyShatterRawDamageFraction !== undefined && (enemy.crackedTurns ?? 0) <= 0) {
     const threshold = Math.ceil(enemy.maxHp * enemy.petrifyShatterRawDamageFraction);
     const rawDamage = (enemy.petrifyRawDamage ?? 0) + prePetrifyAmount;
@@ -688,6 +702,26 @@ export const applyEffectAtom = (
           burnAppliedThisTurn: state.player.burnAppliedThisTurn || atom.status === 'burn'
         }
       };
+    }
+    case 'removeStatus': {
+      const statusTarget = atom.to === 'self' ? { type: 'player' as const } : target;
+      const current = statusTarget.type === 'player' ? state.player.statuses[atom.status] : state.enemies[statusTarget.index]?.statuses[atom.status];
+      if (current === undefined) return state;
+      const removed = current.kind === 'stack' ? Math.min(current.stacks, atom.stacks) : Math.min(current.turns, atom.stacks);
+      const nextStatus = current.kind === 'stack' ? current.stacks - removed : current.turns - removed;
+      if (statusTarget.type === 'player') {
+        const statuses = { ...state.player.statuses };
+        if (nextStatus === 0) delete statuses[atom.status]; else statuses[atom.status] = current.kind === 'stack' ? { kind: 'stack', stacks: nextStatus } : { kind: 'duration', turns: nextStatus };
+        const cleared = { ...state, player: { ...state.player, statuses } };
+        return atom.to === 'self' && atom.status === 'burn' && removed > 0 ? applyFurnacePlayerBurnClear(cleared, events) : cleared;
+      }
+      const enemies = state.enemies.map((enemy, index) => {
+        if (index !== statusTarget.index) return enemy;
+        const statuses = { ...enemy.statuses };
+        if (nextStatus === 0) delete statuses[atom.status]; else statuses[atom.status] = current.kind === 'stack' ? { kind: 'stack', stacks: nextStatus } : { kind: 'duration', turns: nextStatus };
+        return { ...enemy, statuses };
+      });
+      return { ...state, enemies };
     }
     case 'addCoin':
       return addTemporaryCoin(state, atom, events);

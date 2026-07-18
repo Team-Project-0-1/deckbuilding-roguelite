@@ -80,6 +80,8 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
       return ["cooldown"];
     case "enemyWindupCancelled":
       return ["skill"];
+    case "enemyFurnaceChanged":
+      return event.after > event.before ? ["overheat-enter"] : ["cooldown"];
     case "enemySummonTelegraphed":
     case "enemyHatchDelayed":
     case "enemyHatchAccelerated":

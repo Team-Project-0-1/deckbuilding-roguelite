@@ -1,4 +1,4 @@
-import type { EnemyIntent, StatusId, TargetRef } from '../content-types';
+import type { EnemyFurnaceReason, EnemyIntent, StatusId, TargetRef } from '../content-types';
 import type { CoinEnchantId, CoinUid, Element, Face, SkillId, SlotId } from '../ids';
 
 export type DamageSource = 'skill' | 'coin' | 'burn' | 'poison' | 'enemy' | 'self';
@@ -67,6 +67,7 @@ export type CombatEvent =
   | { type: 'enemyWindupStarted'; enemy: number; intent: EnemyIntent; turnsLeft: number; cancelThreshold?: number }
   | { type: 'enemyWindupTicked'; enemy: number; intent: EnemyIntent; turnsLeft: number }
   | { type: 'enemyWindupCancelled'; enemy: number; intent: EnemyIntent }
+  | { type: 'enemyFurnaceChanged'; enemy: number; before: number; after: number; reason: EnemyFurnaceReason }
   | { type: 'enemySummonTelegraphed'; sourceEnemyUid: number; enemy: string; maxCount: number }
   | { type: 'enemySummoned'; sourceEnemyUid: number; enemy: string; slot: number; enemyUid: number }
   | { type: 'enemySummonFailed'; sourceEnemyUid: number; enemy: string; maxCount: number }

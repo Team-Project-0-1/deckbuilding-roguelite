@@ -121,8 +121,20 @@ const DIRECTIVE15_ELITE_POOL = [[enemy("blackthorn-inquisitor-roderick")], [enem
 const ACT_BOSSES = [
   [enemy("gatekeeper-plus")],
   [enemy("raider-plus"), enemy("gatekeeper-plus")],
-  [enemy("ember-archmage")],
+  [enemy("ash-duke-valdemar")],
 ] as const;
+
+// D17 replaces the production Act 3 boss while preserving the intentionally
+// minimal legacy graph fixtures that predate Valdemar's content definition.
+// A full content database always takes the preferred encounter above.
+const LEGACY_ACT3_BOSS = [enemy("ember-archmage")] as const;
+
+const bossEncounterFor = (db: ContentDb, act: number): readonly EnemyDefId[] => {
+  const preferred = ACT_BOSSES[act]!;
+  if (hasEnemies(db, preferred)) return preferred;
+  if (act === 2 && hasEnemies(db, LEGACY_ACT3_BOSS)) return LEGACY_ACT3_BOSS;
+  return preferred;
+};
 
 // 방문 깊이별 전투 조우 풀 — 막 내 방문 1~3 단일, 4~6 2체, 7~8 2~3체 혼합
 const combatPoolFor = (db: ContentDb, act: number, visit: number): readonly (readonly EnemyDefId[])[] => {
@@ -213,7 +225,7 @@ export const generateRunGraph = (runSeed: string, db: ContentDb): RunGraph => {
         continue;
       }
       if (visit === BOSS_VISIT_INDEX) {
-        const encounter = ACT_BOSSES[act]!;
+        const encounter = bossEncounterFor(db, act);
         requireEnemies(db, encounter);
         layers.push([
           { id: `${layerId}-boss`, kind: "boss", encounter: [...encounter] },

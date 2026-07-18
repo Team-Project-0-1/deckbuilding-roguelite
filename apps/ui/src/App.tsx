@@ -525,6 +525,18 @@ export const IntentBadge = ({
   const repeatPressure = enemy.repeatSkillPressure;
   const royalTax = enemy.royalTaxPending;
   const hatch = enemy.hatch;
+  const furnaceTemperature = enemy.furnaceTemperature;
+  const furnaceMaxTemperature = enemy.furnaceMaxTemperature ?? 6;
+  const furnaceCancelAt = (intent.cancelOn === undefined
+    ? []
+    : Array.isArray(intent.cancelOn)
+      ? intent.cancelOn
+      : [intent.cancelOn]
+  ).find(
+    (predicate) =>
+      predicate.kind === "enemyResourceAtMost" &&
+      predicate.resource === "furnaceTemperature",
+  )?.value;
   const repeatConfig = enemyDef?.repeatSkillPressure;
   const taxConfig = enemyDef?.royalTax;
   const repeatedSlot = repeatPressure?.triggeringSlot ?? -1;
@@ -533,7 +545,14 @@ export const IntentBadge = ({
     (total, action) => action.kind === "attack" ? total + enemyAttackDamage(action, enemy.growthStacks) * (action.hits ?? 1) : total,
     0,
   ) ?? 0;
-  const executionCancelThreshold = repeatConfig?.executionIntent.cancelOn?.damageThreshold;
+  const executionCancelPredicates = repeatConfig?.executionIntent.cancelOn === undefined
+    ? []
+    : Array.isArray(repeatConfig.executionIntent.cancelOn)
+      ? repeatConfig.executionIntent.cancelOn
+      : [repeatConfig.executionIntent.cancelOn];
+  const executionCancelThreshold = executionCancelPredicates.find(
+    (predicate) => predicate.kind === "skillDamage",
+  )?.threshold;
   const executionSealTurns = repeatConfig?.executionIntent.actions.find(
     (action): action is Extract<EnemyAction, { kind: "sealTriggeredSkill" }> => action.kind === "sealTriggeredSkill",
   )?.turns;
@@ -554,6 +573,16 @@ export const IntentBadge = ({
               </span>
             </Keyword>
           ) : null}
+          {furnaceCancelAt !== undefined ? (
+            <Keyword term="windup">
+              <span
+                aria-label={`용광로 ${furnaceCancelAt} 이하 시 취소`}
+                data-testid="enemy-furnace-cancel-condition"
+              >
+                용광로 {furnaceCancelAt} 이하 시 취소
+              </span>
+            </Keyword>
+          ) : null}
           {intent.vulnerableWhileWindup !== undefined ? (
             <Keyword term="vulnerable">
               <span aria-label={`준비 중 취약 배수 ${intent.vulnerableWhileWindup}배`}>
@@ -569,6 +598,14 @@ export const IntentBadge = ({
           data-testid="enemy-hatch-status"
         >
           부화 {hatch.turnsRemaining}턴{hatch.delayed ? " · 지연" : ""}
+        </span>
+      ) : null}
+      {furnaceTemperature !== undefined ? (
+        <span
+          aria-label={`용광로 온도 ${furnaceTemperature}/${furnaceMaxTemperature}`}
+          data-testid="enemy-furnace-status"
+        >
+          용광로 {furnaceTemperature}/{furnaceMaxTemperature}
         </span>
       ) : null}
       {enemy.summonSick === true ? (
@@ -732,6 +769,28 @@ export const IntentBadge = ({
           <span key={index} aria-label={`아군 알 부화 ${action.amount}턴 가속`} data-testid="enemy-hatch-accelerate-intent">
             부화 가속 · {action.amount}턴
           </span>
+        ) : action.kind === "setEnemyResource" ? (
+          <span
+            key={index}
+            aria-label={`용광로 온도를 ${action.value}로 설정`}
+            data-testid="enemy-furnace-intent"
+          >
+            용광로 {action.value}
+          </span>
+        ) : action.kind === "adjustEnemyResource" ? (
+          <span
+            key={index}
+            aria-label={`용광로 온도 ${action.amount >= 0 ? "+" : ""}${action.amount}`}
+            data-testid="enemy-furnace-intent"
+          >
+            용광로 {action.amount >= 0 ? "+" : ""}{action.amount}
+          </span>
+        ) : action.kind === "removePlayerStatus" ? (
+          <span key={index}>
+            {statusKo(action.status)} 제거 {action.stacks}
+          </span>
+        ) : action.kind === "reduceGrowthStacks" ? (
+          <span key={index}>성장 감소 {action.amount}</span>
         ) : (
           (() => {
             const exhaustive: never = action;
@@ -847,6 +906,31 @@ const remiseResolutionLines = (events: readonly CombatEvent[]): string[] =>
     return [];
   });
 
+const furnaceReasonKo = (
+  reason: Extract<CombatEvent, { type: "enemyFurnaceChanged" }>["reason"],
+): string => {
+  switch (reason) {
+    case "enemyActionResolved":
+      return "적 행동";
+    case "playerBurnDamaged":
+      return "화상 피해";
+    case "playerBurnCleared":
+      return "화상 제거";
+    case "playerDamageThreshold":
+      return "피해 임계치";
+    case "phaseEntered":
+      return "페이즈 진입";
+    case "coronationCancelled":
+      return "대관식 취소";
+    case "coronationResolved":
+      return "대관식 해결";
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+};
+
 const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
   events.flatMap((event) => {
     if (event.type === "enemySummonTelegraphed")
@@ -915,7 +999,10 @@ const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
       ];
     if (event.type === "enemyWindupTicked") return [`적 ${event.enemy + 1} 준비 카운트 — ${event.turnsLeft}턴 남음`];
     if (event.type === "enemyWindupCancelled") return [`적 ${event.enemy + 1} 준비 취소`];
-    if (event.type === "enemyPhaseChanged") return [`적 ${event.enemy + 1} 페이즈 전환 — 광란`];
+    if (event.type === "enemyFurnaceChanged") {
+      return [`적 ${event.enemy + 1} 용광로 온도 ${event.before}→${event.after} — ${furnaceReasonKo(event.reason)}`];
+    }
+    if (event.type === "enemyPhaseChanged") return [`적 ${event.enemy + 1} 페이즈 전환`];
     if (event.type === "enemyGrew") return [`적 ${event.enemy + 1} 성장 — 스택 ${event.stacks}`];
     if (event.type === "enemyGrowthReduced")
       return [`적 ${event.enemy + 1} 나이테 ${event.removed}개 파괴 — 실제 피해 ${event.damage}/${event.threshold}`];
@@ -1164,7 +1251,50 @@ const testEncounterFromUrl = (): readonly EnemyDefId[] | null => {
   if (encounter === "raider") return ["raider" as EnemyDefId] as const;
   if (encounter === "slime") return ["slime" as EnemyDefId] as const; // 자동 실행 승리 단축 회귀용 저체력 단일 적
   if (encounter === "ghoul") return ["ghoul" as EnemyDefId] as const; // S32 몬스터 패시브 앵커
+  if (encounter === "ash-duke-valdemar") return ["ash-duke-valdemar" as EnemyDefId] as const;
   return null;
+};
+
+const testCombatHpFromUrl = (): number | null => {
+  const raw = new URL(window.location.href).searchParams.get("testCombatHp");
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 1 && value <= 999 ? value : null;
+};
+
+const testEnemyStateFromUrl = (
+  combat: CombatState,
+): CombatState => {
+  const params = new URL(window.location.href).searchParams;
+  const hpRaw = params.get("testEnemyHp");
+  const furnaceRaw = params.get("testEnemyFurnace");
+  const hp = hpRaw === null ? null : Number(hpRaw);
+  const furnace = furnaceRaw === null ? null : Number(furnaceRaw);
+  if (
+    (hp === null || !Number.isInteger(hp) || hp < 1) &&
+    (furnace === null || !Number.isInteger(furnace) || furnace < 0 || furnace > 6)
+  )
+    return combat;
+  return {
+    ...combat,
+    enemies: combat.enemies.map((enemy, index) =>
+      index !== 0
+        ? enemy
+        : {
+            ...enemy,
+            ...(hp !== null && Number.isInteger(hp) && hp >= 1
+              ? { hp: Math.min(hp, enemy.maxHp) }
+              : {}),
+            ...(furnace !== null &&
+            Number.isInteger(furnace) &&
+            furnace >= 0 &&
+            furnace <= 6 &&
+            enemy.furnaceTemperature !== undefined
+              ? { furnaceTemperature: furnace }
+              : {}),
+          },
+    ),
+  };
 };
 
 const testSkillsFromUrl = (fallback: RunState["equippedSkills"]): RunState["equippedSkills"] | null => {
@@ -1206,22 +1336,31 @@ const freshSession = (seed: string, character: CharacterId = "warrior" as Charac
   const testEnemies = testEncounterFromUrl();
   if (testEnemies !== null) {
     const run = { ...ready, phase: "combat" as const };
+    const combat = createCombat(
+      {
+        character: ready.character,
+        enemies: [...testEnemies],
+        bag: ready.bag,
+        equippedSkills: ready.equippedSkills,
+        currentHp: ready.currentHp,
+        maxHp: ready.maxHp,
+        combatIndex: ready.combatIndex,
+        attempt: ready.attempt,
+      },
+      contentDb,
+      seed,
+    );
+    const testCombatHp = testCombatHpFromUrl();
+    const testEnemyState = testEnemyStateFromUrl(combat);
     return {
       run,
-      combat: createCombat(
-        {
-          character: ready.character,
-          enemies: [...testEnemies],
-          bag: ready.bag,
-          equippedSkills: ready.equippedSkills,
-          currentHp: ready.currentHp,
-          maxHp: ready.maxHp,
-          combatIndex: ready.combatIndex,
-          attempt: ready.attempt,
-        },
-        contentDb,
-        seed,
-      ),
+      combat:
+        testCombatHp === null
+          ? testEnemyState
+          : {
+              ...testEnemyState,
+              player: { ...testEnemyState.player, hp: testCombatHp, maxHp: testCombatHp },
+            },
     };
   }
   const started = startRunCombat(ready, contentDb);
@@ -3661,8 +3800,11 @@ const CombatBoard = ({
     } else if (event?.type === "enemyWindupCancelled") {
       showFloat("준비 취소", "enemy", "status", event.enemy);
       delay = 420;
+    } else if (event?.type === "enemyFurnaceChanged") {
+      showFloat(`용광로 ${event.before}→${event.after}`, "enemy", "status", event.enemy);
+      delay = 380;
     } else if (event?.type === "enemyPhaseChanged") {
-      showFloat("광란", "enemy", "status", event.enemy);
+      showFloat("페이즈 전환", "enemy", "status", event.enemy);
       delay = 460;
     } else if (event?.type === "enemyGrew") {
       showFloat(`성장 ${event.stacks}`, "enemy", "status", event.enemy);
@@ -5180,10 +5322,10 @@ export const UnitPanel = ({
         {side === "enemy" && phaseIndex !== undefined ? (
           <Keyword className="chip-keyword" term="frenzy">
             <em
-              aria-label={`광란 페이즈 ${phaseIndex + 1}${damageTakenMultiplier === undefined ? "" : `, 받는 피해 ${damageTakenMultiplier}배`}`}
+              aria-label={`페이즈 ${phaseIndex + 1}${damageTakenMultiplier === undefined ? "" : `, 받는 피해 ${damageTakenMultiplier}배`}`}
               className="passive-chip"
             >
-              광란 {phaseIndex + 1}
+              페이즈 {phaseIndex + 1}
               {damageTakenMultiplier === undefined ? "" : ` · 취약 ×${damageTakenMultiplier}`}
             </em>
           </Keyword>

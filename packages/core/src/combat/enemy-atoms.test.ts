@@ -83,7 +83,7 @@ describe('enemy atoms — windup', () => {
           {
             id: 'pierce',
             windup: { turns: 1, revealAtStart: true },
-            cancelOn: { damageThreshold: 6 },
+            cancelOn: { kind: 'skillDamage', threshold: 6 },
             vulnerableWhileWindup: 1.5,
             actions: [{ kind: 'attack', damage: 8 }]
           },

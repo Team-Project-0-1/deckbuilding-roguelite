@@ -185,7 +185,7 @@ const waitForCombatOrBoundary = (page, timeout = 15000) =>
   page.waitForFunction(
     () =>
       document.querySelector(
-        '[data-testid="reward-overlay"], [data-testid="run-result"]',
+        '[data-testid="reward-overlay"], [data-testid="run-result"], .result-overlay',
       ) !== null ||
       (document.querySelector(".end-turn:not(:disabled)") !== null &&
         document.querySelector(
@@ -282,8 +282,8 @@ const useFlipSkill = async (page, slotIndex) => {
   return placed;
 };
 
-const winCurrentCombat = async (page) => {
-  for (let turn = 0; turn < 18; turn += 1) {
+const winCurrentCombat = async (page, maxTurns = 18) => {
+  for (let turn = 0; turn < maxTurns; turn += 1) {
     for (let action = 0; action < 10; action += 1) {
       const atBoundary =
         (await page
@@ -5684,6 +5684,111 @@ if (onlyScope === null || onlyScope === "d9") {
     );
     check("D9 boss offer and combat transition have no browser errors", errors.length === 0, errors.join(" | "));
     await context.close();
+  }
+}
+
+if (onlyScope === null || onlyScope === "d17") {
+  const d17Url = (overrides = {}) =>
+    urlWith({
+      seed: "D17-ASH-DUKE",
+      encounter: "ash-duke-valdemar",
+      testCombatHp: "500",
+      skills: "direct-hit,guard,flame-rampage,slash,flame-sword,conflagration",
+      ...overrides,
+    });
+  const endD17Turn = async (page) => {
+    await page.locator(".end-turn").click();
+    // Let React publish the enemy-phase transition before checking for the
+    // next enabled player boundary. Without this yield the existing enabled
+    // button can satisfy the predicate in the same task as the click.
+    await page.waitForTimeout(20);
+    await waitForCombatOrBoundary(page, 15000);
+  };
+
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      url: d17Url({ testEnemyFurnace: "6" }),
+    });
+    await endD17Turn(page);
+    await endD17Turn(page);
+    const armed = (await page.locator('[data-testid="enemy-furnace-cancel-condition"]').count()) > 0;
+    await endD17Turn(page);
+    const temperature = await page.locator('[data-testid="enemy-furnace-status"]').innerText();
+    check("D17 ash duke telegraphs Coronation at furnace 6", armed);
+    check("D17 ash duke resolves a non-cancelled Coronation to furnace 3", temperature.includes("3/6"), temperature);
+    check("D17 Coronation resolve path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
+  }
+
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      url: d17Url({ testEnemyFurnace: "6", testEnemyHp: "126" }),
+    });
+    await endD17Turn(page);
+    await endD17Turn(page);
+    const armedBeforePhaseBreak =
+      (await page.locator('[data-testid="enemy-furnace-cancel-condition"]').count()) > 0;
+    const playerHpBefore = await page
+      .locator('.unit.player [role="progressbar"]')
+      .getAttribute("aria-valuenow");
+    await useFlipSkill(page, 0);
+    await endD17Turn(page);
+    const temperature = await page.locator('[data-testid="enemy-furnace-status"]').innerText();
+    const phaseTwo = (await page.locator('.unit.enemy [aria-label*="페이즈 1"]').count()) > 0;
+    const enemyCount = await page.locator(".unit.enemy").count();
+    const playerHpAfter = await page
+      .locator('.unit.player [role="progressbar"]')
+      .getAttribute("aria-valuenow");
+    check(
+      "D17 phase break cancels an actually armed Coronation before damage and sets furnace 2",
+      armedBeforePhaseBreak && temperature.includes("2/6") && playerHpAfter === playerHpBefore,
+      `armed=${String(armedBeforePhaseBreak)} hp=${String(playerHpBefore)}->${String(playerHpAfter)} ${temperature}`,
+    );
+    check("D17 ash duke enters the vassal phase", phaseTwo);
+    check("D17 ash-vassal wave fills but never exceeds the three-enemy cap", enemyCount === 3, String(enemyCount));
+    check("D17 Coronation cancel and vassal path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
+  }
+
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      url: d17Url({ testEnemyHp: "62" }),
+    });
+    await endD17Turn(page);
+    await endD17Turn(page);
+    await endD17Turn(page);
+    const finalPhase = (await page.locator('.unit.enemy [aria-label*="페이즈 2"]').count()) > 0;
+    const finalGrowth = (await page.locator('.unit.enemy [aria-label*="성장"]').count()) > 0;
+    check("D17 ash duke reaches the final growth phase", finalPhase && finalGrowth);
+    check("D17 final-growth path preserves the three-enemy cap", (await page.locator(".unit.enemy").count()) <= 3);
+    check("D17 final-growth path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
+  }
+
+  {
+    const { page, errors } = await boot(undefined, {
+      fast: true,
+      // Keep the run/combat HP contract intact on the terminal path; the
+      // oversized test HP override is only needed while observing boss turns.
+      url: urlWith({
+        seed: "D17-ASH-DUKE-VICTORY",
+        encounter: "ash-duke-valdemar",
+        testEnemyHp: "1",
+        skills: "direct-hit,guard,flame-rampage,slash,flame-sword,conflagration",
+      }),
+    });
+    await useFlipSkill(page, 0);
+    await page.locator(".end-turn").click();
+    await page.waitForTimeout(3000);
+    const terminalBoundary = await page
+      .locator('[data-testid="reward-overlay"], [data-testid="run-result"], .result-overlay')
+      .count();
+    check("D17 ash duke fight reaches victory", terminalBoundary > 0, String(terminalBoundary));
+    check("D17 victory path has no browser errors", errors.length === 0, errors.join(" | "));
+    await page.context().close();
   }
 }
 

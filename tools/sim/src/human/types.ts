@@ -46,6 +46,8 @@ export interface HumanDecisionFact {
     playerAfter: number;
     enemiesBefore: number[];
     enemiesAfter: number[];
+    enemyFurnaceBefore?: number[];
+    enemyFurnaceAfter?: number[];
   };
 }
 
@@ -74,11 +76,10 @@ export interface HumanRewardFact {
   replacedSlot?: number;
 }
 
-// P6 스키마 v3 (가산): v2 필수 사실 불변 + rest/treasure/passive-reward 경로 사실과
-// buy-passive 상점 행동을 추가. v1 거부 유지. v2 로그는 rest/treasure가 없는 레거시
-// 그래프에서만 재생 가능하므로 그대로 수용한다 (새 그래프에서는 사실 부재 = mismatch).
-export const HUMAN_RUN_SCHEMA_VERSION = 3 as const;
-export type HumanRunSchemaVersion = 2 | typeof HUMAN_RUN_SCHEMA_VERSION;
+// D17 스키마 v4 (가산): 적 화로 온도 전후 배열을 추가해 HP가 같은 온도-only 분기를 검증한다.
+// v2/v3 로그는 레거시 사실이 없으므로 계속 수용한다.
+export const HUMAN_RUN_SCHEMA_VERSION = 4 as const;
+export type HumanRunSchemaVersion = 2 | 3 | typeof HUMAN_RUN_SCHEMA_VERSION;
 
 export type HumanShopActionFact =
   | { kind: "buy-coin"; option: number }

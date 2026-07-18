@@ -207,7 +207,11 @@ const sanitizeDamage = (value: unknown, label: string): HumanDamageFact => {
     : { target, enemyIndex, ...common };
 };
 
-const sanitizeDecision = (value: unknown, label: string): HumanDecisionFact => {
+const sanitizeDecision = (
+  value: unknown,
+  label: string,
+  requireFurnaceFacts: boolean,
+): HumanDecisionFact => {
   const object = objectValue(value, label);
   const hp = objectValue(object.hp, `${label}.hp`);
   return {
@@ -259,11 +263,27 @@ const sanitizeDecision = (value: unknown, label: string): HumanDecisionFact => {
       playerAfter: nonNegativeInteger(hp, "playerAfter", `${label}.hp`),
       enemiesBefore: numberArray(hp.enemiesBefore, `${label}.hp.enemiesBefore`),
       enemiesAfter: numberArray(hp.enemiesAfter, `${label}.hp.enemiesAfter`),
+      ...(requireFurnaceFacts
+        ? {
+            enemyFurnaceBefore: numberArray(
+              hp.enemyFurnaceBefore,
+              `${label}.hp.enemyFurnaceBefore`,
+            ),
+            enemyFurnaceAfter: numberArray(
+              hp.enemyFurnaceAfter,
+              `${label}.hp.enemyFurnaceAfter`,
+            ),
+          }
+        : {}),
     },
   };
 };
 
-const sanitizeCombat = (value: unknown, label: string): HumanCombatTrace => {
+const sanitizeCombat = (
+  value: unknown,
+  label: string,
+  requireFurnaceFacts: boolean,
+): HumanCombatTrace => {
   const object = objectValue(value, label);
   const outcome =
     object.outcome === undefined
@@ -288,7 +308,8 @@ const sanitizeCombat = (value: unknown, label: string): HumanCombatTrace => {
     startingHp: nonNegativeInteger(object, "startingHp", label),
     maxHp: nonNegativeInteger(object, "maxHp", label),
     decisions: boundedArray(object.decisions, `${label}.decisions`, 500).map(
-      (decision, index) => sanitizeDecision(decision, `${label}.decisions[${index}]`),
+      (decision, index) =>
+        sanitizeDecision(decision, `${label}.decisions[${index}]`, requireFurnaceFacts),
     ),
     ...(outcome === undefined ? {} : { outcome }),
   };
@@ -399,7 +420,7 @@ const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
   // v2 (P4.3): path 사실 필수 — v1(그래프 이전) 로그는 콘텐츠 드리프트와 같은 이유로 거부.
   // v3 (P6): rest/treasure/passive-reward/buy-passive 가산 사실 허용. v2는 레거시
   // (무 rest/treasure) 그래프에서만 재생 가능하므로 그대로 수용한다.
-  if (object.schemaVersion !== 2 && object.schemaVersion !== 3)
+  if (object.schemaVersion !== 2 && object.schemaVersion !== 3 && object.schemaVersion !== 4)
     throw new Error("schemaVersion is unsupported");
   const schemaVersion = object.schemaVersion;
   if (object.source !== "human") throw new Error("source must be human");
@@ -422,7 +443,8 @@ const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
     startedAtLocal: stringValue(object, "startedAtLocal", "trace"),
     maxHp: nonNegativeInteger(object, "maxHp", "trace"),
     combats: boundedArray(object.combats, "trace.combats", 32).map(
-      (combat, index) => sanitizeCombat(combat, `trace.combats[${index}]`),
+      (combat, index) =>
+        sanitizeCombat(combat, `trace.combats[${index}]`, schemaVersion === 4),
     ),
     rewards: boundedArray(object.rewards, "trace.rewards", 128).map(
       (reward, index) => sanitizeReward(reward, `trace.rewards[${index}]`),
@@ -432,9 +454,9 @@ const sanitizeTrace = (value: unknown): HumanRunTraceLike => {
     path: boundedArray(
       object.path,
       "trace.path",
-      schemaVersion === 3 ? 128 : 64,
+      schemaVersion >= 3 ? 128 : 64,
     ).map((fact, index) =>
-      sanitizePathFact(fact, `trace.path[${index}]`, schemaVersion === 3),
+      sanitizePathFact(fact, `trace.path[${index}]`, schemaVersion >= 3),
     ),
     result: literalValue(
       object.result,
