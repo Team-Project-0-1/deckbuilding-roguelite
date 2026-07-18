@@ -1,0 +1,7 @@
+# Directive 15 Elite Design Sync
+
+Provenance: `P13_REVISION_DESIGN_SYNC.md` rows M-17 and M-18 (lines 110-111).
+
+- M17, 검은가시 심문관 로데릭 (`blackthorn-inquisitor-roderick`), is a 96 HP repeat-skill elite. The first resolved use gains zeal; consecutive resolved uses of the same usable skill gain +1 to a maximum of 3, while a different skill resets zeal to 0. If it is the only currently usable skill, zeal instead advances every second use. The exact triggering slot is retained. At 3 it reveals a one-turn execution with 18 damage and a 15-actual-damage cancel threshold; execution seals that triggering slot for one turn, and execution or cancellation resets zeal.
+- M18, 무너진 왕의 재무관 마르셀 (`fallen-kings-treasurer-marcel`), is a 92 HP tax elite. It cycles tax, audit 8, tax, audit 6. Tax opens only when the current hand has a legal same-element skill plan that spends its two-coin denomination; otherwise it immediately degrades to audit 8. Only successfully resolved matching-element skill coins pay the next-player-turn deadline, allowing partial cumulative payment. A default inserts two combat-only counterfeits into draw and grants the source 8 block through the tax-default event. Two defaults schedule the existing frozen-candidate custody windup, then seize and deal 4.
+- Both rows use `EnemyDef` metadata and generic enemy actions. Custody remains source-owned and UID-exclusive; counterfeits must be elementless with no procs, are ineligible for payment, enchantment, and custody, and are removed at combat end.

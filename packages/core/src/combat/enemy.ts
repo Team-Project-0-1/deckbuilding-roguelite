@@ -2,6 +2,7 @@ import { DURATION_STATUS_IDS } from '../content-types';
 import type { ContentDb, EnemyIntent, StatusId } from '../content-types';
 import type { Element, SlotId } from '../ids';
 import { isSlotUsableNow } from './commands';
+import { openRoyalTax, resetRepeatSkillPressure, resetRoyalTaxDefaults, sealTriggeredSkill } from './directive15';
 import { rngFrom } from '../rng';
 import type { CombatEvent } from './events';
 import { applyBlock, applyDamage, applyEffectAtom, checkCombatEnd } from './resolve/flip';
@@ -14,6 +15,10 @@ export const nextIntent = (state: CombatState, enemyIndex: number, db: ContentDb
   const def = db.enemies[String(enemy.defId)];
   if (def === undefined || def.intents.length === 0) throw new Error('enemy has no intents');
   const intents = enemy.phaseIndex === undefined ? def.intents : (def.phases?.[enemy.phaseIndex]?.intents ?? def.intents);
+  const repeat = def.repeatSkillPressure;
+  if ((enemy.repeatSkillPressure?.zeal ?? 0) >= (repeat?.threshold ?? Number.POSITIVE_INFINITY)) {
+    return { intent: repeat!.executionIntent, index: enemy.intentIndex };
+  }
   const index = (enemy.intentIndex + 1) % intents.length;
   const baseIntent = intents[index];
   if (baseIntent === undefined) throw new Error('enemy intent missing');
@@ -54,6 +59,16 @@ const withEnemy = (state: CombatState, enemyIndex: number, update: (enemy: Comba
   ...state,
   enemies: state.enemies.map((enemy, index) => (index === enemyIndex ? update(enemy) : enemy))
 });
+
+const clearStaleRepeatPressure = (state: CombatState, enemyIndex: number, db: ContentDb, events: CombatEvent[]): CombatState => {
+  const pressure = state.enemies[enemyIndex]?.repeatSkillPressure;
+  if (pressure?.lastSkillId === undefined) return state;
+  const stillUsable = pressure.triggeringSlot === undefined
+    ? state.slots.some((slot, index) => slot.skillId === pressure.lastSkillId && isSlotUsableNow(state, db, index as SlotId))
+    : isSlotUsableNow(state, db, pressure.triggeringSlot);
+  if (stillUsable) return state;
+  return resetRepeatSkillPressure(state, enemyIndex, events);
+};
 
 const bannerAuraPercent = (state: CombatState, target: number, db: ContentDb): { percent: number; source?: number } => {
   let percent = 0;
@@ -137,6 +152,7 @@ const beginCoinSeizureTelegraph = (state: CombatState, enemyIndex: number, db: C
   if (enemy === undefined || seizure === undefined || enemy.coinSeizure !== undefined) return state;
   const counts = new Map<Element, number>();
   for (const coinUid of state.zones.hand) {
+    if (state.coins[Number(coinUid)]?.counterfeit === true) continue;
     const element = db.coins[String(state.coins[Number(coinUid)]?.defId)]?.element;
     if (element !== null && element !== undefined) counts.set(element, (counts.get(element) ?? 0) + 1);
   }
@@ -160,7 +176,7 @@ const seizeCustody = (state: CombatState, enemyIndex: number, events: CombatEven
   const telegraph = state.enemies[enemyIndex]?.coinSeizure;
   if (telegraph === undefined) return state;
   const coins = telegraph.nominated
-    .filter((coin) => state.zones.hand.includes(coin))
+    .filter((coin) => state.zones.hand.includes(coin) && state.coins[Number(coin)]?.counterfeit !== true)
     .slice(0, Math.min(2, telegraph.quantity));
   if (coins.length === 0) return withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, coinSeizure: undefined }));
   const seizureOrder = state.custody.reduce((maximum, entry) => Math.max(maximum, entry.seizureOrder + 1), 0);
@@ -393,6 +409,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           boundHealAlly: undefined,
           cancelledWindupIntentId: windupEnemy.windup?.intent.id
         }));
+        state = resetRepeatSkillPressure(state, enemyIndex, events);
         state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
         continue;
       }
@@ -432,6 +449,24 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
       if (actingEnemy === undefined || actingEnemy.hp <= 0) break;
       if (action.kind === 'seizeCustody') {
         state = seizeCustody(state, enemyIndex, events);
+      } else if (action.kind === 'sealTriggeredSkill') {
+        state = sealTriggeredSkill(state, enemyIndex, action.turns, events);
+      } else if (action.kind === 'resetRepeatSkillPressure') {
+        state = resetRepeatSkillPressure(state, enemyIndex, events);
+      } else if (action.kind === 'royalTax') {
+        const tax = openRoyalTax(state, enemyIndex, db, events);
+        state = tax.state;
+        if (!tax.opened) {
+          state = applyDamage(
+            state,
+            { type: 'player' },
+            scaledEnemyAttackDamage(state, enemyIndex, action.degradedDamage, db, events),
+            'enemy', events, { type: 'enemy', index: enemyIndex }
+          );
+          if (state.phase === 'defeat') return { state, events };
+        }
+      } else if (action.kind === 'resetRoyalTaxDefaults') {
+        state = resetRoyalTaxDefaults(state, enemyIndex);
       } else if (action.kind === 'sealRecentSkill') {
         state = sealRecentSkill(state, enemyIndex, db, events);
         if (state.phase === 'defeat') return { state, events };
@@ -693,6 +728,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
   for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex += 1) {
     const enemy = state.enemies[enemyIndex];
     if (enemy === undefined || enemy.hp <= 0 || enemy.windup !== undefined) continue;
+    state = clearStaleRepeatPressure(state, enemyIndex, db, events);
     state = maybeChangePhase(state, enemyIndex, db, events);
     const next = nextIntent(state, enemyIndex, db);
     const boundHealAlly = bindHealAlly(state, enemyIndex, next.intent);

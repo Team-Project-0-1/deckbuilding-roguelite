@@ -29,6 +29,8 @@ export interface CoinDef {
   id: CoinDefId;
   element: Element | null;
   procs?: { heads?: EffectAtom[]; tails?: EffectAtom[] };
+  /** Combat-only false coin; never appears in permanent reward or shop pools. */
+  counterfeit?: true;
 }
 
 export const COIN_ENCHANT_IDS = [
@@ -57,6 +59,8 @@ interface CoinInstanceBase {
   grants: Element[];
   // P11 — 보존 동전은 턴 정리에서 제외되며 실제 사용/소비 시 해제된다.
   preserved?: boolean;
+  /** Combat-only false coin. It has no face, element, value, enchant, or custody eligibility. */
+  counterfeit?: boolean;
 }
 
 export interface PermanentCoinInstance extends CoinInstanceBase {
@@ -341,6 +345,10 @@ export type EnemyAction =
   | { kind: 'attack'; damage: number; hits?: number; damagePerGrowthPercent?: number }
   | { kind: 'seizeCustody' }
   | { kind: 'sealRecentSkill' }
+  | { kind: 'sealTriggeredSkill'; turns: number }
+  | { kind: 'resetRepeatSkillPressure' }
+  | { kind: 'royalTax'; degradedDamage: number }
+  | { kind: 'resetRoyalTaxDefaults' }
   | { kind: 'conditionalAttack'; damage: number; bonusDamage: number; condition: 'playerHpBelowHalf' }
   | { kind: 'block'; amount: number }
   | { kind: 'nextDrawPenalty'; amount: number }
@@ -443,6 +451,28 @@ export interface EnemySkillSealDef {
   uniqueSkillEffectMultiplier: number;
 }
 
+/** Data-driven repeat pressure: resolution hooks observe successful player skill uses. */
+export interface EnemyRepeatSkillPressureDef {
+  threshold: number;
+  maxZeal: number;
+  sameSkillGain: number;
+  differentSkillReset: number;
+  singleUsableZealEveryUses: number;
+  sealTurns: number;
+  executionIntent: EnemyIntent;
+}
+
+/** Data-driven tax demand and its bounded counterfeit/default escalation. */
+export interface EnemyRoyalTaxDef {
+  denomination: number;
+  deadline: 'endNextPlayerTurn';
+  counterfeitCoin: CoinDefId;
+  counterfeitCount: number;
+  defaultShield: number;
+  seizureAfterDefaults: number;
+  seizureIntent: EnemyIntent;
+}
+
 export interface EnemyDef {
   id: EnemyDefId;
   name: string;
@@ -455,6 +485,8 @@ export interface EnemyDef {
   roundGrowth?: EnemyRoundGrowthDef;
   coinSeizure?: EnemyCoinSeizureDef;
   skillSeal?: EnemySkillSealDef;
+  repeatSkillPressure?: EnemyRepeatSkillPressureDef;
+  royalTax?: EnemyRoyalTaxDef;
   /** Batch C data-driven mechanics. */
   threat?: number;
   protectionLink?: EnemyProtectionLinkDef;
@@ -799,7 +831,7 @@ const validateEnemyPassives = (enemies: Record<string, EnemyDef>): string[] => {
   return errors;
 };
 
-const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
+const validateEnemyIntents = (enemies: Record<string, EnemyDef>, coins: Record<string, CoinDef>): string[] => {
   const errors: string[] = [];
   const validateIntent = (intent: EnemyIntent, owner: string): void => {
     if (intent.windup !== undefined) {
@@ -864,6 +896,10 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
         if (!Number.isInteger(action.cleanse) || action.cleanse <= 0 || action.cleanse > 3) {
           errors.push(`${owner}: healAlly cleanse must be an integer from 1 to 3`);
         }
+      } else if (action.kind === 'sealTriggeredSkill' && (!Number.isInteger(action.turns) || action.turns <= 0)) {
+        errors.push(`${owner}: sealTriggeredSkill turns must be a positive integer`);
+      } else if (action.kind === 'royalTax' && (!Number.isInteger(action.degradedDamage) || action.degradedDamage <= 0)) {
+        errors.push(`${owner}: royalTax degradedDamage must be a positive integer`);
       }
     }
     if (intent.growthBranch !== undefined) {
@@ -902,6 +938,30 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
       if (!Number.isFinite(banner.march.attackPercent) || banner.march.attackPercent <= 0 || banner.march.attackPercent > 1) errors.push(`${owner}: banner march attack must be in (0, 1]`);
       if (!Number.isInteger(banner.march.turns) || banner.march.turns <= 0) errors.push(`${owner}: banner march turns must be a positive integer`);
       if (!Number.isFinite(banner.march.shieldMaxHpFraction) || banner.march.shieldMaxHpFraction <= 0 || banner.march.shieldMaxHpFraction > 1) errors.push(`${owner}: banner march shield must be in (0, 1]`);
+    }
+    if (enemy.repeatSkillPressure !== undefined) {
+      const pressure = enemy.repeatSkillPressure;
+      if (!Number.isInteger(pressure.threshold) || pressure.threshold <= 0) errors.push(`${owner}: repeat pressure threshold must be a positive integer`);
+      if (!Number.isInteger(pressure.maxZeal) || pressure.maxZeal < pressure.threshold) errors.push(`${owner}: repeat pressure maxZeal must be at least threshold`);
+      if (!Number.isInteger(pressure.sameSkillGain) || pressure.sameSkillGain <= 0) errors.push(`${owner}: repeat pressure sameSkillGain must be a positive integer`);
+      if (!Number.isInteger(pressure.differentSkillReset) || pressure.differentSkillReset < 0) errors.push(`${owner}: repeat pressure differentSkillReset must be non-negative`);
+      if (!Number.isInteger(pressure.singleUsableZealEveryUses) || pressure.singleUsableZealEveryUses <= 0) errors.push(`${owner}: repeat pressure zeal cadence must be a positive integer`);
+      if (!Number.isInteger(pressure.sealTurns) || pressure.sealTurns <= 0) errors.push(`${owner}: repeat pressure seal turns must be a positive integer`);
+      validateIntent(pressure.executionIntent, `${owner} repeat pressure execution ${pressure.executionIntent.id}`);
+      if (pressure.executionIntent.windup === undefined) errors.push(`${owner}: repeat pressure execution must wind up`);
+    }
+    if (enemy.royalTax !== undefined) {
+      const tax = enemy.royalTax;
+      if (!Number.isInteger(tax.denomination) || tax.denomination <= 0) errors.push(`${owner}: royal tax denomination must be a positive integer`);
+      if (tax.deadline !== 'endNextPlayerTurn') errors.push(`${owner}: royal tax deadline must be endNextPlayerTurn`);
+      const counterfeit = coins[String(tax.counterfeitCoin)];
+      if (counterfeit === undefined) errors.push(`${owner}: royal tax counterfeitCoin must exist`);
+      else if (counterfeit.counterfeit !== true || counterfeit.element !== null || counterfeit.procs !== undefined) errors.push(`${owner}: royal tax counterfeitCoin must be combat-only, elementless, and have no procs`);
+      if (!Number.isInteger(tax.counterfeitCount) || tax.counterfeitCount <= 0) errors.push(`${owner}: royal tax counterfeitCount must be a positive integer`);
+      if (!Number.isInteger(tax.defaultShield) || tax.defaultShield <= 0) errors.push(`${owner}: royal tax defaultShield must be a positive integer`);
+      if (!Number.isInteger(tax.seizureAfterDefaults) || tax.seizureAfterDefaults <= 0) errors.push(`${owner}: royal tax seizureAfterDefaults must be a positive integer`);
+      validateIntent(tax.seizureIntent, `${owner} royal tax seizure ${tax.seizureIntent.id}`);
+      if (tax.seizureIntent.windup === undefined) errors.push(`${owner}: royal tax seizure must wind up`);
     }
     enemy.intents.forEach((intent, index) => validateIntent(intent, `enemy ${String(enemy.id)} intent ${intent.id || index}`));
     for (const [index, phase] of (enemy.phases ?? []).entries()) {
@@ -1112,7 +1172,7 @@ export const validateContentDb = (db: Omit<ContentDb, 'validate'>): string[] => 
   ...validateTurnTriggers(db),
   ...validateAttackTargets(Object.values(db.skills)),
   ...validateEvents(Object.values(db.events ?? {}), db.enemies),
-  ...validateEnemyIntents(db.enemies),
+  ...validateEnemyIntents(db.enemies, db.coins),
   ...validateEnemyPassives(db.enemies),
   ...validatePassives(db.passives),
   ...validateEquipment(db.equipment),

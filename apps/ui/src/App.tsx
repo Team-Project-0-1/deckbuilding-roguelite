@@ -520,6 +520,22 @@ export const IntentBadge = ({
   const boundHealAllyName = boundHealAlly === undefined ? undefined : enemyDisplayName(enemies[boundHealAlly]);
   const enemyDef = contentDb.enemies[String(enemy.defId)];
   const coinSeizure = enemy.coinSeizure;
+  const repeatPressure = enemy.repeatSkillPressure;
+  const royalTax = enemy.royalTaxPending;
+  const repeatConfig = enemyDef?.repeatSkillPressure;
+  const taxConfig = enemyDef?.royalTax;
+  const repeatedSlot = repeatPressure?.triggeringSlot ?? -1;
+  const executionIsImminent = repeatPressure !== undefined && repeatConfig !== undefined && repeatPressure.zeal >= repeatConfig.threshold;
+  const executionDamage = repeatConfig?.executionIntent.actions.reduce(
+    (total, action) => action.kind === "attack" ? total + enemyAttackDamage(action, enemy.growthStacks) * (action.hits ?? 1) : total,
+    0,
+  ) ?? 0;
+  const executionCancelThreshold = repeatConfig?.executionIntent.cancelOn?.damageThreshold;
+  const executionSealTurns = repeatConfig?.executionIntent.actions.find(
+    (action): action is Extract<EnemyAction, { kind: "sealTriggeredSkill" }> => action.kind === "sealTriggeredSkill",
+  )?.turns;
+  const taxDenomination = taxConfig?.denomination ?? royalTax?.paid ?? 0;
+  const taxStatus = royalTax === undefined ? null : royalTax.paid === 0 ? "납부 대기" : royalTax.paid < taxDenomination ? "납부 진행 중" : "납부 완료";
   const growthLabel = enemyDef?.growthLabel ?? "성장";
   return (
     <div aria-label="다음 행동 의도" className="intent">
@@ -550,6 +566,24 @@ export const IntentBadge = ({
           data-testid="coin-seizure-telegraph"
         >
           압수 예고 · {elementKo(coinSeizure.element)} {Math.min(2, coinSeizure.cap, coinSeizure.nominated.length)}개
+        </span>
+      ) : null}
+      {repeatPressure !== undefined ? (
+        <span aria-label={`열의 Zeal ${repeatPressure.zeal}/${repeatConfig?.threshold ?? repeatPressure.zeal}, 반복 사용 시 누적`} data-testid="repeat-skill-zeal">
+          열의 {repeatPressure.zeal}/{repeatConfig?.threshold ?? repeatPressure.zeal}
+        </span>
+      ) : null}
+      {executionIsImminent ? (
+        <span
+          aria-label={`집행 예고: 열의 ${repeatPressure.zeal}/${repeatConfig.threshold}, 피해 ${executionDamage}, ${executionCancelThreshold === undefined ? "취소 조건 없음" : `실제 체력 피해 ${executionCancelThreshold}로 취소`}${executionSealTurns === undefined ? "" : `, ${repeatedSlot >= 0 ? `스킬 ${repeatedSlot + 1}` : "반복 사용 스킬"} ${executionSealTurns}턴 봉인`}`}
+          data-testid="repeat-skill-execution-preconfirm"
+        >
+          집행 예고 · 피해 {executionDamage}{executionCancelThreshold === undefined ? "" : ` · 실제 체력 피해 ${executionCancelThreshold}로 취소`}{executionSealTurns === undefined ? "" : ` · ${repeatedSlot >= 0 ? `스킬 ${repeatedSlot + 1}` : "반복 사용 스킬"} ${executionSealTurns}턴 봉인`}
+        </span>
+      ) : null}
+      {royalTax !== undefined ? (
+        <span aria-label={`왕실 세금: ${elementKo(royalTax.element)} ${royalTax.paid}/${taxDenomination}, ${royalTax.deadlineTurn}턴 마감, ${taxStatus}`} data-testid="royal-tax-demand">
+          왕실 세금 · {elementKo(royalTax.element)} {royalTax.paid}/{taxDenomination} · {royalTax.deadlineTurn}턴 마감 · {taxStatus}
         </span>
       ) : null}
       {intent.entersPetrify === true && enemyDef?.petrify !== undefined ? (
@@ -629,6 +663,22 @@ export const IntentBadge = ({
           <span key={index} aria-label="최근 반복 사용한 스킬을 봉인합니다" data-testid="skill-seal-intent">
             최근 스킬 봉인
           </span>
+        ) : action.kind === "sealTriggeredSkill" ? (
+          <span key={index} aria-label={`반복 사용한 정확한 스킬 슬롯을 ${action.turns}턴 봉인합니다`} data-testid="repeat-skill-seal-intent">
+            반복 스킬 봉인 · {action.turns}턴
+          </span>
+        ) : action.kind === "resetRepeatSkillPressure" ? (
+          <span key={index} aria-label="열의 누적을 초기화합니다" data-testid="repeat-skill-zeal-reset-intent">
+            열의 초기화
+          </span>
+        ) : action.kind === "royalTax" ? (
+          <span key={index} aria-label={`왕실 세금: 가능한 속성 동전 ${taxConfig?.denomination ?? 0}개를 다음 플레이어 턴 종료 전까지 납부, 불가하면 피해 ${action.degradedDamage}`} data-testid="royal-tax-intent">
+            왕실 세금 · 동전 {taxConfig?.denomination ?? 0}개 납부 · 불가 시 피해 {action.degradedDamage}
+          </span>
+        ) : action.kind === "resetRoyalTaxDefaults" ? (
+          <span key={index} aria-label="왕실 세금 체납 누적을 초기화합니다" data-testid="royal-tax-reset-intent">
+            체납 누적 초기화
+          </span>
         ) : action.kind === "growOnUnblockedDamage" ? (
           <span
             key={index}
@@ -637,7 +687,7 @@ export const IntentBadge = ({
             {growthLabel} +{action.amount}
             {action.maxStacks === undefined ? "" : `/${action.maxStacks}`}
           </span>
-        ) : (
+        ) : action.kind === "healAlly" ? (
           <span
             key={index}
             aria-label={
@@ -650,6 +700,11 @@ export const IntentBadge = ({
             {boundHealAllyName === undefined ? "" : ` → ${boundHealAllyName}`}
             {action.cleanse === undefined ? "" : ` · 정화 ${action.cleanse}`}
           </span>
+        ) : (
+          (() => {
+            const exhaustive: never = action;
+            return exhaustive;
+          })()
         ),
       )}
     </div>
@@ -762,6 +817,21 @@ const remiseResolutionLines = (events: readonly CombatEvent[]): string[] =>
 
 const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
   events.flatMap((event) => {
+    if (event.type === "repeatSkillZealChanged")
+      return [`적 ${event.sourceEnemy + 1} 열의 · 반복 스킬 ${String(event.skill)} ${event.zeal}/${event.maxZeal}`];
+    if (event.type === "repeatSkillZealReset") return [`적 ${event.sourceEnemy + 1} 열의 초기화`];
+    if (event.type === "royalTaxOpened")
+      return [`적 ${event.sourceEnemy + 1} 왕실 세금 시작 · ${elementKo(event.element)} 0/${event.denomination}, ${event.deadlineTurn}턴 마감`];
+    if (event.type === "royalTaxPaymentProgressed")
+      return [`적 ${event.sourceEnemy + 1} 왕실 세금 납부 · ${elementKo(event.element)} ${event.paid}/${event.denomination}`];
+    if (event.type === "royalTaxPaid")
+      return [`적 ${event.sourceEnemy + 1} 왕실 세금 납부 완료 · ${elementKo(event.element)} ${event.paid}/${event.denomination}`];
+    if (event.type === "royalTaxDefaulted")
+      return [`적 ${event.sourceEnemy + 1} 왕실 세금 체납 · ${elementKo(event.element)} ${event.paid}/${event.denomination}, 위조 동전 ${event.counterfeits.length}개, 방어도 +${event.shield}, 체납 ${event.defaultStreak}회`];
+    if (event.type === "royalTaxSeizureScheduled")
+      return [`적 ${event.sourceEnemy + 1} 체납 압수 예고 · ${event.intent.windup?.turns ?? 0}턴 후 압수 실행`];
+    if (event.type === "counterfeitExhausted") return [`위조 동전 ${Number(event.coin)} 소진 · 손패에 들어오지 않고 제거`];
+    if (event.type === "counterfeitsRemoved") return [`위조 동전 ${event.coins.length}개 전투 종료로 제거`];
     if (event.type === "coinSeizureTelegraphed")
       return [
         `적 ${event.sourceEnemy + 1} 압수 예고 · ${elementKo(event.element)} ${Math.min(2, event.cap, event.nominated.length)}개 (예고 시 손패 ${event.handCountAtTelegraph}개)`,
@@ -790,6 +860,12 @@ const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
     if (event.type === "echoSpent") return [`반향 증폭 — +${event.amount}`];
     if (event.type === "bloodCoinFizzle") return ["혈액 코인 불발 — 체력이 부족합니다"];
     if (event.type === "healPrevented") return [`회복 봉인 — 회복 ${event.amount} 무효`];
+    if (event.type === "enemyWindupStarted" && event.intent.actions.some((action) => action.kind === "resetRepeatSkillPressure"))
+      return [`적 ${event.enemy + 1} 반복 집행 예고 · ${event.turnsLeft}턴 후 실행${event.cancelThreshold === undefined ? "" : `, 실제 체력 피해 ${event.cancelThreshold}로 취소`}`];
+    if (event.type === "enemyWindupTicked" && event.intent.actions.some((action) => action.kind === "resetRepeatSkillPressure"))
+      return [event.turnsLeft > 0 ? `적 ${event.enemy + 1} 반복 집행 준비 · ${event.turnsLeft}턴 남음` : `적 ${event.enemy + 1} 반복 집행 해결`];
+    if (event.type === "enemyWindupCancelled" && event.intent.actions.some((action) => action.kind === "resetRepeatSkillPressure"))
+      return [`적 ${event.enemy + 1} 반복 집행 취소`];
     if (event.type === "enemyWindupStarted")
       return [
         `적 ${event.enemy + 1} 준비 시작 — ${event.turnsLeft}턴 남음${event.cancelThreshold === undefined ? "" : `, ${event.cancelThreshold} 피해로 취소`}`,

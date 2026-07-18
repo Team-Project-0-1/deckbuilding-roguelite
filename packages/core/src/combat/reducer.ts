@@ -15,6 +15,7 @@ import { derive, rngFrom, seedFromString } from '../rng';
 import { coinSatisfiesFlipRequirement, flipSkillRequiresEnemyTarget, isSlotUsableNow, skillRequiresSummonChoice } from './commands';
 import type { Command } from './commands';
 import { drawCards, drawSpecificCoin } from './draw';
+import { resolveRoyalTaxDeadlines } from './directive15';
 import { initialIntent, runEnemyPhase } from './enemy';
 import { runSummonPhase } from './summons';
 import type { CombatEvent } from './events';
@@ -525,6 +526,7 @@ const tickPlayerDurations = (input: CombatState, events: CombatEvent[]): CombatS
 
 const placeCoin = (input: CombatState, coin: CoinUid, slotId: SlotId, db: ContentDb): StepResult => {
   if (!input.zones.hand.includes(coin)) return { ok: false, error: 'coin is not in hand' };
+  if (input.coins[Number(coin)]?.counterfeit === true) return { ok: false, error: 'counterfeit coin cannot be placed' };
   const slotState = input.slots[Number(slotId)];
   if (slotState === undefined) return { ok: false, error: 'slot does not exist' };
   if (isSkillCommandSealed(input, slotId)) return { ok: false, error: 'skill is sealed' };
@@ -736,6 +738,8 @@ const endTurn = (input: CombatState, db: ContentDb, preserveChoice?: readonly Co
       if (state.phase === 'victory') return { ok: true, state, events };
     }
   }
+
+  state = resolveRoyalTaxDeadlines(state, db, events);
 
   const enemy = runEnemyPhase(state, db);
   state = enemy.state;

@@ -114,6 +114,22 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
     case "enemyAuraRemoved":
     case "enemyMarchRemoved":
       return [];
+    case "repeatSkillZealChanged":
+      return event.zeal > 0 ? ["mana"] : [];
+    case "repeatSkillZealReset":
+      return ["skill"];
+    case "royalTaxOpened":
+      return ["coin-place"];
+    case "royalTaxPaymentProgressed":
+    case "royalTaxPaid":
+      return ["coin-consume"];
+    case "royalTaxDefaulted":
+      return ["flip-tails", "block"];
+    case "royalTaxSeizureScheduled":
+      return ["cooldown"];
+    case "counterfeitExhausted":
+    case "counterfeitsRemoved":
+      return ["coin-consume"];
     case "coinSeizureTelegraphed":
     case "coinsSeized":
     case "coinsReturned":

@@ -108,6 +108,7 @@ const BATCH_D_POOL = [
   [enemy("grey-tower-sealer")],
 ] as const;
 const ELITE_POOL = [[enemy("raider-plus")], [enemy("gatekeeper-plus")]] as const;
+const DIRECTIVE15_ELITE_POOL = [[enemy("blackthorn-inquisitor-roderick")], [enemy("fallen-kings-treasurer-marcel")]] as const;
 
 // 막 보스 (P6 D1 — 재사용+수치 변형, balance-provisional):
 // act1 수문장+ 단일 승격 / act2 약탈자+·수문장+ 2체 / act3 잿불 마도왕.
@@ -169,7 +170,14 @@ const candidateNode = (
     return { id, kind, encounter: [...encounter] };
   }
   if (kind === "elite") {
-    const encounter = ELITE_POOL[rng.int(ELITE_POOL.length)]!;
+    // D15 elites are optional content: fixture databases retain the mandatory
+    // elite pool and its validation behavior without consuming RNG for absent
+    // optional encounters.
+    const optionalD15Pool = Math.floor(visit / VISITS_PER_ACT) >= 1
+      ? DIRECTIVE15_ELITE_POOL.filter((encounter) => hasEnemies(db, encounter))
+      : [];
+    const pool = [...ELITE_POOL, ...optionalD15Pool];
+    const encounter = pool[rng.int(pool.length)]!;
     requireEnemies(db, encounter);
     return { id, kind, encounter: [...encounter] };
   }

@@ -128,6 +128,20 @@ export interface CoinSeizureTelegraph {
   quantity: number;
 }
 
+export interface RepeatSkillPressureState {
+  lastSkillId?: SkillId;
+  /** The exact equipped slot whose use armed the pending execution. */
+  triggeringSlot?: SlotId;
+  zeal: number;
+  singleUsableResolvedUses: number;
+}
+
+export interface RoyalTaxPendingState {
+  element: Element;
+  paid: number;
+  deadlineTurn: number;
+}
+
 export interface EnemyState extends UnitState {
   defId: EnemyDefId;
   intent: EnemyIntent;
@@ -163,6 +177,9 @@ export interface EnemyState extends UnitState {
   warBannerAuraPercent?: number;
   deathCleanupComplete?: boolean;
   coinSeizure?: CoinSeizureTelegraph;
+  repeatSkillPressure?: RepeatSkillPressureState;
+  royalTaxPending?: RoyalTaxPendingState;
+  royalTaxDefaultStreak?: number;
 }
 
 // P7 D1/D2 — usedThisTurn(턴당 1회) 폐지 → cooldownRemaining(0=가용, 턴 시작 감소).
@@ -313,6 +330,9 @@ export const cloneState = (state: CombatState): CombatState => ({
 
 /** Throws if a coin is absent from, or duplicated across, combat-local zones. */
 export const assertCombatCoinZoneInvariant = (state: CombatState): void => {
+  if (state.custody.some((entry) => entry.coins.some((coin) => state.coins[Number(coin)]?.counterfeit === true))) {
+    throw new Error('counterfeit coin cannot enter custody');
+  }
   const locations = [
     ...state.zones.draw,
     ...state.zones.hand,

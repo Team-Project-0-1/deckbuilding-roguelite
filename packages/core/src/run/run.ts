@@ -209,6 +209,7 @@ export function weightedCoinOptions(
       .filter((element) => element !== undefined && element !== null),
   );
   const remaining = Object.values(db.coins)
+    .filter((coin) => coin.counterfeit !== true)
     .map((coin) => coin.id)
     .sort((left, right) => String(left).localeCompare(String(right)));
   const picks: CoinDefId[] = [];

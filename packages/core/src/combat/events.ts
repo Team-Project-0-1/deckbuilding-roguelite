@@ -88,5 +88,14 @@ export type CombatEvent =
   | { type: 'skillSealFallbackReduced'; sourceEnemy: number; slot: SlotId; multiplier: number; turns: number }
   | { type: 'placedCoinsReturned'; slot: SlotId; coins: CoinUid[]; reason: 'skillSeal' }
   | { type: 'skillSealRepeatStruck'; sourceEnemy: number; damage: number }
+  | { type: 'repeatSkillZealChanged'; sourceEnemy: number; skill: SkillId; zeal: number; maxZeal: number }
+  | { type: 'repeatSkillZealReset'; sourceEnemy: number }
+  | { type: 'royalTaxOpened'; sourceEnemy: number; element: Element; denomination: number; deadlineTurn: number }
+  | { type: 'royalTaxPaymentProgressed'; sourceEnemy: number; element: Element; paid: number; denomination: number }
+  | { type: 'royalTaxPaid'; sourceEnemy: number; element: Element; paid: number; denomination: number }
+  | { type: 'royalTaxDefaulted'; sourceEnemy: number; element: Element; paid: number; denomination: number; counterfeits: CoinUid[]; shield: number; defaultStreak: number }
+  | { type: 'royalTaxSeizureScheduled'; sourceEnemy: number; intent: EnemyIntent }
+  | { type: 'counterfeitExhausted'; coin: CoinUid }
+  | { type: 'counterfeitsRemoved'; coins: CoinUid[] }
   | { type: 'turnStarted'; turn: number }
   | { type: 'combatEnded'; result: 'victory' | 'defeat'; turns: number };

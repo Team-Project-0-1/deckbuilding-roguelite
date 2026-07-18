@@ -14,7 +14,12 @@ const cue = (key: string, duration = 320): FeedbackCue => ({ key, duration });
 export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
   switch (event.type) {
     case "damageDealt":
-      return [cue(`unit-${unitKey(event.target)}`, event.source === "enemy" ? 420 : 320)];
+      return [
+        cue(
+          `unit-${unitKey(event.target)}`,
+          event.source === "enemy" ? 420 : 320,
+        ),
+      ];
     case "blockGained":
       return [cue(`block-${unitKey(event.target)}`, 260)];
     case "healed":
@@ -22,11 +27,11 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
         ? [cue(`heal-${unitKey(event.target)}`, 340)]
         : [];
     case "enemyHealed":
-      return event.amount > 0
-        ? [cue(`heal-enemy-${event.enemy}`, 340)]
-        : [];
+      return event.amount > 0 ? [cue(`heal-enemy-${event.enemy}`, 340)] : [];
     case "healPrevented":
-      return event.amount > 0 ? [cue("heal-lock-player", 380), cue("unit-player", 380)] : [];
+      return event.amount > 0
+        ? [cue("heal-lock-player", 380), cue("unit-player", 380)]
+        : [];
     case "statusApplied":
     case "statusTicked": {
       const strength = event.type === "statusApplied" ? 340 : 240;
@@ -87,7 +92,10 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
     case "enemyHealFailed":
       return [cue(`unit-enemy-${event.enemy}`, 380)];
     case "damageRedirected":
-      return [cue(`unit-enemy-${event.protected}`, 300), cue(`unit-enemy-${event.protector}`, 380)];
+      return [
+        cue(`unit-enemy-${event.protected}`, 300),
+        cue(`unit-enemy-${event.protector}`, 380),
+      ];
     case "protectionLinkRemoved":
     case "protectionLinkBroken":
       return [cue(`unit-enemy-${event.protector}`, 460)];
@@ -100,6 +108,18 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
       return [cue(`unit-enemy-${event.source}`, 320)];
     case "enemyMarchRemoved":
       return [cue(`unit-enemy-${event.target}`, 320)];
+    case "repeatSkillZealChanged":
+    case "repeatSkillZealReset":
+    case "royalTaxOpened":
+    case "royalTaxPaymentProgressed":
+    case "royalTaxPaid":
+    case "royalTaxDefaulted":
+    case "royalTaxSeizureScheduled":
+      return [cue(`unit-enemy-${event.sourceEnemy}`, 420)];
+    case "counterfeitExhausted":
+      return [cue(`coin-${Number(event.coin)}`, 360)];
+    case "counterfeitsRemoved":
+      return event.coins.map((coin) => cue(`coin-${Number(coin)}`, 360));
     case "coinSeizureTelegraphed":
     case "coinsSeized":
     case "coinsReturned":

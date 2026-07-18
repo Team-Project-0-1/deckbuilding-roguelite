@@ -59,6 +59,7 @@ const equip = (value: string) => value as EquipmentDefId;
 // 전체 스킬→모든 생존 적, 자기 대상 스킬→선택한 적. 우호형(방어·회복)은 항상 플레이어.
 export const coins = {
   basic: { id: coin('basic'), element: null },
+  counterfeit: { id: coin('counterfeit'), element: null, counterfeit: true },
   fire: {
     id: coin('fire'),
     element: 'fire',
@@ -2230,6 +2231,55 @@ export const enemies = {
       { id: 'cast-seal', actions: [{ kind: 'sealRecentSkill' }] },
       { id: 'arcane-bolt', actions: [{ kind: 'attack', damage: 7 }] },
       { id: 'greater-bolt', actions: [{ kind: 'attack', damage: 5 }] }
+    ]
+  },
+  // Directive 15 — M17/M18 remain generic resolver data; no enemy-id branches.
+  'blackthorn-inquisitor-roderick': {
+    id: enemy('blackthorn-inquisitor-roderick'),
+    name: '검은가시 심문관 로데릭',
+    maxHp: 96,
+    repeatSkillPressure: {
+      threshold: 3,
+      maxZeal: 3,
+      sameSkillGain: 1,
+      differentSkillReset: 0,
+      singleUsableZealEveryUses: 2,
+      sealTurns: 1,
+      executionIntent: {
+        id: 'zeal-execution',
+        windup: { turns: 1, revealAtStart: true },
+        cancelOn: { damageThreshold: 15 },
+        actions: [{ kind: 'attack', damage: 18 }, { kind: 'sealTriggeredSkill', turns: 1 }, { kind: 'resetRepeatSkillPressure' }]
+      }
+    },
+    intents: [
+      { id: 'warden-strike', actions: [{ kind: 'attack', damage: 8 }] },
+      { id: 'warden-slash', actions: [{ kind: 'attack', damage: 10 }] }
+    ]
+  },
+  'fallen-kings-treasurer-marcel': {
+    id: enemy('fallen-kings-treasurer-marcel'),
+    name: '무너진 왕의 재무관 마르셀',
+    maxHp: 92,
+    coinSeizure: { target: 'mostNumerousPublicElementInHand', maxCoins: 2, capFraction: 0.5 },
+    royalTax: {
+      denomination: 2,
+      deadline: 'endNextPlayerTurn',
+      counterfeitCoin: coin('counterfeit'),
+      counterfeitCount: 2,
+      defaultShield: 8,
+      seizureAfterDefaults: 2,
+      seizureIntent: {
+        id: 'royal-seizure',
+        windup: { turns: 1, revealAtStart: true },
+        actions: [{ kind: 'seizeCustody' }, { kind: 'attack', damage: 4 }, { kind: 'resetRoyalTaxDefaults' }]
+      }
+    },
+    intents: [
+      { id: 'royal-tax', actions: [{ kind: 'royalTax', degradedDamage: 8 }] },
+      { id: 'audit-eight', actions: [{ kind: 'attack', damage: 8 }] },
+      { id: 'royal-tax-repeat', actions: [{ kind: 'royalTax', degradedDamage: 8 }] },
+      { id: 'audit-six', actions: [{ kind: 'attack', damage: 6 }] }
     ]
   },
   'ember-archmage': {

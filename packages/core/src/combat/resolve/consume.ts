@@ -6,6 +6,7 @@ import { assertCoinEnchantEligibility, firstUseEchoCoins } from '../enchant';
 import { activeSkillSeal, isSkillCommandSealed, recordRecentSkillUse } from '../state';
 import type { CombatState } from '../state';
 import { consumeRequirementFor } from '../consume-requirement';
+import { recordDirective15SkillResolution } from '../directive15';
 import {
   applyBloodSwordSkillResolved,
   applyEffectAtom,
@@ -119,7 +120,9 @@ export const resolveConsume = (
     } else {
       state = echoed.state;
     }
-    return { state: recordRecentSkillUse(state, slot), events };
+    state = recordRecentSkillUse(state, slot);
+    state = recordDirective15SkillResolution(state, input, slot, coins, db, events);
+    return { state, events };
   };
 
   let state: CombatState = {

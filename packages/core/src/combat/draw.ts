@@ -14,6 +14,7 @@ export const drawCards = (input: CombatState, count: number): { state: CombatSta
   let state = input;
   let draw = [...state.zones.draw];
   let discard = [...state.zones.discard];
+  const exhausted = [...state.zones.exhausted];
   const rng = state.rngImpl?.shuffle ?? rngFrom(state.rng.shuffle);
   const drawn: CoinUid[] = [];
   let remaining = Math.min(count, Math.max(0, HAND_LIMIT - state.zones.hand.length));
@@ -27,6 +28,12 @@ export const drawCards = (input: CombatState, count: number): { state: CombatSta
     }
     const coin = draw.shift();
     if (coin === undefined) break;
+    if (state.coins[Number(coin)]?.counterfeit === true) {
+      exhausted.push(coin);
+      events.push({ type: 'counterfeitExhausted', coin });
+      remaining -= 1;
+      continue;
+    }
     drawn.push(coin);
     remaining -= 1;
   }
@@ -35,7 +42,7 @@ export const drawCards = (input: CombatState, count: number): { state: CombatSta
   state = {
     ...state,
     rng: { ...state.rng, shuffle: rng.snapshot() },
-    zones: { ...state.zones, draw, discard, hand: [...state.zones.hand, ...drawn] }
+    zones: { ...state.zones, draw, discard, exhausted, hand: [...state.zones.hand, ...drawn] }
   };
   return { state, events };
 };

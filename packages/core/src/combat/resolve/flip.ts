@@ -3,6 +3,7 @@ import { effectiveElements, isStackStatus, isSuccessLadderFlipSkill, skillCooldo
 import type { Element, EquipmentDefId, CoinUid, Face, SkillId, SlotId } from '../../ids';
 import { rngFrom } from '../../rng';
 import { drawCards, drawSpecificCoin, HAND_LIMIT } from '../draw';
+import { recordDirective15SkillResolution, resetRepeatSkillPressure } from '../directive15';
 import type { CombatEvent, DamageSource } from '../events';
 import { assertCoinEnchantEligibility, firstUseEchoCoins, rollEnchantedFace } from '../enchant';
 import { activeSkillSeal, assertCombatCoinZoneInvariant, isSkillCommandSealed, MAX_PRESERVED_COINS, recordRecentSkillUse, statusStacks, statusTurns } from '../state';
@@ -129,16 +130,37 @@ const firstAliveEnemy = (state: CombatState): number | undefined =>
 
 const remiseTotal = (charges: number, amount: number): number => Math.min(3, Math.max(0, charges + amount));
 
+const removeCounterfeitsAtCombatEnd = (state: CombatState, events: CombatEvent[]): CombatState => {
+  const counterfeits = Object.values(state.coins).filter((coin) => coin.counterfeit === true).map((coin) => coin.uid);
+  if (counterfeits.length === 0) return state;
+  const removed = new Set(counterfeits);
+  events.push({ type: 'counterfeitsRemoved', coins: counterfeits });
+  return {
+    ...state,
+    coins: Object.fromEntries(Object.entries(state.coins).filter(([, coin]) => coin.counterfeit !== true)),
+    zones: {
+      ...state.zones,
+      draw: state.zones.draw.filter((coin) => !removed.has(coin)),
+      hand: state.zones.hand.filter((coin) => !removed.has(coin)),
+      discard: state.zones.discard.filter((coin) => !removed.has(coin)),
+      exhausted: state.zones.exhausted.filter((coin) => !removed.has(coin)),
+      placed: Object.fromEntries(Object.entries(state.zones.placed).map(([slot, coins]) => [slot, coins.filter((coin) => !removed.has(coin))]))
+    }
+  };
+};
+
 export const checkCombatEnd = (state: CombatState, events: CombatEvent[]): CombatState => {
   if (state.phase === 'victory' || state.phase === 'defeat') return state;
   if (state.player.hp <= 0) {
     events.push({ type: 'combatEnded', result: 'defeat', turns: state.turn });
-    return { ...state, phase: 'defeat', player: { ...state.player, pendingOverheat: false } };
+    const ended = { ...state, phase: 'defeat' as const, player: { ...state.player, pendingOverheat: false } };
+    return removeCounterfeitsAtCombatEnd(ended, events);
   }
   if (state.enemies.every((enemy) => enemy.hp <= 0)) {
     // M5 run settlement hook: remove temporary coins from all zones when combat finalization spans combats.
     events.push({ type: 'combatEnded', result: 'victory', turns: state.turn });
-    return { ...state, phase: 'victory', player: { ...state.player, pendingOverheat: false } };
+    const ended = { ...state, phase: 'victory' as const, player: { ...state.player, pendingOverheat: false } };
+    return removeCounterfeitsAtCombatEnd(ended, events);
   }
   return state;
 };
@@ -277,6 +299,7 @@ const applyEnemyDamage = (
     events.push({ type: 'enemyWindupCancelled', enemy: enemyIndex, intent: enemy.windup.intent });
   }
   let result: CombatState = { ...state, enemies };
+  if (shouldCancelWindup) result = resetRepeatSkillPressure(result, enemyIndex, events);
   if (trackPetrify && enemy.petrifyActive === true && enemy.petrifyShatterRawDamageFraction !== undefined && (enemy.crackedTurns ?? 0) <= 0) {
     const threshold = Math.ceil(enemy.maxHp * enemy.petrifyShatterRawDamageFraction);
     const rawDamage = (enemy.petrifyRawDamage ?? 0) + prePetrifyAmount;
@@ -1276,7 +1299,9 @@ export const resolveFlip = (
       events.push({ type: 'overheatConsumed', skill: skill.id });
       state = { ...state, player: { ...state.player, overheat: false } };
     }
-    return { state: recordRecentSkillUse(state, slot), events };
+    state = recordRecentSkillUse(state, slot);
+    state = recordDirective15SkillResolution(state, input, slot, placed, db, events);
+    return { state, events };
   };
 
   let state: CombatState = {

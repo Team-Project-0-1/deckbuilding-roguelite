@@ -10,6 +10,7 @@ export const assertCoinEnchantEligibility = (
 ): void => {
   for (const coin of coins) {
     const instance = state.coins[Number(coin)];
+    if (instance?.counterfeit === true) throw new Error('counterfeit coin cannot be enchanted or used');
     const enchant = instance?.enchant;
     if (enchant === undefined) continue;
     if (instance?.permanent !== true) {
