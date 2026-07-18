@@ -17,7 +17,10 @@ const BUDGETS = {
   // The 2026-07-15 combat UX completion adds the ordered execution workflow,
   // help/history/preferences surfaces, and their responsive/accessibility CSS.
   // Keep the measured addition bounded instead of disabling the gate.
-  total: 3213312,
+  // 3,240 KiB - 2026-07-19 Blood Spellblade combat-sprite sign-off.
+  // Measured total 3,257,343 B includes one new 96,066 B production atlas;
+  // retain 60,417 B headroom without relaxing the JS, CSS, or max-file gates.
+  total: 3317760,
   // 608 KiB - 2026-07-18 D18 measured 612,189 B after review-required
   // ordered vault UI, windup-bounded Lead lifecycle, and exact replay telemetry.
   js: 622592,
