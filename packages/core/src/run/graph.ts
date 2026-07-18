@@ -89,6 +89,18 @@ const BATCH_B_THREE_POOL = [
   [enemy("plague-doctor"), enemy("ancient-treant")],
   [enemy("white-wraith"), enemy("ancient-treant")],
 ] as const;
+// P13 §6.2/§6.4 Batch C stays post-Act-1 and keeps each encounter at no more
+// than two new decision-heavy systems. The guard/rider pair protects an
+// existing threat rather than stacking multiple new support systems together.
+const BATCH_C_TWO_POOL = [
+  [enemy("fortress-guard"), enemy("red-lancer")],
+  [enemy("cathedral-gargoyle")],
+  [enemy("war-banner-rider"), enemy("black-hound")],
+] as const;
+const BATCH_C_THREE_POOL = [
+  [enemy("fortress-guard"), enemy("silverbell-healer")],
+  [enemy("war-banner-rider"), enemy("gate-pikeman"), enemy("slime")],
+] as const;
 const ELITE_POOL = [[enemy("raider-plus")], [enemy("gatekeeper-plus")]] as const;
 
 // 막 보스 (P6 D1 — 재사용+수치 변형, balance-provisional):
@@ -106,14 +118,16 @@ const combatPoolFor = (act: number, visit: number): readonly (readonly EnemyDefI
     if (visit <= 5) return TWO_POOL;
     return [...TWO_POOL, ...THREE_POOL];
   }
-  if (visit <= 5) return [...TWO_POOL, ...BATCH_A_TWO_POOL, ...BATCH_B_TWO_POOL];
+  if (visit <= 5) return [...TWO_POOL, ...BATCH_A_TWO_POOL, ...BATCH_B_TWO_POOL, ...BATCH_C_TWO_POOL];
   return [
     ...TWO_POOL,
     ...BATCH_A_TWO_POOL,
     ...BATCH_B_TWO_POOL,
+    ...BATCH_C_TWO_POOL,
     ...THREE_POOL,
     ...BATCH_A_THREE_POOL,
     ...BATCH_B_THREE_POOL,
+    ...BATCH_C_THREE_POOL,
   ];
 };
 

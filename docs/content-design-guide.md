@@ -281,6 +281,9 @@ intents, 패시브, 등장 구간, 보상 가치
 
 - 행동은 공격, 연속 공격, 방어, 버프, 디버프, 소환으로 표현한다.
 - P13 배치 A 기믹 필드(전부 옵셔널, 계약은 `packages/core/src/combat/enemy-atoms.test.ts`): `windup {turns, cancelOn.damageThreshold}`, `vulnerableWhileWindup`, `conditionalAttack(playerHpBelowHalf)`, `phases {hpBelowFraction, damageTakenMultiplier, intents}`, `attack.damagePerGrowthPercent`, `growOnUnblockedDamage(+healOnGrow/maxStacks/minHpDamageFraction/loseOnFullBlock)`, `growthBranch {atLeast, intent}`, `healAlly(lowestHpAlly, cleanse)`.
+- P13 배치 C 필드: `threat`, `protectionLink {target: 'highestThreatAlly', redirectFraction, durability, brokenTurns, damageTakenMultiplierWhileBroken}`, `petrify {damageReduction, shatterRawDamageFraction, crackedTurns, crackedDamageTakenMultiplier, cancelWindupIntentId}`, `warBanner {attackAuraPercent, march {attackPercent, turns, shieldMaxHpFraction}}`. `petrify` 의도에는 `entersPetrify: true`, 집단 행군 의도에는 `groupMarch: true`를 사용한다.
+- 보호 링크는 전투 시작 시 가장 높은 `threat`의 살아 있는 다른 적을 하나만 연결한다. 피해 재지정은 공유 피해 해결기를 통해 처리하므로 상태 피해와 방어 상호작용도 같은 규칙을 쓴다. 링크 내구도는 보호자 자신을 대상으로 한 공격 스킬당 한 번만 줄어든다.
+- 전쟁기수의 오라는 자신을 제외한 살아 있는 적에게만 적용한다. 반대로 행군은 전쟁기수 자신을 포함한 모든 살아 있는 적에게 적용한다. 행군의 보호막·공격 증가는 원천 적을 기록해야 하며, 원천이 사망하면 같은 해결 안에서 남은 보호막과 공격 증가를 제거한다. 새 몬스터가 원천 소유 효과를 추가하면 사망 정리 이벤트와 회귀 테스트를 함께 추가한다.
 - `growthLabel`은 동일 런타임 스택을 몬스터 콘셉트 용어(예: 기세·만찬)로 표시한다. `growthBranch`는 기본 패턴 인덱스를 유지한 채 공개 시점의 스택으로 대체 의도를 확정하므로, 분기 결과와 준비 행동이 플레이어에게 먼저 보인다.
 - 강공은 windup 예고를 경유해야 하고, 일반 조우의 핵심 위협은 1~2개다(교란 축 3중첩 금지).
 - 의도만 보고 대응 결정을 내릴 수 있어야 한다.

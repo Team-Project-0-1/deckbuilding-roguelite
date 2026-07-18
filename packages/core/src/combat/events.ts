@@ -73,5 +73,13 @@ export type CombatEvent =
   | { type: 'playerTurnEndPunished'; enemy: number; coinCount: number; threshold: number; status: StatusId; stacks: number }
   | { type: 'enemyCleansed'; enemy: number; statuses: StatusId[] }
   | { type: 'enemyHealFailed'; enemy: number; target: number }
+  | { type: 'damageRedirected'; protector: number; protected: number; amount: number }
+  | { type: 'protectionLinkRemoved'; protector: number; protected: number }
+  | { type: 'protectionLinkBroken'; protector: number; protected: number; turns: number }
+  | { type: 'petrifyProgressed'; enemy: number; rawDamage: number; threshold: number }
+  | { type: 'petrifyShattered'; enemy: number; rawDamage: number }
+  | { type: 'enemyAuraApplied'; source: number; target: number; percent: number }
+  | { type: 'enemyAuraRemoved'; source: number }
+  | { type: 'enemyMarchRemoved'; source: number; target: number }
   | { type: 'turnStarted'; turn: number }
   | { type: 'combatEnded'; result: 'victory' | 'defeat'; turns: number };

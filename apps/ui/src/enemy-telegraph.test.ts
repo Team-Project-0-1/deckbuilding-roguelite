@@ -126,6 +126,132 @@ describe("enemy telegraph UI", () => {
     expect(html).toContain("회복 봉인 1");
   });
 
+  it("renders Batch C protection, petrify and banner mechanics with stable labels", () => {
+    vi.stubGlobal("window", {
+      clearTimeout,
+      matchMedia: () => ({ addEventListener: () => undefined, matches: true, removeEventListener: () => undefined }),
+      setTimeout,
+    });
+    const common = {
+      block: 4,
+      floats: [],
+      hp: 60,
+      maxHp: 80,
+      motion: "idle" as const,
+      name: "아이젠발 성채수호병",
+      playKey: 0,
+      side: "enemy" as const,
+      sprite,
+      statuses: {},
+      unitKey: "enemy-0",
+      vfx: new Set<string>(),
+    };
+    const activeHtml = renderToStaticMarkup(
+      createElement(UnitPanel, {
+        ...common,
+        enemyIndex: 0,
+        protectionLink: {
+          active: true,
+          brokenDamageTakenMultiplier: 1.2,
+          brokenTurns: 2,
+          durability: 3,
+          restoreDurability: 2,
+          redirectFraction: 0.4,
+          target: 1,
+          turnsUntilRestore: 0,
+        },
+        protectionTargetName: "그리폰 왕가의 전쟁기수",
+        protectedBy: { name: "그리폰 왕가의 전쟁기수", redirectPercent: 40 },
+        petrify: {
+          active: true,
+          crackedPercent: 30,
+          crackedTurns: 0,
+          diveCancelled: false,
+          divePrepared: true,
+          rawDamage: 8,
+          reductionPercent: 70,
+          threshold: 16,
+        },
+        warBannerAuraPercent: 10,
+        auraSourceName: "그리폰 왕가의 전쟁기수",
+        auraSourcePercent: 10,
+        march: { attackPercent: 20, shield: 6, sourceName: "그리폰 왕가의 전쟁기수", turns: 2 },
+      }),
+    );
+    expect(activeHtml).toContain('data-testid="protection-link-0"');
+    expect(activeHtml).toContain("보호 → 그리폰 왕가의 전쟁기수 40% · 내구 3");
+    expect(activeHtml).toContain("석화 70% · 원피해 8/16 · 낙하 취소 가능");
+    expect(activeHtml).toContain('data-testid="war-banner-aura-0"');
+    expect(activeHtml).toContain("군기 오라 · 다른 적 +10%");
+    expect(activeHtml).toContain('data-testid="royal-march-0"');
+    expect(activeHtml).toContain("진군 · +20% · 2턴 · 방패 6 (그리폰 왕가의 전쟁기수)");
+
+    const recoveryHtml = renderToStaticMarkup(
+      createElement(UnitPanel, {
+        ...common,
+        enemyIndex: 1,
+        petrify: {
+          active: false,
+          crackedPercent: 30,
+          crackedTurns: 1,
+          diveCancelled: true,
+          divePrepared: false,
+          rawDamage: 16,
+          reductionPercent: 70,
+          threshold: 16,
+        },
+        protectionLink: {
+          active: false,
+          brokenDamageTakenMultiplier: 1.2,
+          brokenTurns: 2,
+          durability: 0,
+          restoreDurability: 2,
+          redirectFraction: 0.4,
+          target: 0,
+          turnsUntilRestore: 2,
+        },
+      }),
+    );
+    expect(recoveryHtml).toContain("보호 파괴 · 복구 2턴 · 취약 +20%");
+    expect(recoveryHtml).toContain("균열 1턴 · 취약 +30% · 낙하 취소");
+    expect(recoveryHtml).toContain('data-testid="petrify-status-1"');
+  });
+
+  it("telegraphs Batch C petrify and royal march before they resolve", () => {
+    const gargoyle = createCombat(
+      { character: "warrior" as never, enemies: ["cathedral-gargoyle" as never] },
+      contentDb,
+      "batch-c-petrify-intent",
+    ).enemies[0];
+    const rider = createCombat(
+      { character: "warrior" as never, enemies: ["war-banner-rider" as never] },
+      contentDb,
+      "batch-c-march-intent",
+    ).enemies[0];
+    if (gargoyle === undefined || rider === undefined) throw new Error("missing Batch C enemy");
+
+    const petrifyHtml = renderToStaticMarkup(
+      createElement(IntentBadge, {
+        enemy: { ...gargoyle, intent: contentDb.enemies["cathedral-gargoyle"]!.intents[1]! },
+      }),
+    );
+    const marchIntent = contentDb.enemies["war-banner-rider"]!.intents[1]!;
+    const marchHtml = renderToStaticMarkup(
+      createElement(IntentBadge, {
+        enemy: {
+          ...rider,
+          intent: marchIntent,
+          windup: { intent: marchIntent, turnsLeft: 1, startHp: rider.hp },
+        },
+      }),
+    );
+
+    expect(petrifyHtml).toContain('data-testid="petrify-intent"');
+    expect(petrifyHtml).toContain("석화 70% · 원피해 20%로 파쇄");
+    expect(marchHtml).toContain('data-testid="royal-march-intent"');
+    expect(marchHtml).toContain("진군 · 전체 +20% 2턴 · 방패 8%");
+  });
+
   it("defines glossary entries for telegraph terms", () => {
     expect(KEYWORD_GLOSSARY.windup.label).toBe("준비(예고)");
     expect(KEYWORD_GLOSSARY.vulnerable.label).toBe("취약");

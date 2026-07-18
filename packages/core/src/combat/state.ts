@@ -113,6 +113,21 @@ export interface EnemyState extends UnitState {
   damageTakenThisRound?: number;
   boundHealAlly?: number;
   cancelledWindupIntentId?: string;
+  protectionLink?: { target: number; durability: number; restoreDurability: number; active: boolean; turnsUntilRestore: number; redirectFraction: number; brokenTurns: number; brokenDamageTakenMultiplier: number };
+  petrifyRawDamage?: number;
+  petrifyActive?: boolean;
+  crackedTurns?: number;
+  petrifyDamageReduction?: number;
+  petrifyShatterRawDamageFraction?: number;
+  petrifyCrackedDamageTakenMultiplier?: number;
+  petrifyCrackedTurns?: number;
+  petrifyCancelIntentId?: string;
+  marchTurns?: number;
+  marchShield?: number;
+  marchAttackPercent?: number;
+  marchSource?: number;
+  warBannerAuraPercent?: number;
+  deathCleanupComplete?: boolean;
 }
 
 // P7 D1/D2 — usedThisTurn(턴당 1회) 폐지 → cooldownRemaining(0=가용, 턴 시작 감소).
@@ -185,7 +200,8 @@ export const cloneState = (state: CombatState): CombatState => ({
   enemies: state.enemies.map((enemy) => ({
     ...enemy,
     statuses: { ...enemy.statuses },
-    windup: enemy.windup === undefined ? undefined : { ...enemy.windup }
+    windup: enemy.windup === undefined ? undefined : { ...enemy.windup },
+    protectionLink: enemy.protectionLink === undefined ? undefined : { ...enemy.protectionLink }
   })),
   coins: Object.fromEntries(Object.entries(state.coins).map(([uid, coin]) => [uid, { ...coin, grants: [...coin.grants] }])),
   zones: {

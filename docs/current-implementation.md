@@ -228,8 +228,17 @@ Drive v1.2의 화염 격투가 범위에는 과열이 없으므로 신규 보상
 - M-11 `재부리 역병의사`: 독액 주사는 피해 7 뒤 실제 HP 피해가 있을 때만 중독 2를 부여한다. `역병 연무`는 1턴 예고 후 중독 1을 먼저 더하고, 갱신된 중독이 5 이상이면 치유 차단 2턴을 부여한다. 중독은 턴 종료에 스택만큼 방어 무시 피해를 주고 정화 전까지 유지된다.
 - M-12 `서리묘지 백색망령`: 플레이어 턴 종료에 미사용 속성 동전이 4개 이상이면 동상 1턴을 부여한다. 장전에서 돌아온 동전, 임시·보존 동전, 임시 속성 부여를 받은 기본 동전도 손에 남아 미사용이면 각각 한 번만 센다. 이 검사는 기존 지속 상태 감소 뒤, 손패 버림 전에 수행한다. 기본 순환은 피해 7+동상 1과 1턴 예고형 동상 2다.
 - M-14 `흑가시 숲 고목정령`: 나이테는 최대 5, 라운드 종료마다 1을 얻는다. 스택당 받는 피해 8% 감소, 행동 시작 시 최대 HP의 3% 회복을 제공한다. 한 라운드의 실제 HP 피해가 최대 HP의 15% 이상이면 1개, 25% 이상이면 2개를 제거한 뒤 의무 성장 1을 적용하고 피해 누계를 초기화한다. 방어에 막힌 양은 누계하지 않으며 다단·소환·지속 피해의 실제 HP 피해는 합산한다.
-- 배치 B는 `EnemyDef.playerTurnEndPunishment`와 `EnemyDef.roundGrowth`, 조건부 `applyStatus`만 추가한다. 보호 링크·봉인·동전 압수·적 소환 원자는 후속 배치로 남기고 `enemyTurnStart` 자기 대상 한정 검증 벽을 유지한다. 이벤트: `healPrevented`, `playerTurnEndPunished`, `enemyGrowthReduced`, 기존 `enemyGrew`.
+- 배치 B는 `EnemyDef.playerTurnEndPunishment`와 `EnemyDef.roundGrowth`, 조건부 `applyStatus`를 추가했다. 봉인·동전 압수·적 소환은 후속 배치로 남기고 `enemyTurnStart` 패시브의 자기 대상 한정 검증 벽은 유지한다. 이벤트: `healPrevented`, `playerTurnEndPunished`, `enemyGrowthReduced`, 기존 `enemyGrew`.
 - 근거: `PRD/P13_REVISION_DESIGN_SYNC.md` §6.2·§6.4 및 소유자 승인 20종 상세 명세. 수치는 balance-provisional이다.
+
+## 7.0.4 보호·석화·전쟁기 원자 (P13 배치 C)
+
+- `EnemyDef.threat`, `protectionLink { target: 'highestThreatAlly', redirectFraction, durability, brokenTurns, damageTakenMultiplierWhileBroken }`, `petrify { damageReduction, shatterRawDamageFraction, crackedTurns, crackedDamageTakenMultiplier, cancelWindupIntentId }`, `warBanner { attackAuraPercent, march { attackPercent, turns, shieldMaxHpFraction } }`는 모두 선택적 데이터 필드이며 콘텐츠 검증기가 범위·대상·정수 제약을 확인한다.
+- M-05 `아이젠발 성채수호병`은 전투 시작 시 살아 있는 최고 위협 아군을 연결하고, 그 대상 피해의 40%를 수호병으로 재지정한다. 수호병을 대상으로 한 공격 스킬은 다단 여부와 무관하게 내구도를 한 번만 깎는다. 내구도 0이면 링크는 2 적 턴 동안 끊기고, 수호병은 받는 피해 ×1.2가 된 뒤 내구도 2로 복구한다. 재지정된 두 피해 조각은 각자의 방어를 따로 사용한다.
+- M-06 `성 오델리아의 봉헌 가고일`은 `petrify` 의도 해결 뒤 석화 상태가 된다. 석화 중 받는 피해는 70% 감쇄되지만 감쇄 전 피해 누적이 최대 HP의 20%에 닿으면 다음 `falling-assault` 준비를 취소하고, 석화를 해제한 뒤 1 적 턴의 균열(받는 피해 ×1.3)을 얻는다.
+- M-08 `그리폰 왕가의 전쟁기수`가 살아 있는 동안 다른 적의 공격은 +10% 오라를 받는다. `royal-march`는 1턴 예고 후 전쟁기수 자신을 포함한 모든 살아 있는 적에게 2 적 턴 동안 공격 +20%와 최대 HP의 8% 보호막을 부여한다. 보호막은 원천 소유량으로 추적한다.
+- 공통 사망 정리는 같은 피해 해결 안에서 보호 링크와 전쟁기수 원천의 행군 보호막·공격 버프를 제거한다. 이벤트는 `damageRedirected`, `protectionLinkBroken/Removed`, `petrifyProgressed/Shattered`, `enemyAuraApplied/Removed`, `enemyMarchRemoved`로 원인과 정리 결과를 남긴다.
+- 배치 C 몬스터는 2·3막 조우 풀에 편입되어 있으며 라이브 조우는 최대 3적을 유지한다. 수치와 실제 체감은 `balance-provisional` / `experience-unverified`다.
 
 ## 7.1 P10 캐릭터 전투 상태
 

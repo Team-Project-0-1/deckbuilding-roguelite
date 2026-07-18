@@ -86,6 +86,20 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
       return [cue(`unit-enemy-${event.enemy}`, 420)];
     case "enemyHealFailed":
       return [cue(`unit-enemy-${event.enemy}`, 380)];
+    case "damageRedirected":
+      return [cue(`unit-enemy-${event.protected}`, 300), cue(`unit-enemy-${event.protector}`, 380)];
+    case "protectionLinkRemoved":
+    case "protectionLinkBroken":
+      return [cue(`unit-enemy-${event.protector}`, 460)];
+    case "petrifyProgressed":
+    case "petrifyShattered":
+      return [cue(`unit-enemy-${event.enemy}`, 460)];
+    case "enemyAuraApplied":
+      return [cue(`unit-enemy-${event.target}`, 320)];
+    case "enemyAuraRemoved":
+      return [cue(`unit-enemy-${event.source}`, 320)];
+    case "enemyMarchRemoved":
+      return [cue(`unit-enemy-${event.target}`, 320)];
     case "coinFlipped":
     case "bloodCoinFizzle":
     case "resonanceTriggered":

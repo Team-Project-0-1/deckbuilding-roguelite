@@ -72,7 +72,12 @@ const modifiedDamage = (state: CombatState, target: TargetRef, amount: number, a
     growthTarget?.roundGrowth === undefined
       ? 1
       : Math.max(0, 1 - (growthTarget.growthStacks ?? 0) * growthTarget.roundGrowth.damageReductionPerStack);
-  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier * phaseMultiplier * growthMultiplier);
+  const petrifyTarget = target.type === 'enemy' ? state.enemies[target.index] : undefined;
+  const crackedMultiplier = petrifyTarget !== undefined && (petrifyTarget.crackedTurns ?? 0) > 0 ? (petrifyTarget.petrifyCrackedDamageTakenMultiplier ?? 1) : 1;
+  const brokenProtectionMultiplier = petrifyTarget?.protectionLink !== undefined && petrifyTarget.protectionLink.active === false
+    ? petrifyTarget.protectionLink.brokenDamageTakenMultiplier
+    : 1;
+  return Math.floor(amount * frostbiteMultiplier * shockMultiplier * windupMultiplier * phaseMultiplier * growthMultiplier * crackedMultiplier * brokenProtectionMultiplier);
 };
 
 const statusDamageAmount = (state: CombatState, target: TargetRef, amount: number): number => {
@@ -92,7 +97,11 @@ export const applyDamage = (
 ): CombatState => {
   if (amount < 0) throw new Error('damage amount cannot be negative');
   const isStatusDamage = source === 'burn' || source === 'poison';
-  const finalAmount = isStatusDamage ? statusDamageAmount(state, target, amount) : modifiedDamage(state, target, amount, attacker);
+  const baseFinalAmount = isStatusDamage ? statusDamageAmount(state, target, amount) : modifiedDamage(state, target, amount, attacker);
+  const petrifyReduction = target.type === 'enemy' ? state.enemies[target.index]?.petrifyDamageReduction : undefined;
+  const finalAmount = target.type === 'enemy' && state.enemies[target.index]?.petrifyActive === true && petrifyReduction !== undefined
+    ? Math.floor(baseFinalAmount * (1 - petrifyReduction))
+    : baseFinalAmount;
   if (target.type === 'player') {
     const canReduce =
       !isStatusDamage && finalAmount > 0 && !state.player.firstDamageReducedThisTurn && state.passives.some((id) => String(id) === 'opening-stance');
@@ -123,6 +132,35 @@ export const applyDamage = (
 
   const enemy = state.enemies[target.index];
   if (enemy === undefined || enemy.hp <= 0) return state;
+  const protection = state.enemies.findIndex(
+    (candidate) => candidate.hp > 0 && candidate.protectionLink?.active === true && candidate.protectionLink.target === target.index
+  );
+  if (protection >= 0) {
+    const redirected = Math.floor(finalAmount * state.enemies[protection]!.protectionLink!.redirectFraction);
+    const retained = finalAmount - redirected;
+    events.push({ type: 'damageRedirected', protector: protection, protected: target.index, amount: redirected });
+    // Both units independently spend their block.  The recursive calls are
+    // deliberately fed pre-modified slices and bypass further link lookup.
+    let split = applyEnemyDamage(state, target.index, retained, source, events, true, baseFinalAmount, attacker);
+    split = applyEnemyDamage(split, protection, redirected, source, events, false, redirected, attacker);
+    return checkCombatEnd(cleanupDeadEnemies(split, events), events);
+  }
+  return checkCombatEnd(cleanupDeadEnemies(applyEnemyDamage(state, target.index, finalAmount, source, events, true, baseFinalAmount, attacker), events), events);
+};
+
+const applyEnemyDamage = (
+  state: CombatState,
+  enemyIndex: number,
+  finalAmount: number,
+  source: DamageSource,
+  events: CombatEvent[],
+  trackPetrify: boolean,
+  prePetrifyAmount: number,
+  attacker?: TargetRef
+): CombatState => {
+  const enemy = state.enemies[enemyIndex];
+  if (enemy === undefined || enemy.hp <= 0) return state;
+  const isStatusDamage = source === 'burn' || source === 'poison';
   const blocked = isStatusDamage ? 0 : Math.min(enemy.block, finalAmount);
   const hpDamage = finalAmount - blocked;
   const nextHp = Math.max(0, enemy.hp - hpDamage);
@@ -132,10 +170,11 @@ export const applyDamage = (
     enemy.windup?.cancelThreshold !== undefined &&
     Math.max(0, enemy.windup.startHp - nextHp) >= enemy.windup.cancelThreshold;
   const enemies = state.enemies.map((candidate, index) =>
-    index === target.index
+    index === enemyIndex
       ? {
           ...candidate,
           block: candidate.block - blocked,
+          marchShield: Math.max(0, (candidate.marchShield ?? 0) - Math.min(blocked, candidate.marchShield ?? 0)),
           hp: nextHp,
           damageTakenThisRound:
             (candidate.damageTakenThisRound ?? 0) + (countsTowardRoundGrowth ? hpDamage : 0),
@@ -144,11 +183,80 @@ export const applyDamage = (
         }
       : candidate
   );
-  events.push({ type: 'damageDealt', target, amount: hpDamage, blocked, source });
+  events.push({ type: 'damageDealt', target: { type: 'enemy', index: enemyIndex }, amount: hpDamage, blocked, source });
   if (shouldCancelWindup && enemy.windup !== undefined) {
-    events.push({ type: 'enemyWindupCancelled', enemy: target.index, intent: enemy.windup.intent });
+    events.push({ type: 'enemyWindupCancelled', enemy: enemyIndex, intent: enemy.windup.intent });
   }
-  return checkCombatEnd({ ...state, enemies }, events);
+  let result: CombatState = { ...state, enemies };
+  if (trackPetrify && enemy.petrifyActive === true && enemy.petrifyShatterRawDamageFraction !== undefined && (enemy.crackedTurns ?? 0) <= 0) {
+    const threshold = Math.ceil(enemy.maxHp * enemy.petrifyShatterRawDamageFraction);
+    const rawDamage = (enemy.petrifyRawDamage ?? 0) + prePetrifyAmount;
+    const latestRawDamage = prePetrifyAmount;
+    events.push({ type: 'petrifyProgressed', enemy: enemyIndex, rawDamage: latestRawDamage, threshold });
+    if (rawDamage >= threshold) {
+      events.push({ type: 'petrifyShattered', enemy: enemyIndex, rawDamage });
+      const current = result.enemies[enemyIndex]!;
+      const cancelsConfiguredWindup = current.windup?.intent.id === current.petrifyCancelIntentId;
+      result = {
+        ...result,
+        enemies: result.enemies.map((candidate, index) =>
+          index === enemyIndex
+            ? {
+                ...candidate,
+                petrifyActive: false,
+                petrifyRawDamage: 0,
+                crackedTurns: candidate.petrifyCrackedTurns ?? 0,
+                windup: cancelsConfiguredWindup ? undefined : candidate.windup,
+                cancelledWindupIntentId: cancelsConfiguredWindup ? current.windup?.intent.id : candidate.cancelledWindupIntentId
+              }
+            : candidate
+        )
+      };
+      if (cancelsConfiguredWindup && enemy.windup !== undefined) events.push({ type: 'enemyWindupCancelled', enemy: enemyIndex, intent: enemy.windup.intent });
+    } else {
+      result = { ...result, enemies: result.enemies.map((candidate, index) => (index === enemyIndex ? { ...candidate, petrifyRawDamage: rawDamage } : candidate)) };
+    }
+  }
+  return result;
+};
+
+/** Remove source-owned effects in the same damage resolution as the death. */
+export const cleanupDeadEnemies = (state: CombatState, events: CombatEvent[]): CombatState => {
+  let enemies = state.enemies;
+  for (let source = 0; source < enemies.length; source += 1) {
+    const dead = enemies[source];
+    if (dead === undefined || dead.hp > 0 || dead.deathCleanupComplete === true) continue;
+    for (let index = 0; index < enemies.length; index += 1) {
+      const target = enemies[index];
+      if (target === undefined) continue;
+      if (target.protectionLink?.target === source) {
+        events.push({ type: 'protectionLinkRemoved', protector: index, protected: source });
+        enemies = enemies.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, protectionLink: undefined } : candidate);
+      }
+      if (target.protectionLink !== undefined && index === source) {
+        events.push({ type: 'protectionLinkRemoved', protector: source, protected: target.protectionLink.target });
+        enemies = enemies.map((candidate, candidateIndex) => candidateIndex === source ? { ...candidate, protectionLink: undefined } : candidate);
+      }
+      if (target.marchSource === source) {
+        events.push({ type: 'enemyMarchRemoved', source, target: index });
+        enemies = enemies.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, block: Math.max(0, candidate.block - (candidate.marchShield ?? 0)), marchTurns: 0, marchShield: 0, marchAttackPercent: 0, marchSource: undefined } : candidate);
+      }
+    }
+    if (dead.warBannerAuraPercent !== undefined) events.push({ type: 'enemyAuraRemoved', source });
+    enemies = enemies.map((candidate, index) => index === source ? { ...candidate, deathCleanupComplete: true } : candidate);
+  }
+  return enemies === state.enemies ? state : { ...state, enemies };
+};
+
+/** Attack skills wear a guard once, even if that skill has multiple hits. */
+export const wearProtectionForAttack = (state: CombatState, target: number, events: CombatEvent[]): CombatState => {
+  const guard = state.enemies[target];
+  const link = guard?.protectionLink;
+  if (guard === undefined || link === undefined || !link.active) return state;
+  const remaining = Math.max(0, link.durability - 1);
+  if (remaining > 0) return { ...state, enemies: state.enemies.map((enemy, index) => index === target ? { ...enemy, protectionLink: { ...link, durability: remaining } } : enemy) };
+  events.push({ type: 'protectionLinkBroken', protector: target, protected: link.target, turns: link.brokenTurns });
+  return { ...state, enemies: state.enemies.map((enemy, index) => index === target ? { ...enemy, protectionLink: { ...link, durability: 0, active: false, turnsUntilRestore: link.brokenTurns } } : enemy) };
 };
 
 const scheduleOverheat = (state: CombatState, events: CombatEvent[]): CombatState => {
@@ -1333,6 +1441,7 @@ export const resolveFlip = (
   const fireAttackResolved = (targetRef: TargetRef): void => {
     if (state.phase !== 'victory' && state.phase !== 'defeat' && skill.tags.includes('attack')) {
       state = { ...state, player: { ...state.player, attackSkillUsedThisTurn: true } };
+      if (targetRef.type === 'enemy') state = wearProtectionForAttack(state, targetRef.index, events);
       state = fireTurnTriggers(state, 'onAttackSkillResolved', targetRef, db, events, turnTriggerScope);
     }
   };

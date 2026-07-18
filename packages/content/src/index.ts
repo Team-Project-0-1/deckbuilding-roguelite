@@ -2137,6 +2137,66 @@ export const enemies = {
     },
     intents: [{ id: 'root-strike', actions: [{ kind: 'attack', damage: 7 }] }]
   },
+  // P13 §6.2/§6.4 Batch C — defensive roles use the shared core link/petrify/aura
+  // contracts. Values are balance-provisional from the approved 20-monster catalog.
+  'fortress-guard': {
+    id: enemy('fortress-guard'),
+    name: '아이젠발 성채수호병',
+    maxHp: 78,
+    threat: 4,
+    protectionLink: {
+      target: 'highestThreatAlly',
+      redirectFraction: 0.4,
+      durability: 3,
+      restoreDurability: 2,
+      brokenTurns: 2,
+      damageTakenMultiplierWhileBroken: 1.2
+    },
+    intents: [
+      { id: 'shield-bash', actions: [{ kind: 'attack', damage: 6 }] },
+      { id: 'shield-brace', actions: [{ kind: 'block', amount: 8 }] }
+    ]
+  },
+  'cathedral-gargoyle': {
+    id: enemy('cathedral-gargoyle'),
+    name: '성 오델리아의 봉헌 가고일',
+    maxHp: 68,
+    petrify: {
+      damageReduction: 0.7,
+      shatterRawDamageFraction: 0.2,
+      crackedTurns: 1,
+      crackedDamageTakenMultiplier: 1.3,
+      cancelWindupIntentId: 'falling-assault'
+    },
+    intents: [
+      { id: 'claw', actions: [{ kind: 'attack', damage: 7 }] },
+      { id: 'petrify', entersPetrify: true, actions: [] },
+      {
+        id: 'falling-assault',
+        windup: { turns: 1, revealAtStart: true },
+        actions: [{ kind: 'attack', damage: 17 }]
+      }
+    ]
+  },
+  'war-banner-rider': {
+    id: enemy('war-banner-rider'),
+    name: '그리폰 왕가의 전쟁기수',
+    maxHp: 48,
+    threat: 3,
+    warBanner: {
+      attackAuraPercent: 0.1,
+      march: { attackPercent: 0.2, turns: 2, shieldMaxHpFraction: 0.08 }
+    },
+    intents: [
+      { id: 'banner-strike', actions: [{ kind: 'attack', damage: 6 }] },
+      {
+        id: 'royal-march',
+        windup: { turns: 1, revealAtStart: true },
+        groupMarch: true,
+        actions: []
+      }
+    ]
+  },
   'ember-archmage': {
     id: enemy('ember-archmage'),
     name: '잿불 마도왕',

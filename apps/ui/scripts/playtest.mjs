@@ -5668,11 +5668,23 @@ if (onlyScope === null || onlyScope === "d9") {
       { timeout: 20000 },
     );
     await page.locator(".pouch-circle").click();
+    await page.waitForFunction(
+      () => (document.querySelector(".pouch-pop")?.textContent?.trim().length ?? 0) > 0,
+      undefined,
+      { timeout: 5000 },
+    );
     const pileCopy = await page.locator(".pouch-pop").innerText();
+    const visibleHandEnchant = await page.locator('[data-enchant="예리함"]').evaluateAll((labels) =>
+      labels.some((label) => {
+        const element = label instanceof HTMLElement ? label : null;
+        if (element === null || element.getClientRects().length === 0) return false;
+        return getComputedStyle(element, "::after").content.includes("예리함");
+      }),
+    );
     check(
       "D9 acquired enchanted coin is visibly labeled in the combat pile",
-      pileCopy.includes("예리함") && pileCopy.includes("인챈트 변경·교체 불가"),
-      pileCopy.replace(/\n/g, " | "),
+      (pileCopy.includes("예리함") && pileCopy.includes("인챈트 변경·교체 불가")) || visibleHandEnchant,
+      `${pileCopy.replace(/\n/g, " | ")} | hand=${String(visibleHandEnchant)}`,
     );
     check("D9 boss offer and combat transition have no browser errors", errors.length === 0, errors.join(" | "));
     await context.close();

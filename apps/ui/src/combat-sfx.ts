@@ -100,6 +100,20 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
       return ["blood"];
     case "enemyHealFailed":
       return ["flip-tails"];
+    case "damageRedirected":
+      return ["block"];
+    case "protectionLinkBroken":
+      return ["skill"];
+    case "petrifyProgressed":
+      return ["block"];
+    case "petrifyShattered":
+      return ["hit"];
+    case "enemyAuraApplied":
+      return ["mana"];
+    case "protectionLinkRemoved":
+    case "enemyAuraRemoved":
+    case "enemyMarchRemoved":
+      return [];
     case "coinsDrawn":
     case "bloodCoinFizzle":
     case "coinsDiscarded":

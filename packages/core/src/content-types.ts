@@ -361,6 +361,28 @@ export type EnemyAction =
     }
   | { kind: 'healAlly'; amount: number; target: 'lowestHpAlly'; cleanse?: number };
 
+export interface EnemyProtectionLinkDef {
+  target: 'highestThreatAlly';
+  redirectFraction: number;
+  durability: number;
+  restoreDurability: number;
+  brokenTurns: number;
+  damageTakenMultiplierWhileBroken: number;
+}
+
+export interface EnemyPetrifyDef {
+  damageReduction: number;
+  shatterRawDamageFraction: number;
+  crackedTurns: number;
+  crackedDamageTakenMultiplier: number;
+  cancelWindupIntentId: string;
+}
+
+export interface EnemyWarBannerDef {
+  attackAuraPercent: number;
+  march: { attackPercent: number; turns: number; shieldMaxHpFraction: number };
+}
+
 export interface EnemyIntent {
   id: string;
   actions: EnemyAction[];
@@ -368,6 +390,8 @@ export interface EnemyIntent {
   cancelOn?: { damageThreshold: number };
   vulnerableWhileWindup?: number;
   growthBranch?: { atLeast: number; intent: EnemyIntent };
+  groupMarch?: true;
+  entersPetrify?: true;
 }
 
 export interface EnemyPhase {
@@ -413,6 +437,11 @@ export interface EnemyDef {
   passive?: EnemyPassiveDef;
   playerTurnEndPunishment?: PlayerTurnEndPunishmentDef;
   roundGrowth?: EnemyRoundGrowthDef;
+  /** Batch C data-driven mechanics. */
+  threat?: number;
+  protectionLink?: EnemyProtectionLinkDef;
+  petrify?: EnemyPetrifyDef;
+  warBanner?: EnemyWarBannerDef;
 }
 
 export type EventRisk = 'combat' | 'hp' | 'gold' | 'coin';
@@ -828,6 +857,34 @@ const validateEnemyIntents = (enemies: Record<string, EnemyDef>): string[] => {
   };
   for (const enemy of Object.values(enemies)) {
     if (enemy.intents.length === 0) errors.push(`enemy ${String(enemy.id)}: must declare at least one intent`);
+    const owner = `enemy ${String(enemy.id)}`;
+    if (enemy.threat !== undefined && (!Number.isFinite(enemy.threat) || enemy.threat < 0)) errors.push(`${owner}: threat must be non-negative`);
+    if (enemy.protectionLink !== undefined) {
+      const link = enemy.protectionLink;
+      if (link.target !== 'highestThreatAlly') errors.push(`${owner}: protection target must be highestThreatAlly`);
+      if (!Number.isFinite(link.redirectFraction) || link.redirectFraction <= 0 || link.redirectFraction >= 1) errors.push(`${owner}: protection redirectFraction must be between 0 and 1`);
+      if (!Number.isInteger(link.durability) || link.durability <= 0) errors.push(`${owner}: protection durability must be a positive integer`);
+      if (!Number.isInteger(link.restoreDurability) || link.restoreDurability <= 0 || link.restoreDurability > link.durability) errors.push(`${owner}: protection restoreDurability must be a positive integer no greater than durability`);
+      if (!Number.isInteger(link.brokenTurns) || link.brokenTurns <= 0) errors.push(`${owner}: protection brokenTurns must be a positive integer`);
+      if (!Number.isFinite(link.damageTakenMultiplierWhileBroken) || link.damageTakenMultiplierWhileBroken <= 1) errors.push(`${owner}: protection broken multiplier must be greater than 1`);
+    }
+    if (enemy.petrify !== undefined) {
+      const petrify = enemy.petrify;
+      if (!Number.isFinite(petrify.damageReduction) || petrify.damageReduction <= 0 || petrify.damageReduction >= 1) errors.push(`${owner}: petrify damageReduction must be between 0 and 1`);
+      if (!Number.isFinite(petrify.shatterRawDamageFraction) || petrify.shatterRawDamageFraction <= 0 || petrify.shatterRawDamageFraction > 1) errors.push(`${owner}: petrify shatter fraction must be in (0, 1]`);
+      if (!Number.isInteger(petrify.crackedTurns) || petrify.crackedTurns <= 0) errors.push(`${owner}: petrify crackedTurns must be a positive integer`);
+      if (!Number.isFinite(petrify.crackedDamageTakenMultiplier) || petrify.crackedDamageTakenMultiplier <= 1) errors.push(`${owner}: petrify cracked multiplier must be greater than 1`);
+      const cancelIntent = enemy.intents.find((intent) => intent.id === petrify.cancelWindupIntentId);
+      if (cancelIntent === undefined) errors.push(`${owner}: petrify cancelWindupIntentId must reference an intent`);
+      else if (cancelIntent.windup === undefined) errors.push(`${owner}: petrify cancel intent must have a windup`);
+    }
+    if (enemy.warBanner !== undefined) {
+      const banner = enemy.warBanner;
+      if (!Number.isFinite(banner.attackAuraPercent) || banner.attackAuraPercent <= 0 || banner.attackAuraPercent > 1) errors.push(`${owner}: banner aura must be in (0, 1]`);
+      if (!Number.isFinite(banner.march.attackPercent) || banner.march.attackPercent <= 0 || banner.march.attackPercent > 1) errors.push(`${owner}: banner march attack must be in (0, 1]`);
+      if (!Number.isInteger(banner.march.turns) || banner.march.turns <= 0) errors.push(`${owner}: banner march turns must be a positive integer`);
+      if (!Number.isFinite(banner.march.shieldMaxHpFraction) || banner.march.shieldMaxHpFraction <= 0 || banner.march.shieldMaxHpFraction > 1) errors.push(`${owner}: banner march shield must be in (0, 1]`);
+    }
     enemy.intents.forEach((intent, index) => validateIntent(intent, `enemy ${String(enemy.id)} intent ${intent.id || index}`));
     for (const [index, phase] of (enemy.phases ?? []).entries()) {
       const owner = `enemy ${String(enemy.id)} phase ${index}`;

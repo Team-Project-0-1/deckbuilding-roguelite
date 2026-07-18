@@ -53,6 +53,79 @@ const withEnemy = (state: CombatState, enemyIndex: number, update: (enemy: Comba
   enemies: state.enemies.map((enemy, index) => (index === enemyIndex ? update(enemy) : enemy))
 });
 
+const bannerAuraPercent = (state: CombatState, target: number, db: ContentDb): { percent: number; source?: number } => {
+  let percent = 0;
+  let source: number | undefined;
+  state.enemies.forEach((enemy, index) => {
+    if (index === target || enemy.hp <= 0) return;
+    const aura = db.enemies[String(enemy.defId)]?.warBanner?.attackAuraPercent;
+    if (aura !== undefined) {
+      percent += aura;
+      source = index;
+    }
+  });
+  return { percent, source };
+};
+
+const scaledEnemyAttackDamage = (
+  state: CombatState,
+  enemyIndex: number,
+  baseDamage: number,
+  db: ContentDb,
+  events: CombatEvent[]
+): number => {
+  const aura = bannerAuraPercent(state, enemyIndex, db);
+  const actingEnemy = state.enemies[enemyIndex];
+  const marchPercent = (actingEnemy?.marchTurns ?? 0) > 0 ? (actingEnemy?.marchAttackPercent ?? 0) : 0;
+  if (aura.percent > 0 && aura.source !== undefined) {
+    events.push({ type: 'enemyAuraApplied', source: aura.source, target: enemyIndex, percent: aura.percent });
+  }
+  return Math.round(baseDamage * (1 + aura.percent + marchPercent) * (state.enemyScale ?? 1));
+};
+
+const applyGroupMarch = (state: CombatState, source: number, db: ContentDb, events: CombatEvent[]): CombatState => {
+  const banner = db.enemies[String(state.enemies[source]?.defId ?? '')]?.warBanner;
+  if (banner === undefined) return state;
+  let next = state;
+  next = {
+    ...next,
+    enemies: next.enemies.map((enemy) => {
+      if (enemy.hp <= 0) return enemy;
+      const shield = Math.round(enemy.maxHp * banner.march.shieldMaxHpFraction);
+      return {
+        ...enemy,
+        block: enemy.block + shield,
+        marchTurns: banner.march.turns,
+        marchShield: shield,
+        marchAttackPercent: banner.march.attackPercent,
+        marchSource: source
+      };
+    })
+  };
+  next.enemies.forEach((enemy, index) => {
+    if (enemy.hp > 0) events.push({ type: 'blockGained', target: { type: 'enemy', index }, amount: Math.round(enemy.maxHp * banner.march.shieldMaxHpFraction) });
+  });
+  return next;
+};
+
+const tickMarchAfterEnemyTurn = (state: CombatState, enemyIndex: number, events: CombatEvent[]): CombatState => {
+  const enemy = state.enemies[enemyIndex];
+  if (enemy === undefined || (enemy.marchTurns ?? 0) <= 0) return state;
+  const turns = Math.max(0, (enemy.marchTurns ?? 0) - 1);
+  if (turns > 0) return withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, marchTurns: turns }));
+  if (enemy.marchSource !== undefined) {
+    events.push({ type: 'enemyMarchRemoved', source: enemy.marchSource, target: enemyIndex });
+  }
+  return withEnemy(state, enemyIndex, (candidate) => ({
+    ...candidate,
+    block: Math.max(0, candidate.block - (candidate.marchShield ?? 0)),
+    marchTurns: 0,
+    marchShield: 0,
+    marchAttackPercent: 0,
+    marchSource: undefined
+  }));
+};
+
 const CLEANSE_ORDER: readonly StatusId[] = ['burn', 'poison', 'frostbite', 'shock', 'healLock'];
 
 const maybeStartWindup = (state: CombatState, enemyIndex: number, events: CombatEvent[]): { state: CombatState; started: boolean } => {
@@ -137,8 +210,22 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
     ...state,
     enemies: state.enemies.map((enemy, index) => {
       if (enemy.hp <= 0 || enemy.block === 0) return enemy;
-      events.push({ type: 'blockCleared', target: { type: 'enemy', index }, amount: enemy.block });
-      return { ...enemy, block: 0 };
+      const persistentShield = Math.min(enemy.block, enemy.marchShield ?? 0);
+      const clearable = enemy.block - persistentShield;
+      if (clearable > 0) events.push({ type: 'blockCleared', target: { type: 'enemy', index }, amount: clearable });
+      return { ...enemy, block: persistentShield, marchShield: persistentShield };
+    })
+  };
+
+  state = {
+    ...state,
+    enemies: state.enemies.map((enemy) => {
+      const link = enemy.protectionLink;
+      if (link === undefined || link.active || link.turnsUntilRestore <= 0) return enemy;
+      const turnsUntilRestore = Math.max(0, link.turnsUntilRestore - 1);
+      return turnsUntilRestore === 0
+        ? { ...enemy, protectionLink: { ...link, active: true, durability: link.restoreDurability, turnsUntilRestore: 0 } }
+        : { ...enemy, protectionLink: { ...link, turnsUntilRestore } };
     })
   };
 
@@ -188,9 +275,15 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
     }
     const started = maybeStartWindup(state, enemyIndex, events);
     state = started.state;
-    if (started.started) continue;
+    if (started.started) {
+      state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
+      continue;
+    }
     const windupEnemy = state.enemies[enemyIndex];
-    if (windupEnemy !== undefined && windupEnemy.cancelledWindupIntentId === windupEnemy.intent.id) continue;
+    if (windupEnemy !== undefined && windupEnemy.cancelledWindupIntentId === windupEnemy.intent.id) {
+      state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
+      continue;
+    }
     if (windupEnemy?.windup !== undefined) {
       const damageTaken = Math.max(0, windupEnemy.windup.startHp - windupEnemy.hp);
       if (windupEnemy.windup.cancelThreshold !== undefined && damageTaken >= windupEnemy.windup.cancelThreshold) {
@@ -201,6 +294,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           boundHealAlly: undefined,
           cancelledWindupIntentId: windupEnemy.windup?.intent.id
         }));
+        state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
         continue;
       }
       if (windupEnemy.windup.turnsLeft > 1) {
@@ -210,6 +304,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           ...candidate,
           windup: candidate.windup === undefined ? undefined : { ...candidate.windup, turnsLeft }
         }));
+        state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
         continue;
       }
       events.push({ type: 'enemyWindupTicked', enemy: enemyIndex, intent: windupEnemy.windup.intent, turnsLeft: 0 });
@@ -225,6 +320,11 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, boundHealAlly }));
       }
     }
+    const resolvedIntent = state.enemies[enemyIndex]?.intent;
+    if (resolvedIntent?.entersPetrify === true) {
+      state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, petrifyActive: true, petrifyRawDamage: 0 }));
+    }
+    if (resolvedIntent?.groupMarch === true) state = applyGroupMarch(state, enemyIndex, db, events);
     let lastAttackHpDamage = 0;
     let lastAttackBlockedAmount = 0;
     let lastAttackBlocked = false;
@@ -249,13 +349,14 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
           action.damagePerGrowthPercent === undefined
             ? action.damage + growthStacks
             : Math.round(action.damage * (1 + growthStacks * action.damagePerGrowthPercent));
+        const scaledDamage = scaledEnemyAttackDamage(state, enemyIndex, baseDamage, db, events);
         for (let hit = 0; hit < hits; hit += 1) {
           const beforeEventCount = events.length;
           // P6 D1 — 막별 스케일은 공격 피해에만 적용(버프 보너스는 원수치 가산)
           state = applyDamage(
             state,
             { type: 'player' },
-            Math.round(baseDamage * (state.enemyScale ?? 1)) + (hit === 0 ? bonus : 0),
+            scaledDamage + (hit === 0 ? bonus : 0),
             'enemy',
             events,
             { type: 'enemy', index: enemyIndex }
@@ -276,7 +377,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         state = applyDamage(
           state,
           { type: 'player' },
-          Math.round((action.damage + bonusDamage + (actingEnemy.growthStacks ?? 0)) * (state.enemyScale ?? 1)),
+          scaledEnemyAttackDamage(state, enemyIndex, action.damage + bonusDamage + (actingEnemy.growthStacks ?? 0), db, events),
           'enemy',
           events,
           { type: 'enemy', index: enemyIndex }
@@ -387,7 +488,16 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
         throw new Error(`unknown enemy action: ${JSON.stringify(exhausted)}`);
       }
     }
-    state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, boundHealAlly: undefined }));
+    const completedEnemy = state.enemies[enemyIndex];
+    const completedPetrifyIntent = completedEnemy?.petrifyCancelIntentId;
+    state = withEnemy(state, enemyIndex, (candidate) => ({
+      ...candidate,
+      boundHealAlly: undefined,
+      ...(completedPetrifyIntent !== undefined && resolvedIntent?.id === completedPetrifyIntent
+        ? { petrifyActive: false, petrifyRawDamage: 0 }
+        : {})
+    }));
+    state = tickMarchAfterEnemyTurn(state, enemyIndex, events);
   }
 
   for (let enemyIndex = 0; enemyIndex < state.enemies.length; enemyIndex += 1) {

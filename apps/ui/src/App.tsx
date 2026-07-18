@@ -518,7 +518,8 @@ export const IntentBadge = ({
   const intent = windup?.intent ?? enemy.intent;
   const boundHealAlly = windup?.boundHealAlly ?? enemy.boundHealAlly;
   const boundHealAllyName = boundHealAlly === undefined ? undefined : enemyDisplayName(enemies[boundHealAlly]);
-  const growthLabel = contentDb.enemies[String(enemy.defId)]?.growthLabel ?? "성장";
+  const enemyDef = contentDb.enemies[String(enemy.defId)];
+  const growthLabel = enemyDef?.growthLabel ?? "성장";
   return (
     <div aria-label="다음 행동 의도" className="intent">
       {windup !== undefined ? (
@@ -541,6 +542,22 @@ export const IntentBadge = ({
             </Keyword>
           ) : null}
         </>
+      ) : null}
+      {intent.entersPetrify === true && enemyDef?.petrify !== undefined ? (
+        <span
+          aria-label={`석화 진입: 피해 감소 ${Math.round(enemyDef.petrify.damageReduction * 100)}%, 감소 전 피해 ${Math.round(enemyDef.petrify.shatterRawDamageFraction * 100)}% 누적 시 낙하 강습 취소`}
+          data-testid="petrify-intent"
+        >
+          석화 {Math.round(enemyDef.petrify.damageReduction * 100)}% · 원피해 {Math.round(enemyDef.petrify.shatterRawDamageFraction * 100)}%로 파쇄
+        </span>
+      ) : null}
+      {intent.groupMarch === true && enemyDef?.warBanner !== undefined ? (
+        <span
+          aria-label={`왕가의 진군: 모든 적 공격력 ${Math.round(enemyDef.warBanner.march.attackPercent * 100)}% 증가 ${enemyDef.warBanner.march.turns}턴, 최대 체력 ${Math.round(enemyDef.warBanner.march.shieldMaxHpFraction * 100)}% 보호막`}
+          data-testid="royal-march-intent"
+        >
+          진군 · 전체 +{Math.round(enemyDef.warBanner.march.attackPercent * 100)}% {enemyDef.warBanner.march.turns}턴 · 방패 {Math.round(enemyDef.warBanner.march.shieldMaxHpFraction * 100)}%
+        </span>
       ) : null}
       {intent.actions.map((action, index) =>
         action.kind === "attack" ? (
@@ -3950,6 +3967,62 @@ const CombatBoard = ({
                 unusedElementalCoins={unusedElementalCoins}
                 roundGrowth={enemy.roundGrowth}
                 damageTakenThisRound={enemy.damageTakenThisRound}
+                protectionLink={enemy.protectionLink}
+                protectionTargetName={
+                  enemy.protectionLink === undefined ? undefined : enemyDisplayName(state.enemies[enemy.protectionLink.target])
+                }
+                protectedBy={(() => {
+                  const protector = state.enemies.find(
+                    (candidate) => candidate.hp > 0 && candidate.protectionLink?.active === true && candidate.protectionLink.target === index,
+                  );
+                  if (protector === undefined) return undefined;
+                  return {
+                    name: enemyDisplayName(protector),
+                    redirectPercent: Math.round((protector.protectionLink?.redirectFraction ?? 0) * 100),
+                  };
+                })()}
+                petrify={{
+                  active: enemy.petrifyActive === true,
+                  rawDamage: enemy.petrifyRawDamage ?? 0,
+                  reductionPercent: Math.round((enemy.petrifyDamageReduction ?? 0) * 100),
+                  threshold: Math.ceil(enemy.maxHp * (enemy.petrifyShatterRawDamageFraction ?? 0)),
+                  crackedTurns: enemy.crackedTurns ?? 0,
+                  crackedPercent: Math.round(((enemy.petrifyCrackedDamageTakenMultiplier ?? 1) - 1) * 100),
+                  divePrepared: enemy.windup?.intent.id === "falling-assault",
+                  diveCancelled: enemy.cancelledWindupIntentId === "falling-assault",
+                }}
+                march={
+                  enemy.marchTurns !== undefined && enemy.marchTurns > 0
+                    ? {
+                        attackPercent: Math.round((enemy.marchAttackPercent ?? 0) * 100),
+                        shield: enemy.marchShield ?? 0,
+                        sourceName: enemyDisplayName(state.enemies[enemy.marchSource ?? -1]),
+                        turns: enemy.marchTurns,
+                      }
+                    : undefined
+                }
+                warBannerAuraPercent={
+                  enemyDef?.warBanner === undefined ? undefined : Math.round(enemyDef.warBanner.attackAuraPercent * 100)
+                }
+                auraSourceName={(() => {
+                  const source = state.enemies.find(
+                    (candidate, candidateIndex) =>
+                      candidateIndex !== index &&
+                      candidate.hp > 0 &&
+                      contentDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
+                  );
+                  return source === undefined ? undefined : enemyDisplayName(source);
+                })()}
+                auraSourcePercent={(() => {
+                  const source = state.enemies.find(
+                    (candidate, candidateIndex) =>
+                      candidateIndex !== index &&
+                      candidate.hp > 0 &&
+                      contentDb.enemies[String(candidate.defId)]?.warBanner !== undefined,
+                  );
+                  const aura = source === undefined ? undefined : contentDb.enemies[String(source.defId)]?.warBanner;
+                  return aura === undefined ? undefined : Math.round(aura.attackAuraPercent * 100);
+                })()}
               />
             );
           })}
@@ -4744,6 +4817,23 @@ interface UnitPanelProps {
   unusedElementalCoins?: number;
   roundGrowth?: CombatState["enemies"][number]["roundGrowth"];
   damageTakenThisRound?: number;
+  protectionLink?: CombatState["enemies"][number]["protectionLink"];
+  protectionTargetName?: string;
+  protectedBy?: { name: string; redirectPercent: number };
+  petrify?: {
+    active: boolean;
+    rawDamage: number;
+    reductionPercent: number;
+    threshold: number;
+    crackedTurns: number;
+    crackedPercent: number;
+    divePrepared: boolean;
+    diveCancelled: boolean;
+  };
+  march?: { attackPercent: number; shield: number; sourceName: string; turns: number };
+  warBannerAuraPercent?: number;
+  auraSourceName?: string;
+  auraSourcePercent?: number;
 }
 
 export const ArmorEchoHud = ({
@@ -4818,6 +4908,14 @@ export const UnitPanel = ({
   unusedElementalCoins,
   roundGrowth,
   damageTakenThisRound = 0,
+  protectionLink,
+  protectionTargetName,
+  protectedBy,
+  petrify,
+  march,
+  warBannerAuraPercent,
+  auraSourceName,
+  auraSourcePercent,
 }: UnitPanelProps) => (
   <div
     className={`unit ${side} ${vfx.has(`unit-${unitKey}`) ? "vfx-hit" : ""} ${targeting ? "targetable" : ""} ${targetSelected ? "target-selected" : ""}`}
@@ -4892,6 +4990,112 @@ export const UnitPanel = ({
           >
             <em aria-label={`${growthLabel} 스택 ${growthStacks}`} className="passive-chip">
               {growthLabel} {growthStacks}
+            </em>
+          </Keyword>
+        ) : null}
+        {side === "enemy" && protectionLink !== undefined ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{
+              label: "보호 연결",
+              description: "연결된 아군이 받는 피해의 일부를 대신 받습니다. 수호병을 직접 공격하면 내구도가 감소하며, 파괴된 연결은 정해진 턴 뒤 복구됩니다.",
+            }}
+            term="passive"
+          >
+            <em
+              aria-label={
+                protectionLink.active
+                  ? `보호 연결: ${name}이 ${protectionTargetName ?? "지정 아군"} 피해 ${Math.round(protectionLink.redirectFraction * 100)}%를 대신 받음, 내구도 ${protectionLink.durability}`
+                  : `보호 연결 파괴: ${protectionLink.turnsUntilRestore}턴 뒤 복구, 받는 피해 ${Math.round((protectionLink.brokenDamageTakenMultiplier - 1) * 100)}% 증가`
+              }
+              className="passive-chip"
+              data-testid={`protection-link-${enemyIndex ?? "enemy"}`}
+            >
+              {protectionLink.active
+                ? `보호 → ${protectionTargetName ?? "아군"} ${Math.round(protectionLink.redirectFraction * 100)}% · 내구 ${protectionLink.durability}`
+                : `보호 파괴 · 복구 ${protectionLink.turnsUntilRestore}턴 · 취약 +${Math.round((protectionLink.brokenDamageTakenMultiplier - 1) * 100)}%`}
+            </em>
+          </Keyword>
+        ) : null}
+        {side === "enemy" && protectedBy !== undefined ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{ label: "보호 중", description: "수호병이 이 적이 받는 피해의 일부를 대신 받습니다." }}
+            term="passive"
+          >
+            <em
+              aria-label={`보호 중: ${protectedBy.name}이 피해 ${protectedBy.redirectPercent}%를 대신 받음`}
+              className="passive-chip"
+              data-testid={`protected-by-${enemyIndex ?? "enemy"}`}
+            >
+              보호 중 · {protectedBy.name} {protectedBy.redirectPercent}%
+            </em>
+          </Keyword>
+        ) : null}
+        {side === "enemy" && petrify !== undefined && (petrify.active || petrify.crackedTurns > 0 || petrify.diveCancelled) ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{
+              label: "석화",
+              description: "석화 중에는 받는 피해가 감소하지만, 감소 전 피해를 임계치까지 누적하면 낙하 강습을 취소하고 균열 상태가 됩니다.",
+            }}
+            term="passive"
+          >
+            <em
+              aria-label={
+                petrify.active
+                  ? `석화: 피해 감소 ${petrify.reductionPercent}%, 원래 피해 ${petrify.rawDamage}/${petrify.threshold}, ${petrify.divePrepared ? "낙하 강습 준비: 임계치 달성 시 취소" : "임계치 달성 시 낙하 강습 취소"}`
+                  : petrify.crackedTurns > 0
+                    ? `균열: ${petrify.crackedTurns}턴, 받는 피해 ${petrify.crackedPercent}% 증가${petrify.diveCancelled ? ", 낙하 강습 취소됨" : ""}`
+                    : "낙하 강습 취소됨"
+              }
+              className="passive-chip"
+              data-testid={`petrify-status-${enemyIndex ?? "enemy"}`}
+            >
+              {petrify.active
+                ? `석화 ${petrify.reductionPercent}% · 원피해 ${petrify.rawDamage}/${petrify.threshold}${petrify.divePrepared ? " · 낙하 취소 가능" : ""}`
+                : petrify.crackedTurns > 0
+                  ? `균열 ${petrify.crackedTurns}턴 · 취약 +${petrify.crackedPercent}%${petrify.diveCancelled ? " · 낙하 취소" : ""}`
+                  : "낙하 강습 취소"}
+            </em>
+          </Keyword>
+        ) : null}
+        {side === "enemy" && warBannerAuraPercent !== undefined ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{ label: "왕가의 군기", description: "살아 있는 동안 다른 모든 적의 공격 피해를 증가시킵니다. 처치하면 즉시 사라집니다." }}
+            term="passive"
+          >
+            <em
+              aria-label={`왕가의 군기: 다른 적 공격력 ${warBannerAuraPercent}% 증가, 처치 시 즉시 해제`}
+              className="attack-buff-chip"
+              data-testid={`war-banner-aura-${enemyIndex ?? "enemy"}`}
+            >
+              군기 오라 · 다른 적 +{warBannerAuraPercent}%
+            </em>
+          </Keyword>
+        ) : null}
+        {side === "enemy" && auraSourceName !== undefined && auraSourcePercent !== undefined ? (
+          <em
+            aria-label={`왕가의 군기 적용: ${auraSourceName}의 공격력 ${auraSourcePercent}% 증가 오라`}
+            className="attack-buff-chip"
+            data-testid={`war-banner-aura-source-${enemyIndex ?? "enemy"}`}
+          >
+            군기 · {auraSourceName} +{auraSourcePercent}%
+          </em>
+        ) : null}
+        {side === "enemy" && march !== undefined ? (
+          <Keyword
+            className="chip-keyword"
+            entry={{ label: "왕가의 진군", description: "군기수가 부여한 일시 강화입니다. 공격력이 증가하고, 출처가 명시된 보호막을 얻습니다. 군기수 처치 시 즉시 해제됩니다." }}
+            term="passive"
+          >
+            <em
+              aria-label={`왕가의 진군: ${march.sourceName}, 공격력 ${march.attackPercent}% 증가, ${march.turns}턴, 출처 보호막 ${march.shield}`}
+              className="attack-buff-chip"
+              data-testid={`royal-march-${enemyIndex ?? "enemy"}`}
+            >
+              진군 · +{march.attackPercent}% · {march.turns}턴 · 방패 {march.shield} ({march.sourceName})
             </em>
           </Keyword>
         ) : null}

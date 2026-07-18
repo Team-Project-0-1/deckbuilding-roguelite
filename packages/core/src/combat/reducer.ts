@@ -147,6 +147,7 @@ const startPlayerTurn = (input: CombatState, db: ContentDb, clearBlock = true): 
       redRefluxUsedThisTurn: false,
       nextAttackDamageBonus: 0
     },
+    enemies: input.enemies.map((enemy) => ({ ...enemy, crackedTurns: Math.max(0, (enemy.crackedTurns ?? 0) - 1) })),
     slots: input.slots.map((candidate) => ({
       ...candidate,
       cooldownRemaining: Math.max(0, candidate.cooldownRemaining - 1)
@@ -281,10 +282,35 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
       intent: intent.intent,
       intentIndex: intent.index,
       nextAttackBonus: 0,
+      ...(def.petrify === undefined ? {} : {
+        petrifyDamageReduction: def.petrify.damageReduction,
+        petrifyShatterRawDamageFraction: def.petrify.shatterRawDamageFraction,
+        petrifyCrackedDamageTakenMultiplier: def.petrify.crackedDamageTakenMultiplier,
+        petrifyCrackedTurns: def.petrify.crackedTurns,
+        petrifyCancelIntentId: def.petrify.cancelWindupIntentId
+      }),
+      ...(def.warBanner === undefined ? {} : { warBannerAuraPercent: def.warBanner.attackAuraPercent }),
       ...(def.roundGrowth === undefined
         ? {}
         : { roundGrowth: def.roundGrowth, growthStacks: 0, damageTakenThisRound: 0 })
     };
+  });
+  // Protection targets are resolved once from the opening formation.  This
+  // keeps the link visible and deterministic rather than retargeting on death.
+  const linkedEnemies = enemies.map((enemy, index) => {
+    const def = db.enemies[String(enemy.defId)];
+    const link = def?.protectionLink;
+    if (link === undefined) return enemy;
+    const target = enemies.reduce<number | undefined>((best, candidate, candidateIndex) => {
+      if (candidateIndex === index) return best;
+      const candidateDef = db.enemies[String(candidate.defId)];
+      if (best === undefined) return candidateIndex;
+      const bestDef = db.enemies[String(enemies[best]!.defId)];
+      return (candidateDef?.threat ?? 0) > (bestDef?.threat ?? 0) ? candidateIndex : best;
+    }, undefined);
+    return target === undefined
+      ? enemy
+      : { ...enemy, protectionLink: { target, durability: link.durability, restoreDurability: link.restoreDurability, active: true, turnsUntilRestore: 0, redirectFraction: link.redirectFraction, brokenTurns: link.brokenTurns, brokenDamageTakenMultiplier: link.damageTakenMultiplierWhileBroken } };
   });
 
   const base: CombatState = {
@@ -349,7 +375,7 @@ export const createCombat = (cfg: CreateCombatConfig, db: ContentDb, seed: strin
       precisionDefenseArmed: false,
       precisionDefenseSatisfied: false
     },
-    enemies,
+    enemies: linkedEnemies,
     coins,
     zones: {
       draw: shuffledBag,
