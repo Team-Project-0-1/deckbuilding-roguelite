@@ -111,7 +111,7 @@ import { ResolutionTicket } from "./resolution-ticket";
 import type { ResolutionSummary } from "./resolution-summary";
 import { feedbackCuesFor } from "./feedback-cues";
 import { sfxCuesFor } from "./combat-sfx";
-import { cycleTarget, defaultTarget, legalTargetsForCommand, livingEnemyTargets } from "./targeting";
+import { cycleTarget, defaultTarget, legalTargetsForCommand, livingEnemyTargets, sameCoinSelection } from "./targeting";
 import type { TargetingCommand } from "./targeting";
 import bgForest from "./assets/bg-forest.webp";
 import frostKnightStanding from "./assets/characters/frost-knight.webp";
@@ -473,23 +473,6 @@ export const enemyIntentDamageTotal = (enemies: readonly CombatState["enemies"][
     0,
   );
 
-export const armorEchoPreview = (
-  player: CombatState["player"],
-  intentDamage: number,
-): { absorbed: number; remainingBlock: number; precision: boolean; total: number } => {
-  const absorbed = Math.min(player.block, intentDamage);
-  const remainingBlock = Math.max(0, player.block - intentDamage);
-  const precision =
-    player.precisionDefenseSatisfied ||
-    (player.precisionDefenseArmed && absorbed > 0 && remainingBlock <= 2);
-  return {
-    absorbed,
-    remainingBlock,
-    precision,
-    total: Math.min(12, Math.min(absorbed, 6) + (absorbed > 0 ? player.echoPreheat : 0) + (precision ? 4 : 0)),
-  };
-};
-
 /** Mirrors the post-return end-turn M12 check before placed coins are discarded. */
 export const unusedElementalCoinCount = (state: CombatState): number => {
   const coinUids = new Set([...state.zones.hand, ...Object.values(state.zones.placed).flat()]);
@@ -498,8 +481,6 @@ export const unusedElementalCoinCount = (state: CombatState): number => {
     return count + (coin !== undefined && effectiveElements(coin, contentDb).length > 0 ? 1 : 0);
   }, 0);
 };
-
-export const shouldShowArmorEchoHud = (character: CharacterId): boolean => String(character) === "arcanist";
 
 export const shouldShowOverheatBadges = (character: CharacterId): boolean => String(character) === "warrior";
 
@@ -1090,11 +1071,6 @@ const combatEventResolutionLines = (events: readonly CombatEvent[]): string[] =>
     if (event.type === "skillSealRepeatStruck") return [`적 ${event.sourceEnemy + 1} 봉인 반복 시전 · 피해 ${event.damage}`];
     if (event.type === "overheatScheduled") return ["과열 예약 — 다음 플레이어 턴 과열 예정"];
     if (event.type === "overheatActivated") return ["과열 활성 — 예약된 과열 시작"];
-    if (event.type === "echoComputed")
-      return [
-        `갑주 반향 계산 — 기본 ${event.base}, 예열 ${event.preheat}, 정밀 ${event.precision}, 총 ${event.total}`,
-      ];
-    if (event.type === "echoSpent") return [`반향 증폭 — +${event.amount}`];
     if (event.type === "bloodCoinFizzle") return ["혈액 코인 불발 — 체력이 부족합니다"];
     if (event.type === "healPrevented") return [`회복 봉인 — 회복 ${event.amount} 무효`];
     if (event.type === "enemyWindupStarted" && event.intent.actions.some((action) => action.kind === "resetRepeatSkillPressure"))
@@ -3305,9 +3281,12 @@ const CombatBoard = ({
   const targetingCommandFor = (command: TargetingCommand): TargetingCommand | undefined =>
     legal.find(
       (candidate): candidate is TargetingCommand =>
-        (candidate.type === "useFlipSkill" || candidate.type === "useConsumeSkill") &&
+        (candidate.type === "useImmediateFlipSkill" || candidate.type === "useFlipSkill" || candidate.type === "useConsumeSkill") &&
         candidate.type === command.type &&
         candidate.slot === command.slot &&
+        (candidate.type !== "useImmediateFlipSkill" ||
+          command.type !== "useImmediateFlipSkill" ||
+          sameCoinSelection(candidate.coins, command.coins)) &&
         (candidate.type !== "useFlipSkill" ||
           command.type !== "useFlipSkill" ||
           candidate.reservationId === command.reservationId) &&
@@ -3421,7 +3400,10 @@ const CombatBoard = ({
     if (!(source === "auto-turn-end" && cmd.type === "endTurn"))
       clearResolutionTicket();
     onTelemetryDecision(state, [cmd], result.state, result.events, source);
-    if ((cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") && cmd.target !== undefined)
+    if (
+      (cmd.type === "useImmediateFlipSkill" || cmd.type === "useFlipSkill" || cmd.type === "useConsumeSkill") &&
+      cmd.target !== undefined
+    )
       setLastAttackTarget(cmd.target);
     commit(result.state, result.events);
     return true;
@@ -3522,6 +3504,14 @@ const CombatBoard = ({
     setSummonTargeting(null);
     setEquipmentChoice(null);
     resumeExecutionAfterChoice(source, executionToken);
+    if (cmd.type === "useImmediateFlipSkill") {
+      const committed = runExplicitCommand(cmd, showFeedback, source);
+      if (committed) {
+        setResolving({ slot: Number(cmd.slot), coins: [...cmd.coins] });
+        setImmediateSelection(null);
+      }
+      return committed;
+    }
     if (cmd.type === "useFlipSkill") {
       const reservation =
         cmd.reservationId === undefined
@@ -3636,7 +3626,7 @@ const CombatBoard = ({
     executionToken: string | null = null,
   ): boolean => {
     if (
-      command.type === "useFlipSkill" &&
+      (command.type === "useImmediateFlipSkill" || command.type === "useFlipSkill") &&
       requiresEquipmentChoice(state, command, combatDb) &&
       !equipmentConfirmed
     )
@@ -3804,19 +3794,12 @@ const CombatBoard = ({
       showRejection(REJECTION_TEXT.coinCost);
       return false;
     }
-    const target = skill.targetType === "single-enemy" ? (lastAttackTarget ?? livingEnemyTargets(state.enemies)[0]) : undefined;
     const command: Extract<Command, { type: "useImmediateFlipSkill" }> = {
       type: "useImmediateFlipSkill",
       slot: slotId,
       coins: [...coins],
-      ...(target === undefined ? {} : { target }),
     };
-    const committed = runExplicitCommand(command, true);
-    if (committed) {
-      setResolving({ slot: Number(slotId), coins: [...coins] });
-      setImmediateSelection(null);
-    }
-    return committed;
+    return routeSkill(skill, command, true);
   };
 
   const onFuelCoinClick = (coin: CoinUid): boolean => {
@@ -4098,12 +4081,6 @@ const CombatBoard = ({
     } else if (event?.type === "overheatActivated") {
       showFloat("과열", "player", "status");
       delay = 420;
-    } else if (event?.type === "echoComputed") {
-      if (event.total > 0) showFloat(`반향 ${event.total}`, "player", "block");
-      delay = 380;
-    } else if (event?.type === "echoSpent") {
-      showFloat(`증폭 +${event.amount}`, "player", "damage");
-      delay = 420;
     } else if (event?.type === "enemyWindupStarted") {
       showFloat(`준비 ${event.turnsLeft}턴`, "enemy", "status", event.enemy);
       delay = 360;
@@ -4323,7 +4300,6 @@ const CombatBoard = ({
   const ended = state.phase === "victory" || state.phase === "defeat";
   const showResult = ended && !locked && queue.length === 0 && resolving === null && floats.length === 0;
   const activeEvent = queue[0];
-  const totalIntentDamage = enemyIntentDamageTotal(state.enemies);
   const discardReceiving =
     activeEvent?.type === "coinsDiscarded" || (activeEvent?.type === "coinCreated" && activeEvent.zone === "discard");
   const exhaustReceiving = activeEvent?.type === "coinsConsumed";
@@ -4479,18 +4455,6 @@ const CombatBoard = ({
           })}
           pendingOverheat={shouldShowOverheatBadges(run.character) ? state.player.pendingOverheat : false}
           overheat={shouldShowOverheatBadges(run.character) ? state.player.overheat : false}
-          armorEchoHud={
-            shouldShowArmorEchoHud(run.character)
-              ? {
-                  current: state.player.armorEcho,
-                  available: state.player.armorEchoAvailable,
-                  armed: state.player.precisionDefenseArmed,
-                  preview: armorEchoPreview(state.player, totalIntentDamage),
-                  preheat: state.player.echoPreheat,
-                  totalIntentDamage,
-                }
-              : undefined
-          }
           weaponOutput={run.character === "arcanist" ? state.player.weaponOutput : undefined}
           remiseCharges={run.character === "sorcerer" ? state.player.remiseCharges : undefined}
           bloodSwordPower={run.character === "blood-spellblade" ? state.player.bloodSwordPower : undefined}
@@ -5293,14 +5257,6 @@ interface UnitPanelProps {
   passive?: { name: string; description: string };
   overheat?: boolean;
   pendingOverheat?: boolean;
-  armorEchoHud?: {
-    current: number;
-    available: boolean;
-    armed: boolean;
-    preheat: number;
-    totalIntentDamage: number;
-    preview: ReturnType<typeof armorEchoPreview>;
-  };
   weaponOutput?: number;
   remiseCharges?: number;
   bloodSwordPower?: number;
@@ -5337,43 +5293,6 @@ interface UnitPanelProps {
   skillSeals?: readonly { slot: number; name: string; turns: number; effectMultiplier?: number }[];
 }
 
-export const ArmorEchoHud = ({
-  hud,
-}: {
-  hud: {
-    current: number;
-    available: boolean;
-    armed: boolean;
-    preheat: number;
-    totalIntentDamage: number;
-    preview: ReturnType<typeof armorEchoPreview>;
-  };
-}): JSX.Element => (
-  <span
-    aria-label={`갑주 반향 ${hud.current}, 반향 증폭 ${hud.available ? "가능" : "불가"}, 적 의도 피해 ${hud.totalIntentDamage}, 예상 잔여 방어 ${hud.preview.remainingBlock}, 반향 미리보기 ${hud.preview.total}, 정밀 방어 ${hud.preview.precision ? "성립" : "미성립"}`}
-    className="chip-keyword"
-    data-testid="armor-echo-hud"
-  >
-    <Keyword term="armorEcho">
-      <em className="passive-chip">반향 {hud.current}</em>
-    </Keyword>
-    <Keyword term="echoAmplification">
-      <em className="passive-chip">증폭 {hud.available ? "가능" : "불가"}</em>
-    </Keyword>
-    <Keyword term="precisionDefense">
-      <em className="passive-chip">정밀 {hud.preview.precision ? "성립" : hud.armed ? "대기" : "미성립"}</em>
-    </Keyword>
-    {hud.preheat > 0 ? (
-      <Keyword term="echoPreheat">
-        <em className="passive-chip">예열 +{hud.preheat}</em>
-      </Keyword>
-    ) : null}
-    <em className="passive-chip">
-      의도 {hud.totalIntentDamage} · 잔여 {hud.preview.remainingBlock} · 예상 반향 {hud.preview.total}
-    </em>
-  </span>
-);
-
 export const UnitPanel = ({
   side,
   unitKey,
@@ -5396,7 +5315,6 @@ export const UnitPanel = ({
   passive,
   overheat = false,
   pendingOverheat = false,
-  armorEchoHud,
   weaponOutput,
   remiseCharges,
   bloodSwordPower,
@@ -5666,7 +5584,6 @@ export const UnitPanel = ({
           </Keyword>
         ) : null}
         {skillSeals !== undefined ? <SkillSealBadges seals={skillSeals} /> : null}
-        {armorEchoHud !== undefined ? <ArmorEchoHud hud={armorEchoHud} /> : null}
         {weaponOutput !== undefined ? (
           <em aria-label={`병기 출력 ${weaponOutput}/5`} className="passive-chip">
             병기 출력 {weaponOutput}/5

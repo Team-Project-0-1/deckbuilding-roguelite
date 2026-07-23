@@ -4,7 +4,7 @@ import type {
   EquipmentDefId,
   FlipSkillDef,
 } from "@game/core";
-import { skillRequiresEquipmentChoice, step } from "@game/core";
+import { skillRequiresEquipmentChoice } from "@game/core";
 
 import type { TargetingCommand } from "./targeting";
 
@@ -30,7 +30,7 @@ const flipSkillFor = (
   command: TargetingCommand,
   db: ContentDb,
 ): FlipSkillDef | null => {
-  if (command.type !== "useFlipSkill") return null;
+  if (command.type !== "useImmediateFlipSkill" && command.type !== "useFlipSkill") return null;
   const slot = state.slots[Number(command.slot)];
   const skill = slot === undefined ? undefined : db.skills[String(slot.skillId)];
   return skill?.type === "flip" ? skill : null;
@@ -50,13 +50,13 @@ export const equipmentChoiceCommand = (
   command: TargetingCommand,
   equipment: EquipmentDefId,
   db: ContentDb,
-): Extract<TargetingCommand, { type: "useFlipSkill" }> | null => {
+): Extract<TargetingCommand, { type: "useImmediateFlipSkill" | "useFlipSkill" }> | null => {
   if (!requiresEquipmentChoice(state, command, db)) return null;
   if ((db.equipment ?? {})[String(equipment)] === undefined) return null;
   const explicit = {
     ...command,
-    type: "useFlipSkill" as const,
     chosenEquipment: equipment,
   };
-  return step(state, explicit, db).ok ? explicit : null;
+  if (explicit.type !== "useImmediateFlipSkill" && explicit.type !== "useFlipSkill") return null;
+  return explicit;
 };

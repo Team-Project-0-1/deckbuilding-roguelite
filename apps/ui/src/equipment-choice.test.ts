@@ -34,6 +34,20 @@ const chargedState = (): CombatState => {
   return placed.state;
 };
 
+const immediateChargedState = (): CombatState => {
+  const initial = createCombat(
+    { character: "arcanist" as never, enemies: ["raider" as never] },
+    contentDb,
+    "immediate-equipment-choice",
+  );
+  return {
+    ...initial,
+    slots: initial.slots.map((entry, index) =>
+      index === 0 ? { ...entry, skillId: "arcane-charge" as never } : entry,
+    ),
+  };
+};
+
 describe("equipment choice", () => {
   it("offers every equipment definition in stable order only for a chosen-equipment skill", () => {
     const state = chargedState();
@@ -97,5 +111,29 @@ describe("equipment choice", () => {
         contentDb,
       ),
     ).toBeNull();
+  });
+
+  it("supports equipment selection for the immediate flip flow", () => {
+    const state = immediateChargedState();
+    const coin = state.zones.hand.find(
+      (candidate) => String(state.coins[Number(candidate)]?.defId) === "basic",
+    );
+    if (coin === undefined) throw new Error("missing test coin");
+    const base = {
+      type: "useImmediateFlipSkill" as const,
+      slot: slot(0),
+      coins: [coin],
+    };
+
+    expect(requiresEquipmentChoice(state, base, contentDb)).toBe(true);
+    const command = equipmentChoiceCommand(
+      state,
+      base,
+      "mana-shield" as never,
+      contentDb,
+    );
+
+    expect(command).toEqual({ ...base, chosenEquipment: "mana-shield" });
+    expect(command !== null && step(state, { ...command, target: 0 }, contentDb).ok).toBe(true);
   });
 });

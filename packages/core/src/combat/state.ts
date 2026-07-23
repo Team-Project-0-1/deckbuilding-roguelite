@@ -88,12 +88,6 @@ export interface PlayerState extends UnitState {
   concentratedBloodUsedThisTurn: boolean;
   redRefluxUsedThisTurn: boolean;
   residualHeatUsed: boolean;
-  armorEcho: number;
-  armorEchoAvailable: boolean;
-  armorEchoAbsorbedThisEnemyTurn: number;
-  echoPreheat: number;
-  precisionDefenseArmed: boolean;
-  precisionDefenseSatisfied: boolean;
   /** Skill uses from the current and immediately preceding player turn. */
   recentSkillUses: Array<{ turn: number; slot: SlotId }>;
   skillSeals: Partial<Record<number, SkillSealState>>;

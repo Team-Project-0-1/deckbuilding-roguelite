@@ -270,6 +270,7 @@ export interface TurnTriggerDef {
 
 export type EffectAtom =
   | { kind: 'damage'; amount: number }
+  | { kind: 'aoeDamage'; amount: number }
   | { kind: 'coinDamage'; amount: number }
   /** Direct damage that intentionally bypasses block and attack modifiers. */
   | { kind: 'fixedDamage'; amount: number }
@@ -313,10 +314,6 @@ export type EffectAtom =
   | { kind: 'damagePerBlock'; amountPerBlock: number }
   | { kind: 'blockFromCurrent'; cap: number }
   | { kind: 'damagePlusBlock'; base: number; cap: number }
-  | { kind: 'echoPreheat'; amount: number }
-  | { kind: 'precisionDefenseArm' }
-  | { kind: 'damagePlusEcho'; base: number }
-  | { kind: 'aoeDamagePlusEcho'; base: number }
   | { kind: 'prepareNextAttackDamage'; amount: number }
   | { kind: 'scheduleEndTurnBlockAoe'; cap: number }
   // P6 D6 — 소환: equipment 'chosen'은 커맨드의 chosenEquipment(기본: 정렬 첫 장비)
@@ -694,16 +691,10 @@ const validateAtomAmounts = (db: Omit<ContentDb, 'validate'>): string[] => {
         errors.push(`${owner}: ${atom.kind} count must be a positive integer`);
       }
       if (
-        (atom.kind === 'heal' || atom.kind === 'payHp' || atom.kind === 'lifesteal' || atom.kind === 'reduceCooldown' || atom.kind === 'fixedDamage' || atom.kind === 'damageIfTargetStatus' || atom.kind === 'nextTurnBlock') &&
+        (atom.kind === 'aoeDamage' || atom.kind === 'heal' || atom.kind === 'payHp' || atom.kind === 'lifesteal' || atom.kind === 'reduceCooldown' || atom.kind === 'fixedDamage' || atom.kind === 'damageIfTargetStatus' || atom.kind === 'nextTurnBlock') &&
         (!Number.isInteger(atom.amount) || atom.amount <= 0)
       ) {
         errors.push(`${owner}: ${atom.kind} amount must be a positive integer`);
-      }
-      if (atom.kind === 'echoPreheat' && (!Number.isInteger(atom.amount) || atom.amount <= 0)) {
-        errors.push(`${owner}: echoPreheat amount must be a positive integer`);
-      }
-      if ((atom.kind === 'damagePlusEcho' || atom.kind === 'aoeDamagePlusEcho') && (!Number.isInteger(atom.base) || atom.base < 0)) {
-        errors.push(`${owner}: ${atom.kind} base must be a non-negative integer`);
       }
       if (atom.kind === 'returnDiscardCoin' && (!Number.isInteger(atom.count) || atom.count <= 0)) {
         errors.push(`${owner}: returnDiscardCoin count must be a positive integer`);

@@ -110,12 +110,6 @@ describe("feedbackCuesFor", () => {
     expect(keys({ type: "weaponOutputChanged", amount: 1, value: 2 })).toEqual([
       "unit-player",
     ]);
-    expect(keys({ type: "echoComputed", base: 4, preheat: 2, precision: 4, total: 10 })).toEqual([
-      "unit-player",
-    ]);
-    expect(keys({ type: "echoSpent", skill: "armor-smash" as never, amount: 6 })).toEqual([
-      "unit-player",
-    ]);
   });
 
   it("does not create motion cues for zero-value or bookkeeping events", () => {

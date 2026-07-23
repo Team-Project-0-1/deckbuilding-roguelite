@@ -136,11 +136,7 @@ const atomSegment = (atom: EffectAtom): { text: string; term?: KeywordTerm } => 
       term: "block",
     };
   }
-  if (atom.kind === "echoPreheat") return { text: `반향 예열 +${atom.amount}`, term: "echoPreheat" };
-  if (atom.kind === "precisionDefenseArm") return { text: "정밀 방어 준비", term: "precisionDefense" };
-  if (atom.kind === "damagePlusEcho") return { text: `피해 ${atom.base} + 반향`, term: "echoAmplification" };
-  if (atom.kind === "aoeDamagePlusEcho")
-    return { text: `모든 적 피해 ${atom.base} + 반향`, term: "echoAmplification" };
+  if (atom.kind === "aoeDamage") return { text: `모든 적 피해 ${atom.amount}` };
   if (atom.kind === "prepareNextAttackDamage") {
     return { text: `이번 턴 다음 공격 피해 +${atom.amount}` };
   }

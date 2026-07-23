@@ -20,11 +20,6 @@ describe("sfxCuesFor", () => {
     expect(cues({ type: "summonActed", uid: 1, equipment: "mana-sword", bonus: 0 })).toEqual(["summon-act"]);
   });
 
-  it("reuses mana emphasis for armor echo events", () => {
-    expect(cues({ type: "echoComputed", base: 4, preheat: 2, precision: 4, total: 10 })).toEqual(["mana"]);
-    expect(cues({ type: "echoSpent", skill: "armor-smash" as never, amount: 6 })).toEqual(["mana"]);
-  });
-
   it("reuses existing sounds for enemy telegraph events", () => {
     const intent = { id: "charge", actions: [{ kind: "attack" as const, damage: 12 }] };
     expect(cues({ type: "enemyWindupStarted", enemy: 0, intent, turnsLeft: 1, cancelThreshold: 8 })).toEqual(["cooldown"]);

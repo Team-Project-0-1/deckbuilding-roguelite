@@ -61,8 +61,6 @@ export const feedbackCuesFor = (event: CombatEvent): FeedbackCue[] => {
     case "remiseRepeatResolved":
       return [cue("unit-player", 620)];
     case "weaponOutputChanged":
-    case "echoComputed":
-    case "echoSpent":
       return [cue("unit-player", 420)];
     case "summonAoeGranted":
       return [cue(`summon-${event.uid}`, 380)];

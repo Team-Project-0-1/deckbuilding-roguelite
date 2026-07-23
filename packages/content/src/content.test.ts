@@ -886,7 +886,7 @@ describe('P10 Fire Warrior and Arcanist design sync', () => {
     ).toEqual(expect.arrayContaining(['강철 피부', '방패 숙련', '빈틈없는 대비', '불굴의 투지', '전투 호흡', '발화 본능', '잔불 칼날', '잔열 축적']));
   });
 
-  it('ships the corrected repeat starter costs and the five armor skills', () => {
+  it('ships the corrected repeat starter costs and armor skills without armor echo', () => {
     expect(skills['arcane-charge']).toMatchObject({ cost: 1, cooldown: 0 });
     expect(skills['arcane-command']).toMatchObject({ cost: 2, cooldown: 0 });
     expect(skills['armor-counter']).toMatchObject({ cost: 2, cooldown: 1 });
@@ -901,47 +901,25 @@ describe('P10 Fire Warrior and Arcanist design sync', () => {
     });
     expect(skills['armor-compression']).toMatchObject({
       base: [{ kind: 'block', amount: 6 }],
-      heads: { mode: 'per', effects: [{ kind: 'echoPreheat', amount: 2 }] },
       tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] }
     });
     expect(skills['mana-amplification']).toMatchObject({
-      effects: [{ kind: 'block', amount: 6 }, { kind: 'precisionDefenseArm' }]
+      effects: [{ kind: 'block', amount: 6 }]
     });
     expect(skills['armor-smash']).toMatchObject({
-      effects: [{ kind: 'damagePlusEcho', base: 6 }],
-      upgrade: { patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damagePlusEcho', base: 8 } } }
+      effects: [{ kind: 'damage', amount: 6 }],
+      upgrade: { patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damage', amount: 8 } } }
     });
     expect(skills['arcane-armor-release']).toMatchObject({
-      effects: [{ kind: 'block', amount: 8 }, { kind: 'aoeDamagePlusEcho', base: 4 }]
+      effects: [{ kind: 'block', amount: 8 }, { kind: 'aoeDamage', amount: 4 }]
     });
     expect(deriveUpgradedSkill(skills['arcane-armor-release']!)).toMatchObject({
       oncePerCombat: true,
-      effects: [{ kind: 'block', amount: 10 }, { kind: 'aoeDamagePlusEcho', base: 6 }]
+      effects: [{ kind: 'block', amount: 10 }, { kind: 'aoeDamage', amount: 6 }]
     });
   });
 
-  it('keeps armor echo as the arcanist armor-to-damage bridge', () => {
-    let state = withEquippedSkills(combat('p10-armor', 'arcanist'), ['armor-compression', 'armor-smash']);
-    state = withHandDefs(state, ['basic', 'basic', 'mana', 'mana', 'mana']);
-    state = withFaces(state, ['heads', 'tails']);
-    const compressed = useFlipAt(state, 0, state.zones.hand.slice(0, 2), 0);
-    expect(compressed.state.player.block).toBe(12);
-    expect(compressed.state.player.echoPreheat).toBe(2);
-    const echoed = { ...compressed.state, player: { ...compressed.state.player, armorEcho: 8, armorEchoAvailable: true } };
-    const smashed = useConsumeAt(
-      echoed,
-      1,
-      echoed.zones.hand.filter((uid) => String(echoed.coins[Number(uid)]?.defId) === 'mana').slice(0, 2),
-      0
-    );
-    expect(smashed.state.enemies[0]?.hp).toBe(57);
-    expect(smashed.state.player.armorEcho).toBe(8);
-    expect(smashed.state.player.armorEchoAvailable).toBe(false);
-    expect((skills['armor-smash'] as ConsumeSkillDef).effects[0]).toEqual({
-      kind: 'damagePlusEcho',
-      base: 6
-    });
-
+  it('keeps literal damage bonuses and their turn-end expiry', () => {
     let literalDamage = withEquippedSkills(combat('p10-literal-damage-bonus', 'arcanist'), ['armor-compression', 'burnout-blow']);
     literalDamage = withHandDefs(literalDamage, ['basic', 'basic', 'fire', 'fire', 'fire']);
     literalDamage = withFaces(literalDamage, ['heads', 'tails']);
@@ -1562,7 +1540,7 @@ describe('P3.4 exclusive reward reachability (dead-option gate)', () => {
     expect(passivePool).toEqual(expect.arrayContaining(['iron-body', 'steady-breath', 'ember-stock']));
   });
 
-  it('keeps active arcanist armor-to-damage effects routed through armor echo only', () => {
+  it('keeps retired block-to-damage effects out of active arcanist skills', () => {
     const retired = new Set(['aegis-pulse', 'mirror-plate', 'bulwark-charge']);
     const directBridgeKinds = new Set(['damagePerBlock', 'blockFromCurrent', 'damagePlusBlock', 'scheduleEndTurnBlockAoe']);
     const activeArcanistSkills = Object.values(contentDb.skills).filter(
@@ -1586,10 +1564,10 @@ describe('P3.4 exclusive reward reachability (dead-option gate)', () => {
       .filter((entry) => String(entry.exclusiveTo) === 'arcanist')
       .flatMap((entry) => entry.effects.filter((atom) => directBridgeKinds.has(atom.kind)).map((atom) => `${String(entry.id)}:${atom.kind}`));
     expect([...directBridgeEffects, ...directBridgePassiveEffects]).toEqual([]);
-    expect((skills['armor-smash'] as ConsumeSkillDef).effects).toEqual([{ kind: 'damagePlusEcho', base: 6 }]);
+    expect((skills['armor-smash'] as ConsumeSkillDef).effects).toEqual([{ kind: 'damage', amount: 6 }]);
     expect((skills['arcane-armor-release'] as ConsumeSkillDef).effects).toEqual([
       { kind: 'block', amount: 8 },
-      { kind: 'aoeDamagePlusEcho', base: 4 }
+      { kind: 'aoeDamage', amount: 4 }
     ]);
   });
 });

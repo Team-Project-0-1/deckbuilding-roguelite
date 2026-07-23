@@ -1,6 +1,6 @@
 // P13 Wave 4a contract lock.
 // 사유: Wave-0 방어 참조 특성화는 보상 은퇴 전 저장 호환용으로만 유지된다.
-// 새 잠금은 기존 원자를 삭제하지 않되, 갑주 반향 원자가 방어를 직접 피해로 변환/소모하지 않는 계약을 고정한다.
+// Retired block-reference atoms remain resolvable for older content and saves.
 import { describe, expect, it } from 'vitest';
 
 import type { CharacterId, CoinDefId, CoinUid, EnemyDefId, SkillId, SlotId } from '../ids';
@@ -63,7 +63,7 @@ const useConsume = (state: CombatState, db: ContentDb, slotIndex = 0, target = 0
   return used;
 };
 
-describe('P13 armor echo contract lock', () => {
+describe('legacy block-reference atom compatibility', () => {
   it('keeps retired block-reference atoms resolvable for save compatibility', () => {
     const db = dbFor([consume('legacy', [{ kind: 'damagePlusBlock', base: 2, cap: 4 }])]);
     const state = { ...combat(db), player: { ...combat(db).player, block: 9 } };
@@ -71,18 +71,5 @@ describe('P13 armor echo contract lock', () => {
     const result = useConsume(state, db);
     expect(beforeHp - (result.state.enemies[0]?.hp ?? 0)).toBe(6);
     expect(result.state.player.block).toBe(9);
-  });
-
-  it('uses armor echo as the only new block-to-attack bridge without consuming block', () => {
-    const db = dbFor([consume('smash', [{ kind: 'damagePlusEcho', base: 6 }])]);
-    const echoed = step({ ...combat(db), player: { ...combat(db).player, block: 8 } }, { type: 'endTurn' }, db);
-    if (!echoed.ok) throw new Error(echoed.error);
-    const state = { ...echoed.state, player: { ...echoed.state.player, block: 7 } };
-    const beforeHp = state.enemies[0]?.hp ?? 0;
-    const result = useConsume(state, db);
-    expect(beforeHp - (result.state.enemies[0]?.hp ?? 0)).toBe(11);
-    expect(result.events).toContainEqual({ type: 'echoSpent', skill: id<SkillId>('smash'), amount: 5 });
-    expect(result.state.player.armorEcho).toBe(5);
-    expect(result.state.player.block).toBe(7);
   });
 });

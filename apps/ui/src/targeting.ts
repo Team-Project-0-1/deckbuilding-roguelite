@@ -2,7 +2,7 @@ import type { Command } from "@game/core";
 
 export type TargetingCommand = Extract<
   Command,
-  { type: "useFlipSkill" | "useConsumeSkill" }
+  { type: "useImmediateFlipSkill" | "useFlipSkill" | "useConsumeSkill" }
 >;
 
 export type TargetDirection = "left" | "right";
@@ -12,20 +12,31 @@ export const livingEnemyTargets = (
 ): number[] =>
   enemies.flatMap((enemy, index) => (enemy.hp > 0 ? [index] : []));
 
+export const sameCoinSelection = (
+  left: readonly number[],
+  right: readonly number[],
+): boolean =>
+  left.length === right.length &&
+  left.every((coin) => right.includes(coin));
+
 const sameTargetingBase = (
   left: TargetingCommand,
   right: TargetingCommand,
 ): boolean =>
   left.type === right.type &&
   left.slot === right.slot &&
-  left.chosenSummon === right.chosenSummon;
+  left.chosenSummon === right.chosenSummon &&
+  (left.type !== "useImmediateFlipSkill" ||
+    right.type !== "useImmediateFlipSkill" ||
+    sameCoinSelection(left.coins, right.coins));
 
 export const legalTargetsForCommand = (
   commands: readonly Command[],
   command: TargetingCommand,
 ): number[] =>
   commands.flatMap((candidate) =>
-    (candidate.type === "useFlipSkill" ||
+    (candidate.type === "useImmediateFlipSkill" ||
+      candidate.type === "useFlipSkill" ||
       candidate.type === "useConsumeSkill") &&
     sameTargetingBase(candidate, command) &&
     candidate.target !== undefined

@@ -34,8 +34,6 @@ export type CombatEvent =
   | { type: 'overheatScheduled' }
   | { type: 'overheatActivated' }
   | { type: 'overheatConsumed'; skill: SkillId }
-  | { type: 'echoComputed'; base: number; preheat: number; precision: number; total: number }
-  | { type: 'echoSpent'; skill: SkillId; amount: number }
   | { type: 'remiseGained'; amount: number; total: number }
   | { type: 'remiseSpent'; skill: SkillId; firstFace: Face; repeat: boolean; remaining: number }
   | { type: 'remiseRepeatResolved'; skill: SkillId }

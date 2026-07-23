@@ -228,7 +228,7 @@ export const resolveConsume = (
   }
   if (skill.tags.includes('attack') && state.player.nextAttackDamageBonus > 0) {
       const primaryDamageIndex = effects.findIndex(
-        (atom) => atom.kind === 'damage' || atom.kind === 'damagePlusBlock' || atom.kind === 'damagePlusEcho' || atom.kind === 'aoeDamagePlusEcho'
+        (atom) => atom.kind === 'damage' || atom.kind === 'aoeDamage' || atom.kind === 'damagePlusBlock'
       );
     if (primaryDamageIndex >= 0) {
       effects = effects.map((atom, index) => {
@@ -239,8 +239,8 @@ export const resolveConsume = (
         if (atom.kind === 'damagePlusBlock') {
           return { ...atom, base: atom.base + state.player.nextAttackDamageBonus };
         }
-        if (atom.kind === 'damagePlusEcho' || atom.kind === 'aoeDamagePlusEcho') {
-          return { ...atom, base: atom.base + state.player.nextAttackDamageBonus };
+        if (atom.kind === 'aoeDamage') {
+          return { ...atom, amount: atom.amount + state.player.nextAttackDamageBonus };
         }
         return atom;
       });

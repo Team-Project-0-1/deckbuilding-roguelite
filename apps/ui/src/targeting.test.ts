@@ -62,6 +62,43 @@ describe("targeting", () => {
     ).toEqual([2, 0]);
   });
 
+  it("keeps immediate self-skill targets scoped to the selected coins", () => {
+    const commands: Command[] = [
+      {
+        type: "useImmediateFlipSkill",
+        slot: slot(0),
+        coins: [coin(1), coin(2)],
+        target: 0,
+      },
+      {
+        type: "useImmediateFlipSkill",
+        slot: slot(0),
+        coins: [coin(1), coin(2)],
+        target: 2,
+      },
+      {
+        type: "useImmediateFlipSkill",
+        slot: slot(0),
+        coins: [coin(3), coin(4)],
+      },
+    ];
+
+    expect(
+      legalTargetsForCommand(commands, {
+        type: "useImmediateFlipSkill",
+        slot: slot(0),
+        coins: [coin(2), coin(1)],
+      }),
+    ).toEqual([0, 2]);
+    expect(
+      legalTargetsForCommand(commands, {
+        type: "useImmediateFlipSkill",
+        slot: slot(0),
+        coins: [coin(4), coin(3)],
+      }),
+    ).toEqual([]);
+  });
+
   it("falls back when the last attacked target is dead or illegal", () => {
     expect(defaultTarget([1, 3], 0)).toBe(1);
     expect(defaultTarget([], 0)).toBeNull();

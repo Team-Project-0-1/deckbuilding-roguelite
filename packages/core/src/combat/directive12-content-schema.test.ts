@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContentDb, EnemyDef } from '../content-types';
 import { validateContentDb } from '../content-types';
-import type { CharacterId, CoinDefId, EnemyDefId } from '../ids';
+import type { CharacterId, CoinDefId, EnemyDefId, SkillId } from '../ids';
 
 const id = <T extends string>(value: string) => value as T;
 
@@ -73,5 +73,21 @@ describe('Directive 12 Batch B content schema', () => {
     );
 
     expect(validateContentDb(db)).toContain('enemy candidate playerTurnEndPunishment: threshold must be a positive integer');
+  });
+
+  it('rejects non-positive area damage before it can reach combat resolution', () => {
+    const db = content(baseEnemy());
+    db.skills.blast = {
+      id: id<SkillId>('blast'),
+      name: 'blast',
+      type: 'consume',
+      rarity: 'common',
+      tags: ['attack'],
+      targetType: 'self',
+      consume: { element: 'mana', count: 1 },
+      effects: [{ kind: 'aoeDamage', amount: -1 }]
+    };
+
+    expect(validateContentDb(db)).toContain('skill blast: aoeDamage amount must be a positive integer');
   });
 });

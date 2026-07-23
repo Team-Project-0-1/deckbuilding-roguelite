@@ -467,7 +467,7 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
   let state: CombatState = {
     ...input,
     phase: 'enemy',
-    player: { ...input.player, armorEchoAbsorbedThisEnemyTurn: 0, precisionDefenseSatisfied: false, armorEchoAvailable: false }
+    player: { ...input.player }
   };
 
   // Entrants remain inactive for the phase in which they were created.  A
@@ -930,24 +930,6 @@ export const runEnemyPhase = (input: CombatState, db: ContentDb): { state: Comba
     if (stacks > afterRemoval) events.push({ type: 'enemyGrew', enemy: enemyIndex, stacks });
     state = withEnemy(state, enemyIndex, (candidate) => ({ ...candidate, growthStacks: stacks, damageTakenThisRound: 0 }));
   }
-
-  const baseEcho = Math.min(state.player.armorEchoAbsorbedThisEnemyTurn, 6);
-  const preheat = state.player.armorEchoAbsorbedThisEnemyTurn > 0 ? state.player.echoPreheat : 0;
-  const precision = state.player.armorEchoAbsorbedThisEnemyTurn > 0 && state.player.precisionDefenseSatisfied ? 4 : 0;
-  const total = Math.min(12, baseEcho + preheat + precision);
-  events.push({ type: 'echoComputed', base: baseEcho, preheat, precision, total });
-  state = {
-    ...state,
-    player: {
-      ...state.player,
-      armorEcho: total,
-      armorEchoAvailable: false,
-      armorEchoAbsorbedThisEnemyTurn: 0,
-      echoPreheat: 0,
-      precisionDefenseArmed: false,
-      precisionDefenseSatisfied: false
-    }
-  };
 
   const ai = state.rngImpl?.ai ?? rngFrom(state.rng.ai);
   void ai.int(1);

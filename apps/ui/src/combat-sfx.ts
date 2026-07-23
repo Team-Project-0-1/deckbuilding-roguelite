@@ -59,8 +59,6 @@ export const sfxCuesFor = (event: CombatEvent): SfxKind[] => {
     case "remiseRepeatResolved":
       return ["hit"];
     case "weaponOutputChanged":
-    case "echoComputed":
-    case "echoSpent":
     case "summonAoeGranted":
       return ["mana"];
     case "summonExpired":

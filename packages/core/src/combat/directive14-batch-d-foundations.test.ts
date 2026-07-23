@@ -370,8 +370,8 @@ describe('Directive 14 Batch D M10 seal and repeat foundations', () => {
       { kind: 'damageByConsumed', base: 5, perCoin: 5, frostbittenBonusPerCoin: 2 },
       0.75
     )).toEqual({ kind: 'damageByConsumed', base: 3, perCoin: 3, frostbittenBonusPerCoin: 1 });
-    expect(scaleSkillAuthoredEffect({ kind: 'aoeDamagePlusEcho', base: 4 }, 0.75))
-      .toEqual({ kind: 'aoeDamagePlusEcho', base: 3 });
+    expect(scaleSkillAuthoredEffect({ kind: 'aoeDamage', amount: 4 }, 0.75))
+      .toEqual({ kind: 'aoeDamage', amount: 3 });
     expect(scaleSkillAuthoredEffect({ kind: 'blockPerTargetShock', base: 7, cap: 5 }, 0.75))
       .toEqual({ kind: 'blockPerTargetShock', base: 5, cap: 3 });
     expect(scaleSkillAuthoredEffect({ kind: 'virtualManaSwordVolley', baseDamage: 3, baseCount: 4 }, 0.75))

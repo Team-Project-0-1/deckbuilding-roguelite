@@ -88,26 +88,21 @@ describe("skillEffectRows", () => {
     expect(rows.find((row) => row.kind === "base")?.segments).toEqual([{ text: "과열 진입", term: "overheat" }]);
   });
 
-  it("renders armor echo effects without generic copy", () => {
+  it("renders former armor echo skills as ordinary effects", () => {
     const manaAmplification = skillEffectRows(skill("mana-amplification"));
-    expect(manaAmplification[1]?.segments).toEqual([
-      { text: "방어 6" },
-      { text: "정밀 방어 준비", term: "precisionDefense" },
-    ]);
+    expect(manaAmplification[1]?.segments).toEqual([{ text: "방어 6" }]);
 
     const armorSmash = skillEffectRows(skill("armor-smash"));
-    expect(armorSmash[1]?.segments).toEqual([{ text: "피해 6 + 반향", term: "echoAmplification" }]);
+    expect(armorSmash[1]?.segments).toEqual([{ text: "피해 6" }]);
 
     const arcaneArmorRelease = skillEffectRows(skill("arcane-armor-release"));
     expect(arcaneArmorRelease[1]?.segments).toEqual([
       { text: "방어 8" },
-      { text: "모든 적 피해 4 + 반향", term: "echoAmplification" },
+      { text: "모든 적 피해 4" },
     ]);
 
     const armorCompression = skillEffectRows(skill("armor-compression"));
-    expect(armorCompression.find((row) => row.kind === "heads")?.segments).toEqual([
-      { text: "반향 예열 +2", term: "echoPreheat" },
-    ]);
+    expect(armorCompression.find((row) => row.kind === "heads")).toBeUndefined();
 
     for (const id of ["mana-amplification", "armor-smash", "arcane-armor-release", "armor-compression"]) {
       expect(renderedTexts(id)).not.toContain("효과");

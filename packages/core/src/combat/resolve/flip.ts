@@ -63,9 +63,8 @@ export const scaleSkillAuthoredEffect = (atom: EffectAtom, multiplier: number | 
       return { ...atom, base: scale(atom.base), multiplier: scale(atom.multiplier) };
     case 'damagePlusBlock':
       return { ...atom, base: scale(atom.base), cap: scale(atom.cap) };
-    case 'damagePlusEcho':
-    case 'aoeDamagePlusEcho':
-      return { ...atom, base: scale(atom.base) };
+    case 'aoeDamage':
+      return { ...atom, amount: scale(atom.amount) };
     case 'blockPerTargetShock':
       return { ...atom, base: scale(atom.base), cap: scale(atom.cap) };
     case 'damagePerTargetBurn':
@@ -109,8 +108,6 @@ export const scaleSkillAuthoredEffect = (atom: EffectAtom, multiplier: number | 
     case 'grantElement':
     case 'investBloodSword':
     case 'bloodOffering':
-    case 'echoPreheat':
-    case 'precisionDefenseArm':
     case 'summonEquipment':
     case 'empowerSummons':
     case 'increaseWeaponOutput':
@@ -267,10 +264,6 @@ export const applyDamage = (
       hp: shouldBreathe ? Math.min(state.player.maxHp, nextHp + 3) : nextHp,
       firstDamageReducedThisTurn: state.player.firstDamageReducedThisTurn || canReduce,
       combatBreathingUsed: state.player.combatBreathingUsed || shouldBreathe,
-      armorEchoAbsorbedThisEnemyTurn:
-        source === 'enemy' ? state.player.armorEchoAbsorbedThisEnemyTurn + blocked : state.player.armorEchoAbsorbedThisEnemyTurn,
-      precisionDefenseSatisfied:
-        state.player.precisionDefenseSatisfied || (source === 'enemy' && state.player.precisionDefenseArmed && blocked > 0 && state.player.block - blocked <= 2)
     };
     events.push({ type: 'damageDealt', target, amount: hpDamage, blocked, source });
     const damaged = checkCombatEnd({ ...state, player }, events);
@@ -436,12 +429,6 @@ const scheduleOverheat = (state: CombatState, events: CombatEvent[]): CombatStat
   return { ...state, player: { ...state.player, pendingOverheat: true } };
 };
 
-const spendEcho = (state: CombatState, events: CombatEvent[], skill: SkillId | undefined): { state: CombatState; amount: number } => {
-  if (!state.player.armorEchoAvailable || state.player.armorEcho <= 0 || skill === undefined) return { state, amount: 0 };
-  events.push({ type: 'echoSpent', skill, amount: state.player.armorEcho });
-  return { state: { ...state, player: { ...state.player, armorEchoAvailable: false } }, amount: state.player.armorEcho };
-};
-
 export const applyBlock = (state: CombatState, target: TargetRef, amount: number, events: CombatEvent[]): CombatState => {
   if (amount < 0) throw new Error('block amount cannot be negative');
   events.push({ type: 'blockGained', target, amount });
@@ -604,6 +591,14 @@ export const applyEffectAtom = (
       const statuses = state.enemies[target.index]?.statuses ?? {};
       const active = isStackStatus(atom.status) ? statusStacks(statuses, atom.status) > 0 : statusTurns(statuses, atom.status) > 0;
       return active ? applyDamage(state, target, atom.amount, 'skill', events, { type: 'player' }) : state;
+    }
+    case 'aoeDamage': {
+      let next = state;
+      for (let index = 0; index < next.enemies.length; index += 1) {
+        if ((next.enemies[index]?.hp ?? 0) <= 0) continue;
+        next = applyDamage(next, { type: 'enemy', index }, atom.amount, 'skill', events, { type: 'player' });
+      }
+      return next;
     }
     case 'block':
       return applyBlock(state, { type: 'player' }, atom.amount, events);
@@ -831,24 +826,6 @@ export const applyEffectAtom = (
       if (target.type !== 'enemy' || !isAliveEnemy(state, target.index)) return state;
       return applyDamage(state, target, atom.base + Math.min(atom.cap, state.player.block), 'skill', events, { type: 'player' });
     }
-    case 'echoPreheat':
-      return { ...state, player: { ...state.player, echoPreheat: state.player.echoPreheat + atom.amount } };
-    case 'precisionDefenseArm':
-      return { ...state, player: { ...state.player, precisionDefenseArmed: true, precisionDefenseSatisfied: false } };
-    case 'damagePlusEcho': {
-      if (target.type !== 'enemy' || !isAliveEnemy(state, target.index)) return state;
-      const spent = spendEcho(state, events, options?.sourceSkill);
-      return applyDamage(spent.state, target, atom.base + spent.amount, 'skill', events, { type: 'player' });
-    }
-    case 'aoeDamagePlusEcho': {
-      const spent = spendEcho(state, events, options?.sourceSkill);
-      let next = spent.state;
-      for (let index = 0; index < next.enemies.length; index += 1) {
-        if ((next.enemies[index]?.hp ?? 0) <= 0) continue;
-        next = applyDamage(next, { type: 'enemy', index }, atom.base + spent.amount, 'skill', events, { type: 'player' });
-      }
-      return next;
-    }
     case 'prepareNextAttackDamage':
       return { ...state, player: { ...state.player, nextAttackDamageBonus: state.player.nextAttackDamageBonus + atom.amount } };
     case 'scheduleEndTurnBlockAoe':
@@ -1042,7 +1019,6 @@ const isTargetEffect = (atom: EffectAtom): boolean =>
   atom.kind === 'damageByTargetFrostbite' ||
   atom.kind === 'damageByBloodSword' ||
   atom.kind === 'damagePerBlock' ||
-  atom.kind === 'damagePlusEcho' ||
   atom.kind === 'damagePlusBlock' ||
   (atom.kind === 'applyStatus' && atom.to === 'target');
 
@@ -1057,9 +1033,7 @@ export const targetsForSkillEffect = (state: CombatState, atom: EffectAtom, skil
     atom.kind === 'payHp' ||
     atom.kind === 'heal' ||
     atom.kind === 'scheduleOverheat' ||
-    atom.kind === 'echoPreheat' ||
-    atom.kind === 'precisionDefenseArm' ||
-    atom.kind === 'aoeDamagePlusEcho' ||
+    atom.kind === 'aoeDamage' ||
     atom.kind === 'returnDiscardCoin' ||
     atom.kind === 'lifesteal' ||
     atom.kind === 'lifestealByConsumed' ||
@@ -1078,7 +1052,12 @@ export const applyPrimaryDamageBonus = (input: readonly EffectAtom[], bonus: num
   let damageBoosted = false;
   return input.map((atom): EffectAtom => {
     if (!damageBoosted) {
-      if (atom.kind === 'damage' || atom.kind === 'damageIfTargetShocked' || atom.kind === 'damageIfReused') {
+      if (
+        atom.kind === 'damage' ||
+        atom.kind === 'aoeDamage' ||
+        atom.kind === 'damageIfTargetShocked' ||
+        atom.kind === 'damageIfReused'
+      ) {
         damageBoosted = true;
         return { ...atom, amount: atom.amount + bonus };
       }
@@ -1086,9 +1065,7 @@ export const applyPrimaryDamageBonus = (input: readonly EffectAtom[], bonus: num
         atom.kind === 'damageByConsumed' ||
         atom.kind === 'damageByTargetFrostbite' ||
         atom.kind === 'damageByBloodSword' ||
-        atom.kind === 'damagePlusBlock' ||
-        atom.kind === 'damagePlusEcho' ||
-        atom.kind === 'aoeDamagePlusEcho'
+        atom.kind === 'damagePlusBlock'
       ) {
         damageBoosted = true;
         return { ...atom, base: atom.base + bonus };
@@ -1259,8 +1236,7 @@ const isRemiseRepeatAtom = (atom: EffectAtom): boolean =>
   atom.kind === 'damagePerBlock' ||
   atom.kind === 'blockFromCurrent' ||
   atom.kind === 'damagePlusBlock' ||
-  atom.kind === 'damagePlusEcho' ||
-  atom.kind === 'aoeDamagePlusEcho' ||
+  atom.kind === 'aoeDamage' ||
   atom.kind === 'doubleTargetShock' ||
   atom.kind === 'blockPerTargetShock' ||
   atom.kind === 'executeOrDischargeShock' ||

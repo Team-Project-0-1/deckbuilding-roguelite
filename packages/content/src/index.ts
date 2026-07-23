@@ -1229,7 +1229,6 @@ export const skills = {
     cooldown: 1,
     cost: 2,
     base: [{ kind: 'block', amount: 6 }],
-    heads: { mode: 'per', effects: [{ kind: 'echoPreheat', amount: 2 }] },
     tails: { mode: 'per', effects: [{ kind: 'block', amount: 2 }] },
     upgrade: {
       name: '강화',
@@ -1247,7 +1246,7 @@ export const skills = {
     targetType: 'self',
     cooldown: 1,
     consume: { element: 'mana', count: 2 },
-    effects: [{ kind: 'block', amount: 6 }, { kind: 'precisionDefenseArm' }],
+    effects: [{ kind: 'block', amount: 6 }],
     upgrade: { name: '강화', description: '마나 코인 소비 2개 → 1개', patch: { kind: 'costDelta', delta: -1 } }
   },
   'armor-smash': {
@@ -1260,11 +1259,11 @@ export const skills = {
     targetType: 'single-enemy',
     cooldown: 1,
     consume: { element: 'mana', count: 2 },
-    effects: [{ kind: 'damagePlusEcho', base: 6 }],
+    effects: [{ kind: 'damage', amount: 6 }],
     upgrade: {
       name: '강화',
       description: '기본 피해 6 → 8',
-      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damagePlusEcho', base: 8 } }
+      patch: { kind: 'replaceEffect', section: 'base', index: 0, effect: { kind: 'damage', amount: 8 } }
     }
   },
   'arcane-armor-release': {
@@ -1279,7 +1278,7 @@ export const skills = {
     consume: { element: 'mana', count: 3 },
     effects: [
       { kind: 'block', amount: 8 },
-      { kind: 'aoeDamagePlusEcho', base: 4 }
+      { kind: 'aoeDamage', amount: 4 }
     ],
     upgrade: {
       name: '강화',
@@ -1288,7 +1287,7 @@ export const skills = {
         kind: 'multi',
         patches: [
           { kind: 'baseAmount', index: 0, delta: 2 },
-          { kind: 'replaceEffect', section: 'base', index: 1, effect: { kind: 'aoeDamagePlusEcho', base: 6 } }
+          { kind: 'replaceEffect', section: 'base', index: 1, effect: { kind: 'aoeDamage', amount: 6 } }
         ]
       }
     }
